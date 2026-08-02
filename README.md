@@ -4,8 +4,9 @@ ScratchEditor 是从 AutoHotkey 临时编辑器迁移出的轻量 Windows 编辑
 Qt 6 Quick/QML、C++20 和 CMake；AutoHotkey 继续负责全局快捷键与启动调度，并通过
 本地命名管道控制常驻的 `ScratchEditor.exe`。
 
-迁移阶段 1–5 已完成。阶段 6（从原 `KeysRedirect.ahk` 移除旧 GUI）尚未执行，必须
-等待明确批准。原始 AHK 文件不属于本仓库，所有构建与测试都不会修改它。
+迁移阶段 1–6 已完成。经用户明确批准并先创建同目录备份后，原
+`D:\Documents\AutoHotkey\KeysRedirect.ahk` 已移除旧 GUI，只保留快捷键、Qt IPC
+调度和启动失败时不改写内容的纯剪贴板回退。外部 AHK 文件和备份不属于本仓库。
 
 ## 功能
 
@@ -83,10 +84,19 @@ KeysRedirect.ahk ──命名管道──> ScratchEditor.exe
 
 ## 验收
 
-当前功能回归（阶段 4，同时覆盖阶段 3 和阶段 2）：
+阶段 6 AHK 安装状态、备份、IPC、失败回退和进程保护验收：
 
 ```powershell
-./scripts/run-stage4-tests.ps1 -OriginalAhkPath D:\Documents\AutoHotkey\KeysRedirect.ahk
+./scripts/run-stage6-tests.ps1
+```
+
+Qt 功能回归仍由阶段 4 入口覆盖阶段 3 和阶段 2。该历史入口的 AHK 基线参数应指向
+阶段 6 备份：
+
+```powershell
+./scripts/run-stage4-tests.ps1 `
+  -BuildSubdirectory build\stage4 `
+  -OriginalAhkPath D:\Documents\AutoHotkey\KeysRedirect.ahk.stage6-backup-20260802-132834
 ```
 
 完整性能回归：
@@ -98,29 +108,23 @@ KeysRedirect.ahk ──命名管道──> ScratchEditor.exe
   -ArtifactPrefix validation-performance
 ```
 
-AHK 持久 IPC 隔离测试：
-
-```powershell
-./scripts/test-ahk-ipc.ps1 `
-  -BuildSubdirectory build\stage4 `
-  -OriginalAhkPath D:\Documents\AutoHotkey\KeysRedirect.ahk
-```
-
-也可设置 `SCRATCHEDITOR_ORIGINAL_AHK`，避免在命令行重复提供路径。所有当前测试使用
-独立管道和测试配置，不会停止默认管道上的用户实例。详细说明见
+所有当前测试使用独立管道和测试配置，不会停止默认管道上的用户实例。详细说明见
 [tests/README.md](tests/README.md)。
 
-阶段 4 最终实测：冷启动最大 82.84 ms、热唤醒 P95 25.96 ms、10 万字输入到帧
-P95 16.15 ms、空闲 CPU 0%、工作集 39.50 MB、动画 60.16 FPS；微软拼音精确提交
+阶段 6 最终实测：冷启动最大 75.18 ms、热唤醒 P95 19.54 ms、10 万字输入到帧
+P95 16.61 ms、空闲 CPU 0%、工作集 39.61 MB、动画 59.88 FPS；微软拼音精确提交
 `你好`。完整 JSON 证据保存在 [artifacts/baselines](artifacts/baselines/README.md)。
 
 ## AHK 迁移边界
 
-`integration/KeysRedirect.QtMigration.ahk` 是隔离参考副本，包含 Qt/旧 GUI 回退开关；
-它不会被自动复制或覆盖到用户的 AHK 仓库。阶段 6 获批前：
+`integration/KeysRedirect.QtMigration.ahk` 是阶段 2 的历史隔离参考副本，仍保留当时的
+Qt/旧 GUI 回退开关，不会被构建或测试脚本自动安装。阶段 6 当前状态：
 
-- 保留原 AHK 编辑器模块和回退路径。
-- 不改写原 `KeysRedirect.ahk`。
-- 不停止用户当前运行的 AHK 或 ScratchEditor 实例。
+- 原文件备份：`D:\Documents\AutoHotkey\KeysRedirect.ahk.stage6-backup-20260802-132834`。
+- 备份 SHA-256：`8BB8FFEFEBD9A6C90C102F66583D517C6C5CF83D36200A3D4E77D413C77B41C9`。
+- 已安装文件 SHA-256：`EF7CCD4E2CDDB0D29F8790F116A0B319CA1F2925548F48A05A5B195ADFE7D823`。
+- 默认 Qt 路径仍为 `D:\_Dev\ScratchEditor\build\stage4\ScratchEditor.exe`，未迁移任何
+  现有文件位置。
+- 验收未重载正在运行的 AHK；磁盘上的新版本会在用户下次正常重载或登录时生效。
 
 Qt 部署资源目前会输出已知的 `libpng iCCP` 警告，不影响功能、像素检查或性能验收。

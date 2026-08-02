@@ -1,0 +1,84 @@
+{
+    "timestamp":  "2026-08-02T13:47:40.5060458+08:00",
+    "original":  {
+                     "path":  "D:\\Documents\\AutoHotkey\\KeysRedirect.ahk",
+                     "sha256":  "EF7CCD4E2CDDB0D29F8790F116A0B319CA1F2925548F48A05A5B195ADFE7D823",
+                     "length":  18638
+                 },
+    "backup":  {
+                   "path":  "D:\\Documents\\AutoHotkey\\KeysRedirect.ahk.stage6-backup-20260802-132834",
+                   "sha256":  "8BB8FFEFEBD9A6C90C102F66583D517C6C5CF83D36200A3D4E77D413C77B41C9",
+                   "length":  23739
+               },
+    "editor":  {
+                   "path":  "D:\\_Dev\\ScratchEditor\\build\\stage4\\ScratchEditor.exe",
+                   "sha256":  "A280B9B433A522B10FCFB58084675F57CAF04BE8152F302DD9B2FA17250FBDFF"
+               },
+    "tests":  {
+                  "fallback":  {
+                                   "mode":  "fallback",
+                                   "serverName":  "ScratchEditor.Stage6.Fallback.932b505c2de5489f9ac663371a76e380",
+                                   "exitCode":  0,
+                                   "stdout":  "stage6-fallback-pass",
+                                   "stderr":  "",
+                                   "passed":  true
+                               },
+                  "ipc":  {
+                              "mode":  "ipc",
+                              "serverName":  "ScratchEditor.Stage6.Ipc.eb5d4a929985454fa85d969558512869",
+                              "exitCode":  0,
+                              "stdout":  "stage6-ipc-pass",
+                              "stderr":  "",
+                              "passed":  true
+                          }
+              },
+    "processes":  {
+                      "ahkBefore":  13164,
+                      "ahkAfter":  13164,
+                      "editorBefore":  [
+                                           25844,
+                                           39288
+                                       ],
+                      "editorAfter":  [
+                                          25844,
+                                          39288
+                                      ],
+                      "extraAhk":  [
+
+                                   ],
+                      "extraEditors":  [
+
+                                       ]
+                  },
+    "details":  {
+                    "generatedHash":  "EF7CCD4E2CDDB0D29F8790F116A0B319CA1F2925548F48A05A5B195ADFE7D823",
+                    "installedTestCopyHash":  "EF7CCD4E2CDDB0D29F8790F116A0B319CA1F2925548F48A05A5B195ADFE7D823",
+                    "legacyReferences":  [
+
+                                         ],
+                    "externalRepositoryStatus":  [
+                                                     " M KeysRedirect.ahk",
+                                                     "?? KeysRedirect.ahk.stage6-backup-20260802-132834"
+                                                 ]
+                },
+    "checks":  {
+                   "backupExists":  true,
+                   "backupSharesOriginalDirectory":  true,
+                   "backupHashMatchesStage5Baseline":  true,
+                   "installedMatchesControlledTransformation":  true,
+                   "legacyAhkGuiRemoved":  true,
+                   "legacyBackupRetained":  true,
+                   "shortcutPreserved":  true,
+                   "ipcPreserved":  true,
+                   "residentStartupPreserved":  true,
+                   "clipboardFallbackPreserved":  true,
+                   "configuredExecutableExists":  true,
+                   "fallbackTest":  true,
+                   "persistentIpcTest":  true,
+                   "userAhkProcessesPreserved":  true,
+                   "userEditorProcessesPreserved":  true,
+                   "noTestProcessesRemain":  true,
+                   "externalRepositoryScope":  true
+               },
+    "allPassed":  true
+}

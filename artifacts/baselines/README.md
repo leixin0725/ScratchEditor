@@ -16,3 +16,6 @@
 - `stage5-ahk-ipc-20260802-131519.json`：阶段 5 隔离 AHK 持久 IPC 回归。
 - `stage5-performance-20260802-131542.json`：阶段 5 最终性能回归。
 - `stage5-audit.json`：目录、文档、基线、边界和 Git 状态审计。
+- `stage6-results-20260802-134740.json`：阶段 6 备份、受控安装、IPC、回退和进程保护验收。
+- `stage6-functional-20260802-134646.json`：阶段 6 Qt 功能与阶段 4/3/2 回归。
+- `stage6-performance-20260802-134805.json`：阶段 6 最终性能与输入法回归。
