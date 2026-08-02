@@ -18,6 +18,7 @@
 #include <QLocalSocket>
 #include <QMetaObject>
 #include <QMutexLocker>
+#include <QPropertyAnimation>
 #include <QQuickWindow>
 #include <QQuickTextDocument>
 #include <QScreen>
@@ -145,7 +146,7 @@ bool EditorController::isReady() const
 
 bool EditorController::isVisible() const
 {
-    return m_window && m_window->isVisible();
+    return m_window && m_window->isVisible() && !m_hiding;
 }
 
 bool EditorController::testMode() const
@@ -207,6 +208,12 @@ void EditorController::registerWindow(QQuickWindow *window)
 {
     m_window = window;
     if (m_window) {
+        m_windowOpacityAnimation = new QPropertyAnimation(m_window, "opacity", this);
+        connect(m_windowOpacityAnimation, &QPropertyAnimation::finished, this, [this] {
+            if (m_hideWhenAnimationFinishes && m_hiding) {
+                finishWindowHide();
+            }
+        });
         m_positioned = restoreWindowGeometry();
         m_window->create();
         applyNativeWindowStyle();
@@ -812,10 +819,20 @@ void EditorController::showEditor()
         m_positioned = true;
     }
 
+    const bool wasNativeVisible = m_window->isVisible();
+    if (m_windowOpacityAnimation) {
+        m_windowOpacityAnimation->stop();
+    }
+    m_hideWhenAnimationFinishes = false;
+    m_hiding = false;
+    if (!wasNativeVisible) {
+        m_window->setOpacity(m_animationsEnabled ? 0.0 : 1.0);
+    }
     m_window->show();
     m_window->raise();
     m_window->requestActivate();
     emit visibleChanged();
+    startWindowOpacityAnimation(1.0, false);
 
     QTimer::singleShot(0, this, [this] {
         if (!m_window || !m_editor || !m_window->isVisible()) {
@@ -847,7 +864,10 @@ void EditorController::hideEditor()
 
 bool EditorController::commitAndHide()
 {
-    if (!isVisible() || !m_editor) {
+    if (!m_window || (!m_window->isVisible() && !m_hiding) || !m_editor) {
+        return true;
+    }
+    if (m_hiding) {
         return true;
     }
 
@@ -864,7 +884,15 @@ bool EditorController::commitAndHide()
     }
     setClipboardState(true);
     saveWindowGeometry();
+    if (m_animationsEnabled) {
+        m_hiding = true;
+        emit visibleChanged();
+        startWindowOpacityAnimation(0.0, true);
+        return true;
+    }
+
     m_window->hide();
+    m_window->setOpacity(1.0);
     emit visibleChanged();
     const quint64 focusGeneration = ++m_focusGeneration;
     QTimer::singleShot(0, this, [this, focusGeneration] {
@@ -873,6 +901,52 @@ bool EditorController::commitAndHide()
         }
     });
     return true;
+}
+
+void EditorController::startWindowOpacityAnimation(qreal targetOpacity, bool hideWhenFinished)
+{
+    if (!m_window) {
+        return;
+    }
+
+    m_hideWhenAnimationFinishes = hideWhenFinished;
+    if (!m_animationsEnabled || !m_windowOpacityAnimation) {
+        m_window->setOpacity(targetOpacity);
+        if (hideWhenFinished) {
+            finishWindowHide();
+        }
+        return;
+    }
+
+    m_windowOpacityAnimation->stop();
+    m_windowOpacityAnimation->setDuration(120);
+    m_windowOpacityAnimation->setStartValue(m_window->opacity());
+    m_windowOpacityAnimation->setEndValue(targetOpacity);
+    m_windowOpacityAnimation->setEasingCurve(hideWhenFinished ? QEasingCurve::InCubic
+                                                              : QEasingCurve::OutCubic);
+    m_windowOpacityAnimation->start();
+}
+
+void EditorController::finishWindowHide()
+{
+    if (!m_window || !m_hiding) {
+        return;
+    }
+
+    if (m_windowOpacityAnimation) {
+        m_windowOpacityAnimation->stop();
+    }
+    m_hideWhenAnimationFinishes = false;
+    m_window->hide();
+    m_window->setOpacity(1.0);
+    m_hiding = false;
+
+    const quint64 focusGeneration = ++m_focusGeneration;
+    QTimer::singleShot(0, this, [this, focusGeneration] {
+        if (focusGeneration == m_focusGeneration && !isVisible()) {
+            restorePreviousFocus();
+        }
+    });
 }
 
 void EditorController::shutdown()
@@ -1157,8 +1231,22 @@ QJsonObject EditorController::statusObject() const
                       m_window->property("settingsPageVisible").toBool());
         status.insert(QStringLiteral("themeBackgroundColor"),
                       m_window->property("themeBackgroundColor").toString());
+        status.insert(QStringLiteral("themeEditorSurfaceColor"),
+                      m_window->property("themeEditorSurfaceColor").toString());
         status.insert(QStringLiteral("transitionDuration"),
                       m_window->property("transitionDuration").toInt());
+        status.insert(QStringLiteral("resizeMargin"),
+                      m_window->property("resizeMargin").toInt());
+        status.insert(QStringLiteral("edgeDragWidth"),
+                      m_window->property("edgeDragWidth").toInt());
+        status.insert(QStringLiteral("cornerResizeEnabled"),
+                      m_window->property("cornerResizeEnabled").toBool());
+        status.insert(QStringLiteral("edgeDragEnabled"),
+                      m_window->property("edgeDragEnabled").toBool());
+        status.insert(QStringLiteral("windowOpacity"), m_window->opacity());
+        status.insert(QStringLiteral("windowTransitionActive"),
+                      m_windowOpacityAnimation
+                          && m_windowOpacityAnimation->state() == QAbstractAnimation::Running);
 #ifdef Q_OS_WIN
         status.insert(QStringLiteral("hwnd"),
                       QString::number(reinterpret_cast<quintptr>(m_window->winId())));

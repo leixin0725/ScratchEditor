@@ -14,10 +14,12 @@ int main(int argc, char *argv[])
     QElapsedTimer startupTimer;
     startupTimer.start();
 
-    // The basic loop avoids the extra threaded hand-off measured on large
-    // QTextDocument updates while retaining GPU-backed Qt Quick rendering.
+    // Keep scene graph rendering off the GUI thread. The basic loop blocks the
+    // native Windows sizing loop behind every TextEdit relayout and makes
+    // interactive edge/corner resizing visibly stall, especially for wrapped
+    // Markdown documents.
     if (qEnvironmentVariableIsEmpty("QSG_RENDER_LOOP")) {
-        qputenv("QSG_RENDER_LOOP", QByteArrayLiteral("basic"));
+        qputenv("QSG_RENDER_LOOP", QByteArrayLiteral("threaded"));
     }
 
     QGuiApplication::setHighDpiScaleFactorRoundingPolicy(

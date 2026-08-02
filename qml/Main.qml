@@ -15,6 +15,9 @@ Window {
     readonly property int dragZoneHeight: 52
     readonly property int marginSize: 18
     readonly property int resizeMargin: 8
+    readonly property int edgeDragWidth: marginSize - resizeMargin
+    readonly property bool cornerResizeEnabled: true
+    readonly property bool edgeDragEnabled: true
     readonly property bool verticalScrollBarVisible: scrollThumb.visible
     readonly property bool commandPaletteLoaded: commandPaletteLoader.active
     readonly property bool findPanelVisible: findPanel.visible
@@ -22,6 +25,7 @@ Window {
     readonly property bool settingsPageVisible: settingsLoader.active
     readonly property bool darkTheme: controller.theme !== "light"
     readonly property color themeBackgroundColor: darkTheme ? "#252525" : "#f7f8fa"
+    readonly property color themeEditorSurfaceColor: darkTheme ? "#292929" : "#ffffff"
     readonly property color themeHeaderColor: darkTheme ? "#202020" : "#eef1f5"
     readonly property color themePanelColor: darkTheme ? "#292929" : "#ffffff"
     readonly property color themeFieldColor: darkTheme ? "#1d1d1d" : "#f5f7fa"
@@ -453,6 +457,19 @@ Window {
         }
     }
 
+    Rectangle {
+        id: editorSurface
+        x: root.marginSize
+        y: root.dragZoneHeight
+        width: root.width - root.marginSize * 2
+        height: root.height - root.dragZoneHeight - root.marginSize
+        color: root.themeEditorSurfaceColor
+
+        Behavior on color {
+            ColorAnimation { duration: root.transitionDuration }
+        }
+    }
+
     Flickable {
         id: editorViewport
         x: root.marginSize
@@ -497,6 +514,39 @@ Window {
                 }
             }
         }
+    }
+
+    // The outermost strip keeps normal window resizing.  The narrow frame just
+    // inside it is intentionally draggable, so the window can be moved from
+    // any side without stealing pointer events from the editor itself.
+    MouseArea {
+        z: 19
+        x: root.resizeMargin
+        y: root.dragZoneHeight
+        width: root.edgeDragWidth
+        height: root.height - root.dragZoneHeight - root.marginSize
+        acceptedButtons: Qt.LeftButton
+        onPressed: root.startSystemMove()
+    }
+
+    MouseArea {
+        z: 19
+        x: root.width - root.marginSize
+        y: root.dragZoneHeight
+        width: root.edgeDragWidth
+        height: root.height - root.dragZoneHeight - root.marginSize
+        acceptedButtons: Qt.LeftButton
+        onPressed: root.startSystemMove()
+    }
+
+    MouseArea {
+        z: 19
+        x: root.resizeMargin
+        y: root.height - root.marginSize
+        width: root.width - root.resizeMargin * 2
+        height: root.edgeDragWidth
+        acceptedButtons: Qt.LeftButton
+        onPressed: root.startSystemMove()
     }
 
     Rectangle {
@@ -1222,7 +1272,9 @@ Window {
         width: root.resizeMargin
         anchors.left: parent.left
         anchors.top: parent.top
+        anchors.topMargin: root.resizeMargin
         anchors.bottom: parent.bottom
+        anchors.bottomMargin: root.resizeMargin
         cursorShape: Qt.SizeHorCursor
         onPressed: root.startSystemResize(Qt.LeftEdge)
     }
@@ -1232,7 +1284,9 @@ Window {
         width: root.resizeMargin
         anchors.right: parent.right
         anchors.top: parent.top
+        anchors.topMargin: root.resizeMargin
         anchors.bottom: parent.bottom
+        anchors.bottomMargin: root.resizeMargin
         cursorShape: Qt.SizeHorCursor
         onPressed: root.startSystemResize(Qt.RightEdge)
     }
@@ -1241,7 +1295,9 @@ Window {
         z: 101
         height: root.resizeMargin
         anchors.left: parent.left
+        anchors.leftMargin: root.resizeMargin
         anchors.right: parent.right
+        anchors.rightMargin: root.resizeMargin
         anchors.top: parent.top
         cursorShape: Qt.SizeVerCursor
         onPressed: root.startSystemResize(Qt.TopEdge)
@@ -1251,9 +1307,51 @@ Window {
         z: 101
         height: root.resizeMargin
         anchors.left: parent.left
+        anchors.leftMargin: root.resizeMargin
         anchors.right: parent.right
+        anchors.rightMargin: root.resizeMargin
         anchors.bottom: parent.bottom
         cursorShape: Qt.SizeVerCursor
         onPressed: root.startSystemResize(Qt.BottomEdge)
+    }
+
+    MouseArea {
+        z: 102
+        width: root.resizeMargin
+        height: root.resizeMargin
+        anchors.left: parent.left
+        anchors.top: parent.top
+        cursorShape: Qt.SizeFDiagCursor
+        onPressed: root.startSystemResize(Qt.TopEdge | Qt.LeftEdge)
+    }
+
+    MouseArea {
+        z: 102
+        width: root.resizeMargin
+        height: root.resizeMargin
+        anchors.right: parent.right
+        anchors.top: parent.top
+        cursorShape: Qt.SizeBDiagCursor
+        onPressed: root.startSystemResize(Qt.TopEdge | Qt.RightEdge)
+    }
+
+    MouseArea {
+        z: 102
+        width: root.resizeMargin
+        height: root.resizeMargin
+        anchors.left: parent.left
+        anchors.bottom: parent.bottom
+        cursorShape: Qt.SizeBDiagCursor
+        onPressed: root.startSystemResize(Qt.BottomEdge | Qt.LeftEdge)
+    }
+
+    MouseArea {
+        z: 102
+        width: root.resizeMargin
+        height: root.resizeMargin
+        anchors.right: parent.right
+        anchors.bottom: parent.bottom
+        cursorShape: Qt.SizeFDiagCursor
+        onPressed: root.startSystemResize(Qt.BottomEdge | Qt.RightEdge)
     }
 }

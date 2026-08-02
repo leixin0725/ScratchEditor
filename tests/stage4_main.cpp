@@ -101,6 +101,14 @@ int main(int argc, char *argv[])
                  && initial.value(QStringLiteral("themeBackgroundColor")).toString()
                     == QStringLiteral("#252525"),
              initial);
+    addCheck(checks, details, QStringLiteral("windowInteractionLayout"),
+             initial.value(QStringLiteral("cornerResizeEnabled")).toBool()
+                 && initial.value(QStringLiteral("edgeDragEnabled")).toBool()
+                 && initial.value(QStringLiteral("resizeMargin")).toInt() >= 8
+                 && initial.value(QStringLiteral("edgeDragWidth")).toInt() > 0
+                 && initial.value(QStringLiteral("themeEditorSurfaceColor")).toString()
+                    != initial.value(QStringLiteral("themeBackgroundColor")).toString(),
+             initial);
 
     const QJsonObject opened = execute(QStringLiteral("settings"));
     addCheck(checks, details, QStringLiteral("lazySettingsPage"),

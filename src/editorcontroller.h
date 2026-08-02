@@ -14,6 +14,7 @@
 #include <memory>
 
 class QLocalSocket;
+class QPropertyAnimation;
 class QQuickWindow;
 class AppSettings;
 class EditorCommandRegistry;
@@ -111,6 +112,8 @@ private:
     void waitForNextFrame(QLocalSocket *socket, QJsonObject response, qint64 startedNs,
                           const QString &requestId);
     bool commitAndHide();
+    void startWindowOpacityAnimation(qreal targetOpacity, bool hideWhenFinished);
+    void finishWindowHide();
     void applyNativeWindowStyle();
     void updateReadyState();
     bool readClipboardText(QString *text, QString *errorMessage);
@@ -154,6 +157,9 @@ private:
     QString m_editorFontFamily = QStringLiteral("Microsoft YaHei UI");
     int m_editorFontPointSize = 13;
     bool m_animationsEnabled = true;
+    QPropertyAnimation *m_windowOpacityAnimation = nullptr;
+    bool m_hiding = false;
+    bool m_hideWhenAnimationFinishes = false;
     QString m_settingsError;
 
     PendingRequest m_pendingInput;
