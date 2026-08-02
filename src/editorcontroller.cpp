@@ -2,8 +2,10 @@
 #include "appsettings.h"
 #include "editorcommandregistry.h"
 #include "markdownhighlighter.h"
+#include "markdownstyle.h"
 
 #include <QClipboard>
+#include <QColor>
 #include <QCoreApplication>
 #include <QEvent>
 #include <QFont>
@@ -88,6 +90,7 @@ EditorController::EditorController(bool testMode, QElapsedTimer *startupTimer, Q
     , m_testMode(testMode)
 {
     m_settings = std::make_unique<AppSettings>(m_testMode);
+    m_markdownStyle = std::make_unique<MarkdownStyle>(MarkdownStyle::load());
     reloadAppearance();
     m_commands = std::make_unique<EditorCommandRegistry>(m_settings.get(), this);
     connect(m_commands.get(), &EditorCommandRegistry::commandsChanged,
@@ -206,6 +209,23 @@ QString EditorController::settingsError() const
     return m_settingsError;
 }
 
+QString EditorController::markdownTextColor() const
+{
+    return m_markdownStyle
+        ? m_markdownStyle->baseText.foreground.name(QColor::HexRgb)
+        : QStringLiteral("#c2c0b6");
+}
+
+QString EditorController::markdownStyleFile() const
+{
+    return m_markdownStyle ? m_markdownStyle->filePath() : QString();
+}
+
+bool EditorController::markdownStyleLoaded() const
+{
+    return m_markdownStyle && m_markdownStyle->loadedFromFile();
+}
+
 void EditorController::registerWindow(QQuickWindow *window)
 {
     m_window = window;
@@ -260,9 +280,8 @@ void EditorController::registerEditor(QObject *editor)
             document = quickDocument->textDocument();
         }
     }
-    if (document) {
-        m_markdownHighlighter = new MarkdownHighlighter(document);
-        m_markdownHighlighter->setDarkTheme(m_theme == QStringLiteral("dark"));
+    if (document && m_markdownStyle) {
+        m_markdownHighlighter = new MarkdownHighlighter(document, *m_markdownStyle);
     }
     if (m_commands) {
         m_commands->setEditor(m_editor, document);
@@ -363,9 +382,6 @@ void EditorController::reloadAppearance()
     m_editorFontFamily = appearance.fontFamily;
     m_editorFontPointSize = appearance.fontPointSize;
     m_animationsEnabled = appearance.animationsEnabled;
-    if (m_markdownHighlighter) {
-        m_markdownHighlighter->setDarkTheme(m_theme == QStringLiteral("dark"));
-    }
     if (m_window) {
         applyNativeWindowStyle();
     }
@@ -557,6 +573,38 @@ void EditorController::dispatchCommand(QLocalSocket *socket, const QJsonObject &
         response.insert(QStringLiteral("command"), command);
         response.insert(QStringLiteral("invoked"), invoked);
         sendResponse(socket, response, startedNs, requestId);
+    } else if (command == QStringLiteral("testKeyPress")) {
+        const QString text = request.value(QStringLiteral("text")).toString();
+        const QString keyName = request.value(QStringLiteral("key")).toString();
+        const bool shift = request.value(QStringLiteral("shift")).toBool();
+        int key = Qt::Key_unknown;
+        if (keyName == QStringLiteral("Tab")) {
+            key = shift ? Qt::Key_Backtab : Qt::Key_Tab;
+        } else if (!text.isEmpty()) {
+            key = text.front().unicode();
+        }
+        const Qt::KeyboardModifiers modifiers = shift ? Qt::ShiftModifier
+                                                       : Qt::NoModifier;
+        QKeyEvent keyEvent(QEvent::KeyPress, key, modifiers, text);
+        const bool accepted = QCoreApplication::sendEvent(m_editor, &keyEvent);
+        QJsonObject response = statusObject();
+        response.insert(QStringLiteral("command"), command);
+        response.insert(QStringLiteral("accepted"), accepted);
+        response.insert(QStringLiteral("text"), m_editor->property("text").toString());
+        sendResponse(socket, response, startedNs, requestId);
+    } else if (command == QStringLiteral("testInputMethodCommit")) {
+        QInputMethodEvent inputEvent;
+        inputEvent.setCommitString(request.value(QStringLiteral("text")).toString());
+        const bool accepted = QCoreApplication::sendEvent(m_editor, &inputEvent);
+        QPointer<QLocalSocket> guardedSocket = socket;
+        QTimer::singleShot(0, this, [this, guardedSocket, accepted, startedNs, requestId,
+                                     command] {
+            QJsonObject response = statusObject();
+            response.insert(QStringLiteral("command"), command);
+            response.insert(QStringLiteral("accepted"), accepted);
+            response.insert(QStringLiteral("text"), m_editor->property("text").toString());
+            sendResponse(guardedSocket, response, startedNs, requestId);
+        });
     } else if (command == QStringLiteral("testExecuteCommand")) {
         const QString commandId = request.value(QStringLiteral("commandId")).toString();
         const bool executed = executeCommand(commandId);
@@ -632,6 +680,37 @@ void EditorController::dispatchCommand(QLocalSocket *socket, const QJsonObject &
         response.insert(QStringLiteral("blocks"), blocks);
         response.insert(QStringLiteral("formattedRanges"), formattedRanges);
         response.insert(QStringLiteral("fencedBlocks"), fencedBlocks);
+        sendResponse(socket, response, startedNs, requestId);
+    } else if (command == QStringLiteral("testFormatAt")) {
+        const int position = request.value(QStringLiteral("position")).toInt();
+        QJsonObject response = statusObject();
+        response.insert(QStringLiteral("command"), command);
+        if (auto *quickDocument = qvariant_cast<QQuickTextDocument *>(
+                m_editor->property("textDocument"))) {
+            const QTextBlock block = quickDocument->textDocument()->findBlock(position);
+            const int positionInBlock = position - block.position();
+            if (block.isValid() && block.layout()) {
+                for (const QTextLayout::FormatRange &range : block.layout()->formats()) {
+                    if (positionInBlock < range.start
+                        || positionInBlock >= range.start + range.length) {
+                        continue;
+                    }
+                    const QTextCharFormat &format = range.format;
+                    response.insert(QStringLiteral("formatted"), true);
+                    response.insert(QStringLiteral("foreground"),
+                                    format.foreground().color().name(QColor::HexRgb));
+                    response.insert(QStringLiteral("background"),
+                                    format.background().color().name(QColor::HexRgb));
+                    response.insert(QStringLiteral("bold"),
+                                    format.fontWeight() >= QFont::Bold);
+                    response.insert(QStringLiteral("italic"), format.fontItalic());
+                    response.insert(QStringLiteral("strikeThrough"),
+                                    format.fontStrikeOut());
+                    response.insert(QStringLiteral("underline"), format.fontUnderline());
+                    break;
+                }
+            }
+        }
         sendResponse(socket, response, startedNs, requestId);
     } else if (command == QStringLiteral("testCloseOverlays")) {
         const bool paletteClosed = QMetaObject::invokeMethod(m_window, "closeCommandPalette");
@@ -1297,6 +1376,9 @@ QJsonObject EditorController::statusObject() const
     status.insert(QStringLiteral("animationsEnabled"), m_animationsEnabled);
     status.insert(QStringLiteral("settingsError"), m_settingsError);
     status.insert(QStringLiteral("markdownHighlighting"), markdownHighlighting());
+    status.insert(QStringLiteral("markdownTextColor"), markdownTextColor());
+    status.insert(QStringLiteral("markdownStyleFile"), markdownStyleFile());
+    status.insert(QStringLiteral("markdownStyleLoaded"), markdownStyleLoaded());
     status.insert(QStringLiteral("commandCount"), commands().size());
 
     if (m_window) {
@@ -1327,6 +1409,14 @@ QJsonObject EditorController::statusObject() const
                       m_window->property("themeBackgroundColor").toString());
         status.insert(QStringLiteral("themeEditorSurfaceColor"),
                       m_window->property("themeEditorSurfaceColor").toString());
+        status.insert(QStringLiteral("themeHeaderColor"),
+                      m_window->property("themeHeaderColor").toString());
+        status.insert(QStringLiteral("themeBorderColor"),
+                      m_window->property("themeBorderColor").toString());
+        status.insert(QStringLiteral("panelAccentColor"),
+                      m_window->property("panelAccentColor").toString());
+        status.insert(QStringLiteral("commandPaletteMaximumWidth"),
+                      m_window->property("commandPaletteMaximumWidth").toInt());
         status.insert(QStringLiteral("transitionDuration"),
                       m_window->property("transitionDuration").toInt());
         status.insert(QStringLiteral("resizeMargin"),
@@ -1569,6 +1659,9 @@ bool EditorController::eventFilter(QObject *watched, QEvent *event)
                         }, Qt::QueuedConnection);
                     }, Qt::ConnectionType(Qt::DirectConnection | Qt::SingleShotConnection));
         }
+    }
+    if (watched == m_editor && m_commands && m_commands->handleEditorEvent(event)) {
+        return true;
     }
     return QObject::eventFilter(watched, event);
 }

@@ -26,7 +26,7 @@ Window {
     readonly property bool darkTheme: controller.theme !== "light"
     readonly property color themeBackgroundColor: darkTheme ? "#252525" : "#f7f8fa"
     readonly property color themeEditorSurfaceColor: darkTheme ? "#292929" : "#ffffff"
-    readonly property color themeHeaderColor: darkTheme ? "#202020" : "#eef1f5"
+    readonly property color themeHeaderColor: themeBackgroundColor
     readonly property color themePanelColor: darkTheme ? "#292929" : "#ffffff"
     readonly property color themeFieldColor: darkTheme ? "#1d1d1d" : "#f5f7fa"
     readonly property color themeTextColor: darkTheme ? "#f2f2f2" : "#24292f"
@@ -39,6 +39,10 @@ Window {
     readonly property color themeSelectionColor: darkTheme ? "#3d648f" : "#b6d7ff"
     readonly property color themeSelectedTextColor: darkTheme ? "#ffffff" : "#111111"
     readonly property color themeDangerColor: darkTheme ? "#ff8a80" : "#cf222e"
+    readonly property color panelAccentColor: "#85c7c0"
+    readonly property color panelAccentTextColor: "#183331"
+    readonly property int commandPaletteMaximumWidth: 620
+    readonly property color markdownTextColor: controller.markdownTextColor
     readonly property string uiFontFamily: "Microsoft YaHei UI"
     readonly property int transitionDuration: controller.animationsEnabled ? 120 : 0
     property real scrollContentHeight: 0
@@ -489,7 +493,7 @@ Window {
             y: 8
             width: editorViewport.width - 24
             height: Math.max(editorViewport.height - 16, contentHeight)
-            color: root.themeTextColor
+            color: root.markdownTextColor
             selectionColor: root.themeSelectionColor
             selectedTextColor: root.themeSelectedTextColor
             font.family: controller.editorFontFamily
@@ -770,13 +774,13 @@ Window {
                             height: 34
                             radius: 4
                             color: settingsRoot.draftTheme === "dark"
-                                   ? root.themeAccentColor : root.themeButtonColor
+                                   ? root.panelAccentColor : root.themeButtonColor
                             border.color: root.themeBorderColor
                             Text {
                                 anchors.centerIn: parent
                                 text: "深色"
                                 color: settingsRoot.draftTheme === "dark"
-                                       ? "#ffffff" : root.themeTextColor
+                                       ? root.panelAccentTextColor : root.themeTextColor
                                 font.family: root.uiFontFamily
                             }
                             MouseArea {
@@ -793,13 +797,13 @@ Window {
                             height: 34
                             radius: 4
                             color: settingsRoot.draftTheme === "light"
-                                   ? root.themeAccentColor : root.themeButtonColor
+                                   ? root.panelAccentColor : root.themeButtonColor
                             border.color: root.themeBorderColor
                             Text {
                                 anchors.centerIn: parent
                                 text: "浅色"
                                 color: settingsRoot.draftTheme === "light"
-                                       ? "#ffffff" : root.themeTextColor
+                                       ? root.panelAccentTextColor : root.themeTextColor
                                 font.family: root.uiFontFamily
                             }
                             MouseArea {
@@ -827,7 +831,7 @@ Window {
                             radius: 4
                             color: root.themeFieldColor
                             border.color: fontFamilyInput.activeFocus
-                                          ? root.themeFocusColor : root.themeBorderColor
+                                          ? root.panelAccentColor : root.themeBorderColor
                             TextInput {
                                 id: fontFamilyInput
                                 anchors.fill: parent
@@ -835,8 +839,8 @@ Window {
                                 anchors.rightMargin: 10
                                 verticalAlignment: TextInput.AlignVCenter
                                 color: root.themeTextColor
-                                selectionColor: root.themeSelectionColor
-                                selectedTextColor: root.themeSelectedTextColor
+                                selectionColor: root.panelAccentColor
+                                selectedTextColor: root.panelAccentTextColor
                                 font.family: root.uiFontFamily
                                 font.pointSize: 10
                                 selectByMouse: true
@@ -862,15 +866,15 @@ Window {
                             radius: 4
                             color: root.themeFieldColor
                             border.color: fontSizeInput.activeFocus
-                                          ? root.themeFocusColor : root.themeBorderColor
+                                          ? root.panelAccentColor : root.themeBorderColor
                             TextInput {
                                 id: fontSizeInput
                                 anchors.fill: parent
                                 horizontalAlignment: TextInput.AlignHCenter
                                 verticalAlignment: TextInput.AlignVCenter
                                 color: root.themeTextColor
-                                selectionColor: root.themeSelectionColor
-                                selectedTextColor: root.themeSelectedTextColor
+                                selectionColor: root.panelAccentColor
+                                selectedTextColor: root.panelAccentTextColor
                                 font.family: root.uiFontFamily
                                 font.pointSize: 10
                                 validator: IntValidator { bottom: 9; top: 24 }
@@ -894,13 +898,13 @@ Window {
                             height: 34
                             radius: 17
                             color: settingsRoot.draftAnimationsEnabled
-                                   ? root.themeAccentColor : root.themeButtonColor
+                                   ? root.panelAccentColor : root.themeButtonColor
                             border.color: root.themeBorderColor
                             Text {
                                 anchors.centerIn: parent
                                 text: settingsRoot.draftAnimationsEnabled ? "开启" : "关闭"
                                 color: settingsRoot.draftAnimationsEnabled
-                                       ? "#ffffff" : root.themeTextColor
+                                       ? root.panelAccentTextColor : root.themeTextColor
                                 font.family: root.uiFontFamily
                                 font.pointSize: 9
                             }
@@ -983,11 +987,11 @@ Window {
                     width: 92
                     height: 36
                     radius: 4
-                    color: root.themeAccentColor
+                    color: root.panelAccentColor
                     Text {
                         anchors.centerIn: parent
                         text: "应用"
-                        color: "#ffffff"
+                        color: root.panelAccentTextColor
                         font.family: root.uiFontFamily
                     }
                     MouseArea {
@@ -1094,7 +1098,7 @@ Window {
                 id: palettePanel
                 x: Math.round((parent.width - width) / 2)
                 y: Math.max(72, Math.round(parent.height * 0.14))
-                width: Math.min(680, parent.width - 64)
+                width: Math.min(root.commandPaletteMaximumWidth, parent.width - 64)
                 height: Math.min(500, parent.height - y - 60)
                 radius: 6
                 color: root.themePanelColor
@@ -1120,7 +1124,7 @@ Window {
                     radius: 4
                     color: root.themeFieldColor
                     border.color: paletteQuery.activeFocus
-                                  ? root.themeFocusColor : root.themeBorderColor
+                                  ? root.panelAccentColor : root.themeBorderColor
 
                     TextInput {
                         id: paletteQuery
@@ -1129,8 +1133,8 @@ Window {
                         anchors.rightMargin: 12
                         verticalAlignment: TextInput.AlignVCenter
                         color: root.themeTextColor
-                        selectionColor: root.themeSelectionColor
-                        selectedTextColor: root.themeSelectedTextColor
+                        selectionColor: root.panelAccentColor
+                        selectedTextColor: root.panelAccentTextColor
                         font.family: root.uiFontFamily
                         font.pointSize: 11
                         selectByMouse: true
@@ -1181,14 +1185,15 @@ Window {
                         height: 38
                         radius: 3
                         color: index === paletteRoot.selectedIndex
-                               ? (root.darkTheme ? "#3a5573" : "#dbeafe") : "transparent"
+                               ? root.panelAccentColor : "transparent"
 
                         Text {
                             anchors.left: parent.left
                             anchors.leftMargin: 10
                             anchors.verticalCenter: parent.verticalCenter
                             text: modelData.title
-                            color: root.themeTextColor
+                            color: index === paletteRoot.selectedIndex
+                                   ? root.panelAccentTextColor : root.themeTextColor
                             font.family: root.uiFontFamily
                             font.pointSize: 10
                         }
@@ -1198,7 +1203,8 @@ Window {
                             anchors.rightMargin: 10
                             anchors.verticalCenter: parent.verticalCenter
                             text: modelData.shortcut
-                            color: root.themeMutedTextColor
+                            color: index === paletteRoot.selectedIndex
+                                   ? root.panelAccentTextColor : root.themeMutedTextColor
                             font.family: "Cascadia Mono"
                             font.pointSize: 9
                         }
@@ -1235,7 +1241,7 @@ Window {
                     height: 38
                     radius: 4
                     color: root.themeFieldColor
-                    border.color: root.themeFocusColor
+                    border.color: root.panelAccentColor
 
                     TextInput {
                         id: shortcutEditor
@@ -1244,8 +1250,8 @@ Window {
                         anchors.rightMargin: 10
                         verticalAlignment: TextInput.AlignVCenter
                         color: root.themeTextColor
-                        selectionColor: root.themeSelectionColor
-                        selectedTextColor: root.themeSelectedTextColor
+                        selectionColor: root.panelAccentColor
+                        selectedTextColor: root.panelAccentTextColor
                         font.family: "Cascadia Mono"
                         font.pointSize: 10
                         selectByMouse: true

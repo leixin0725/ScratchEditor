@@ -20,6 +20,7 @@ class QVariantAnimation;
 class AppSettings;
 class EditorCommandRegistry;
 class MarkdownHighlighter;
+class MarkdownStyle;
 
 class EditorController final : public QObject
 {
@@ -36,6 +37,9 @@ class EditorController final : public QObject
     Q_PROPERTY(bool animationsEnabled READ animationsEnabled NOTIFY appearanceChanged)
     Q_PROPERTY(QString settingsFile READ settingsFile CONSTANT)
     Q_PROPERTY(QString settingsError READ settingsError NOTIFY settingsErrorChanged)
+    Q_PROPERTY(QString markdownTextColor READ markdownTextColor CONSTANT)
+    Q_PROPERTY(QString markdownStyleFile READ markdownStyleFile CONSTANT)
+    Q_PROPERTY(bool markdownStyleLoaded READ markdownStyleLoaded CONSTANT)
 
 public:
     explicit EditorController(bool testMode, QElapsedTimer *startupTimer, QObject *parent = nullptr);
@@ -58,6 +62,9 @@ public:
     bool animationsEnabled() const;
     QString settingsFile() const;
     QString settingsError() const;
+    QString markdownTextColor() const;
+    QString markdownStyleFile() const;
+    bool markdownStyleLoaded() const;
 
     Q_INVOKABLE void registerWindow(QQuickWindow *window);
     Q_INVOKABLE void registerEditor(QObject *editor);
@@ -141,6 +148,7 @@ private:
     QPointer<QObject> m_editor;
     std::unique_ptr<AppSettings> m_settings;
     std::unique_ptr<EditorCommandRegistry> m_commands;
+    std::unique_ptr<MarkdownStyle> m_markdownStyle;
     QPointer<MarkdownHighlighter> m_markdownHighlighter;
     QElapsedTimer *m_startupTimer = nullptr;
     QElapsedTimer m_monotonic;

@@ -118,21 +118,22 @@ int main(int argc, char *argv[])
              initial);
 
     constexpr int animationStressRounds = 20;
+    constexpr int animationSettleMs = 240;
     bool closingShapeStable = true;
     QJsonObject hiddenWindow;
     QJsonObject parkedWindow;
     QJsonObject reopenedWindow;
     for (int round = 0; round < animationStressRounds; ++round) {
         const QJsonObject opening = request(QStringLiteral("show"));
-        QThread::msleep(180);
+        QThread::msleep(animationSettleMs);
         const QJsonObject openedWindow = request(QStringLiteral("status"));
         const QJsonObject closing = request(QStringLiteral("hide"));
-        QThread::msleep(180);
+        QThread::msleep(animationSettleMs);
         hiddenWindow = request(QStringLiteral("status"));
         QThread::msleep(100);
         parkedWindow = request(QStringLiteral("status"));
         request(QStringLiteral("show"));
-        QThread::msleep(180);
+        QThread::msleep(animationSettleMs);
         reopenedWindow = request(QStringLiteral("status"));
 
         closingShapeStable = closingShapeStable

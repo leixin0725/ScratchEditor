@@ -22,6 +22,19 @@ Qt 6 Quick/QML、C++20 和 CMake；AutoHotkey 继续负责全局快捷键与启�
 按用户决定不提供 Markdown 预览。项目也不使用 Qt WebEngine、WebView 或其他浏览器
 内核；历史草稿、标签页、固定草稿、多光标、插件和 LSP 当前均不在范围内。
 
+## 编辑快捷键
+
+- `Ctrl+Shift+L` 删除光标或选区覆盖的整行。
+- `Ctrl+Num+1` 到 `Ctrl+Num+6` 直接设为对应级别标题；`Ctrl+Num+-` 向 6 级推进，`Ctrl+Num++` 向 1 级推进。
+- `Tab` 优先跳出括号、引号或 Markdown 强调标记，否则在行首增加 4 个空格；`Shift+Tab` 减少一级缩进。
+- 括号、引号、行内代码与围栏代码支持自动补全，包含半角、全角及常用中文成对符号。
+
+## Markdown 样式配置
+
+Markdown 颜色和字体样式集中保存在 `config/markdown-style.json`。构建时该文件会复制到
+程序目录下的 `config/markdown-style.json`，程序启动时读取；修改后重启 ScratchEditor
+即可生效。行内代码和围栏代码的背景色、等宽字体以及链接下划线也由该文件管理。
+
 ## 架构与目录
 
 ```text

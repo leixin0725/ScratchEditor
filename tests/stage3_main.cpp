@@ -4,6 +4,8 @@
 #include <QLocalSocket>
 #include <QThread>
 
+#include <array>
+
 namespace {
 
 QString serverName()
@@ -59,6 +61,33 @@ QJsonObject execute(const QString &commandId)
                    {{QStringLiteral("commandId"), commandId}});
 }
 
+QJsonObject keyPress(const QString &text = {}, const QString &key = {}, bool shift = false)
+{
+    return request(QStringLiteral("testKeyPress"),
+                   {{QStringLiteral("text"), text},
+                    {QStringLiteral("key"), key},
+                    {QStringLiteral("shift"), shift}});
+}
+
+QJsonObject inputMethodCommit(const QString &text)
+{
+    return request(QStringLiteral("testInputMethodCommit"),
+                   {{QStringLiteral("text"), text}});
+}
+
+QJsonObject formatAt(const QString &document, const QString &needle, int offset = 0)
+{
+    return request(QStringLiteral("testFormatAt"),
+                   {{QStringLiteral("position"), document.indexOf(needle) + offset}});
+}
+
+bool hasColor(const QJsonObject &format, const QString &color)
+{
+    return format.value(QStringLiteral("formatted")).toBool()
+        && format.value(QStringLiteral("foreground")).toString()
+            == color.toLower();
+}
+
 QString editorText()
 {
     return request(QStringLiteral("testText")).value(QStringLiteral("text")).toString();
@@ -89,6 +118,17 @@ int main(int argc, char *argv[])
                  && initial.value(QStringLiteral("markdownHighlighting")).toBool(),
              initial);
 
+    addCheck(checks, details, QStringLiteral("markdownStyleConfiguration"),
+             initial.value(QStringLiteral("markdownStyleLoaded")).toBool()
+                 && initial.value(QStringLiteral("markdownTextColor")).toString()
+                    == QStringLiteral("#c2c0b6")
+                 && initial.value(QStringLiteral("themeHeaderColor")).toString()
+                    == QStringLiteral("#252525")
+                 && initial.value(QStringLiteral("panelAccentColor")).toString()
+                    == QStringLiteral("#85c7c0")
+                 && initial.value(QStringLiteral("commandPaletteMaximumWidth")).toInt() == 620,
+             initial);
+
     const QString markdown = QStringLiteral(
         "# 标题\n**粗体** 与 *斜体* 以及 `code`\n> 引用\n- 列表\n- [ ] 任务\n```cpp\nint x = 1;\n```\n[链接](https://example.invalid)");
     request(QStringLiteral("testSetText"), {{QStringLiteral("text"), markdown}});
@@ -97,6 +137,75 @@ int main(int argc, char *argv[])
              highlight.value(QStringLiteral("formattedRanges")).toInt() >= 9
                  && highlight.value(QStringLiteral("fencedBlocks")).toInt() >= 1,
              highlight);
+
+    const QString styledMarkdown = QStringLiteral(
+        "# H1\n## H2\n### H3\n#### H4\n##### H5\n###### H6\n"
+        "plain `code`\n```cpp\nfenced body\n```\n- item\n> quote\n"
+        "**bold** *italic* ***both*** ~~gone~~\n"
+        "[Title](URL)\n- [ ] todo\n- [x] done");
+    request(QStringLiteral("testSetText"),
+            {{QStringLiteral("text"), styledMarkdown}});
+
+    const std::array<QString, 6> headingColors{
+        QStringLiteral("#d04255"), QStringLiteral("#d5763f"),
+        QStringLiteral("#e5b567"), QStringLiteral("#a8c373"),
+        QStringLiteral("#6c99bb"), QStringLiteral("#9e86c8")};
+    bool rainbowHeadings = true;
+    for (int level = 1; level <= 6; ++level) {
+        const QString headingText = QString(level, QLatin1Char('#'))
+            + QStringLiteral(" H%1").arg(level);
+        const QJsonObject format = formatAt(styledMarkdown, headingText, level + 1);
+        rainbowHeadings = rainbowHeadings && hasColor(format, headingColors[level - 1])
+            && format.value(QStringLiteral("bold")).toBool();
+    }
+    addCheck(checks, details, QStringLiteral("rainbowHeadingStyles"), rainbowHeadings);
+
+    const QJsonObject inlineCodeStyle = formatAt(styledMarkdown, QStringLiteral("`code`"), 1);
+    const QJsonObject fencedCodeStyle = formatAt(styledMarkdown, QStringLiteral("fenced body"));
+    const QJsonObject fenceStyle = formatAt(styledMarkdown, QStringLiteral("```cpp"));
+    const QJsonObject listStyle = formatAt(styledMarkdown, QStringLiteral("- item"));
+    const QJsonObject quoteStyle = formatAt(styledMarkdown, QStringLiteral("> quote"), 2);
+    addCheck(checks, details, QStringLiteral("structuralMarkdownStyles"),
+             hasColor(inlineCodeStyle, QStringLiteral("#ffffff"))
+                 && inlineCodeStyle.value(QStringLiteral("background")).toString()
+                    == QStringLiteral("#303030")
+                 && hasColor(fencedCodeStyle, QStringLiteral("#c2c0b6"))
+                 && fencedCodeStyle.value(QStringLiteral("background")).toString()
+                    == QStringLiteral("#303030")
+                 && hasColor(fenceStyle, QStringLiteral("#c2c0b6"))
+                 && hasColor(listStyle, QStringLiteral("#ffffff"))
+                 && hasColor(quoteStyle, QStringLiteral("#999999"))
+                 && quoteStyle.value(QStringLiteral("italic")).toBool(),
+             inlineCodeStyle);
+
+    const QJsonObject boldStyle = formatAt(styledMarkdown, QStringLiteral("**bold**"), 2);
+    const QJsonObject italicStyle = formatAt(styledMarkdown, QStringLiteral("*italic*"), 1);
+    const QJsonObject boldItalicStyle = formatAt(styledMarkdown, QStringLiteral("***both***"), 3);
+    const QJsonObject strikeStyle = formatAt(styledMarkdown, QStringLiteral("~~gone~~"), 2);
+    addCheck(checks, details, QStringLiteral("textDecorationStyles"),
+             hasColor(boldStyle, QStringLiteral("#ffe6b7"))
+                 && boldStyle.value(QStringLiteral("bold")).toBool()
+                 && hasColor(italicStyle, QStringLiteral("#999999"))
+                 && italicStyle.value(QStringLiteral("italic")).toBool()
+                 && hasColor(boldItalicStyle, QStringLiteral("#ffe6b7"))
+                 && boldItalicStyle.value(QStringLiteral("bold")).toBool()
+                 && boldItalicStyle.value(QStringLiteral("italic")).toBool()
+                 && hasColor(strikeStyle, QStringLiteral("#999999"))
+                 && strikeStyle.value(QStringLiteral("strikeThrough")).toBool(),
+             boldItalicStyle);
+
+    const QJsonObject linkTextStyle = formatAt(styledMarkdown, QStringLiteral("Title"));
+    const QJsonObject linkBracketStyle = formatAt(styledMarkdown, QStringLiteral("[Title"));
+    const QJsonObject checkboxStyle = formatAt(styledMarkdown, QStringLiteral("[ ]"));
+    const QJsonObject completedTaskStyle = formatAt(styledMarkdown, QStringLiteral("done"));
+    addCheck(checks, details, QStringLiteral("linkAndTaskStyles"),
+             hasColor(linkTextStyle, QStringLiteral("#85c7c0"))
+                 && linkTextStyle.value(QStringLiteral("underline")).toBool()
+                 && hasColor(linkBracketStyle, QStringLiteral("#999999"))
+                 && hasColor(checkboxStyle, QStringLiteral("#4a4a4a"))
+                 && hasColor(completedTaskStyle, QStringLiteral("#999999"))
+                 && completedTaskStyle.value(QStringLiteral("strikeThrough")).toBool(),
+             completedTaskStyle);
 
     setTextAndSelection(QStringLiteral("alpha"), 0, 5);
     const QJsonObject boldOn = execute(QStringLiteral("toggleBold"));
@@ -122,26 +231,150 @@ int main(int argc, char *argv[])
     addCheck(checks, details, QStringLiteral("cycleHeading"),
              headingOne && editorText() == QStringLiteral("## one\n## two"));
 
+    bool allDirectHeadingLevels = true;
+    for (int level = 1; level <= 6; ++level) {
+        setTextAndSelection(QStringLiteral("one"), 0, 3);
+        execute(QStringLiteral("setHeading%1").arg(level));
+        allDirectHeadingLevels = allDirectHeadingLevels
+            && editorText() == QString(level, QLatin1Char('#')) + QStringLiteral(" one");
+    }
+
+    setTextAndSelection(QStringLiteral("one\ntwo"), 0, 7);
+    execute(QStringLiteral("setHeading3"));
+    const bool headingThree = editorText() == QStringLiteral("### one\n### two");
+    execute(QStringLiteral("increaseHeadingLevel"));
+    const bool headingIncreased = editorText() == QStringLiteral("#### one\n#### two");
+    execute(QStringLiteral("decreaseHeadingLevel"));
+    addCheck(checks, details, QStringLiteral("directAndDirectionalHeadings"),
+             allDirectHeadingLevels && headingThree && headingIncreased
+                 && editorText() == QStringLiteral("### one\n### two"));
+
     setTextAndSelection(QStringLiteral("one\ntwo"), 0, 7);
     execute(QStringLiteral("toggleList"));
     const bool listOn = editorText() == QStringLiteral("- one\n- two");
-    execute(QStringLiteral("toggleList"));
+    const QJsonObject listOff = execute(QStringLiteral("toggleList"));
     addCheck(checks, details, QStringLiteral("toggleList"),
-             listOn && editorText() == QStringLiteral("one\ntwo"));
+             listOn && editorText() == QStringLiteral("one\ntwo"), listOff);
 
     setTextAndSelection(QStringLiteral("one\ntwo"), 0, 7);
     execute(QStringLiteral("toggleTask"));
     const bool taskOn = editorText() == QStringLiteral("- [ ] one\n- [ ] two");
-    execute(QStringLiteral("toggleTask"));
+    const QJsonObject taskOff = execute(QStringLiteral("toggleTask"));
     addCheck(checks, details, QStringLiteral("toggleTask"),
-             taskOn && editorText() == QStringLiteral("one\ntwo"));
+             taskOn && editorText() == QStringLiteral("one\ntwo"), taskOff);
 
     setTextAndSelection(QStringLiteral("one\ntwo"), 0, 7);
     execute(QStringLiteral("toggleQuote"));
     const bool quoteOn = editorText() == QStringLiteral("> one\n> two");
-    execute(QStringLiteral("toggleQuote"));
+    setTextAndSelection(QStringLiteral("> one\n> two"), 0, 11);
+    const QJsonObject quoteOff = execute(QStringLiteral("toggleQuote"));
     addCheck(checks, details, QStringLiteral("toggleQuote"),
-             quoteOn && editorText() == QStringLiteral("one\ntwo"));
+             quoteOn && editorText() == QStringLiteral("one\ntwo"), quoteOff);
+
+    setTextAndSelection(QString(), 0, 0);
+    const QJsonObject emptyQuote = execute(QStringLiteral("toggleQuote"));
+    addCheck(checks, details, QStringLiteral("emptyQuoteAndCollapsedSelection"),
+             emptyQuote.value(QStringLiteral("text")).toString() == QStringLiteral("> ")
+                 && emptyQuote.value(QStringLiteral("selectionStart")).toInt() == 2
+                 && emptyQuote.value(QStringLiteral("selectionEnd")).toInt() == 2,
+             emptyQuote);
+
+    setTextAndSelection(QStringLiteral("one\ntwo"), 0, 7);
+    const QJsonObject quotedSelection = execute(QStringLiteral("toggleQuote"));
+    addCheck(checks, details, QStringLiteral("quoteDoesNotRemainSelected"),
+             quotedSelection.value(QStringLiteral("text")).toString()
+                    == QStringLiteral("> one\n> two")
+                 && quotedSelection.value(QStringLiteral("selectionStart")).toInt()
+                    == quotedSelection.value(QStringLiteral("selectionEnd")).toInt(),
+             quotedSelection);
+
+    setTextAndSelection(QStringLiteral("a\nb\nc"), 2, 2);
+    const QJsonObject deletedMiddleLine = execute(QStringLiteral("deleteLine"));
+    setTextAndSelection(QStringLiteral("a\nb\nc"), 4, 5);
+    const QJsonObject deletedLastLine = execute(QStringLiteral("deleteLine"));
+    addCheck(checks, details, QStringLiteral("deleteWholeLine"),
+             deletedMiddleLine.value(QStringLiteral("text")).toString()
+                    == QStringLiteral("a\nc")
+                 && deletedMiddleLine.value(QStringLiteral("cursorPosition")).toInt() == 2
+                 && deletedLastLine.value(QStringLiteral("text")).toString()
+                    == QStringLiteral("a\nb"),
+             deletedMiddleLine);
+
+    setTextAndSelection(QString(), 0, 0);
+    const QJsonObject halfWidthPair = keyPress(QStringLiteral("("));
+    keyPress({}, QStringLiteral("Tab"));
+    const QJsonObject tabIndent = keyPress({}, QStringLiteral("Tab"));
+    addCheck(checks, details, QStringLiteral("pairCompletionTabOutAndIndent"),
+             halfWidthPair.value(QStringLiteral("text")).toString() == QStringLiteral("()")
+                 && halfWidthPair.value(QStringLiteral("cursorPosition")).toInt() == 1
+                 && tabIndent.value(QStringLiteral("text")).toString()
+                    == QStringLiteral("    ()")
+                 && tabIndent.value(QStringLiteral("cursorPosition")).toInt() == 6,
+             tabIndent);
+
+    setTextAndSelection(QString(), 0, 0);
+    const QJsonObject fullWidthPair = inputMethodCommit(QStringLiteral("（"));
+    setTextAndSelection(QString(), 0, 0);
+    const QJsonObject fullWidthQuote = inputMethodCommit(QStringLiteral("“"));
+    addCheck(checks, details, QStringLiteral("fullWidthPairAndQuoteCompletion"),
+             fullWidthPair.value(QStringLiteral("text")).toString() == QStringLiteral("（）")
+                 && fullWidthPair.value(QStringLiteral("cursorPosition")).toInt() == 1
+                 && fullWidthQuote.value(QStringLiteral("text")).toString()
+                    == QStringLiteral("“”")
+                 && fullWidthQuote.value(QStringLiteral("cursorPosition")).toInt() == 1,
+             fullWidthQuote);
+
+    setTextAndSelection(QString(), 0, 0);
+    const QJsonObject inlineCode = keyPress(QStringLiteral("`"));
+    keyPress(QStringLiteral("`"));
+    const QJsonObject fencedCode = keyPress(QStringLiteral("`"));
+    addCheck(checks, details, QStringLiteral("inlineAndFencedCodeCompletion"),
+             inlineCode.value(QStringLiteral("text")).toString() == QStringLiteral("``")
+                 && inlineCode.value(QStringLiteral("cursorPosition")).toInt() == 1
+                 && fencedCode.value(QStringLiteral("text")).toString()
+                    == QStringLiteral("```\n```")
+                 && fencedCode.value(QStringLiteral("cursorPosition")).toInt() == 3,
+             fencedCode);
+
+    setTextAndSelection(QStringLiteral("***bold italic***"), 8, 8);
+    const QJsonObject boldItalicTab = keyPress({}, QStringLiteral("Tab"));
+    addCheck(checks, details, QStringLiteral("tabOutOfMarkdownEmphasis"),
+             boldItalicTab.value(QStringLiteral("cursorPosition")).toInt() == 17,
+             boldItalicTab);
+
+    setTextAndSelection(QStringLiteral("a\nb"), 0, 3);
+    const QJsonObject multiLineIndent = keyPress({}, QStringLiteral("Tab"));
+    const QJsonObject multiLineOutdent = keyPress({}, QStringLiteral("Tab"), true);
+    addCheck(checks, details, QStringLiteral("tabIndentAndShiftTabOutdent"),
+             multiLineIndent.value(QStringLiteral("text")).toString()
+                    == QStringLiteral("    a\n    b")
+                 && multiLineOutdent.value(QStringLiteral("text")).toString()
+                    == QStringLiteral("a\nb"),
+             multiLineOutdent);
+
+    setTextAndSelection(QStringLiteral("alpha"), 2, 2);
+    const QJsonObject middleOfLineIndent = keyPress({}, QStringLiteral("Tab"));
+    const QJsonObject middleOfLineOutdent = keyPress({}, QStringLiteral("Tab"), true);
+    addCheck(checks, details, QStringLiteral("indentFromAnywhereInLine"),
+             middleOfLineIndent.value(QStringLiteral("text")).toString()
+                    == QStringLiteral("    alpha")
+                 && middleOfLineIndent.value(QStringLiteral("cursorPosition")).toInt() == 6
+                 && middleOfLineOutdent.value(QStringLiteral("text")).toString()
+                    == QStringLiteral("alpha")
+                 && middleOfLineOutdent.value(QStringLiteral("cursorPosition")).toInt() == 2,
+             middleOfLineOutdent);
+
+    const QString adjacentMarkdownLines = QStringLiteral(
+        "* **bold** (Bold)\n* *italic* (Italic)");
+    const int firstLineEnd = adjacentMarkdownLines.indexOf(QLatin1Char('\n'));
+    setTextAndSelection(adjacentMarkdownLines, firstLineEnd, firstLineEnd);
+    const QJsonObject tabAfterClosedBold = keyPress({}, QStringLiteral("Tab"));
+    addCheck(checks, details, QStringLiteral("tabAfterClosedEmphasisIndentsLine"),
+             tabAfterClosedBold.value(QStringLiteral("text")).toString()
+                    == QStringLiteral("    * **bold** (Bold)\n* *italic* (Italic)")
+                 && tabAfterClosedBold.value(QStringLiteral("cursorPosition")).toInt()
+                    == firstLineEnd + 4,
+             tabAfterClosedBold);
 
     setTextAndSelection(QStringLiteral("code"), 0, 4);
     execute(QStringLiteral("wrapCode"));
@@ -205,6 +438,45 @@ int main(int argc, char *argv[])
     addCheck(checks, details, QStringLiteral("previewExcluded"),
              !noPreview.value(QStringLiteral("executed")).toBool(), noPreview);
     request(QStringLiteral("testCloseOverlays"));
+
+    const QJsonObject deleteLineShortcut = request(
+        QStringLiteral("testShortcut"),
+        {{QStringLiteral("commandId"), QStringLiteral("deleteLine")}});
+    const QJsonObject oldHeadingShortcut = request(
+        QStringLiteral("testShortcut"),
+        {{QStringLiteral("commandId"), QStringLiteral("cycleHeading")}});
+    const QJsonObject headingOneShortcut = request(
+        QStringLiteral("testShortcut"),
+        {{QStringLiteral("commandId"), QStringLiteral("setHeading1")}});
+    bool allHeadingShortcuts = true;
+    for (int level = 1; level <= 6; ++level) {
+        const QJsonObject shortcutResponse = request(
+            QStringLiteral("testShortcut"),
+            {{QStringLiteral("commandId"), QStringLiteral("setHeading%1").arg(level)}});
+        allHeadingShortcuts = allHeadingShortcuts
+            && shortcutResponse.value(QStringLiteral("shortcut")).toString()
+                == QStringLiteral("Ctrl+Num+%1").arg(level);
+    }
+    const QJsonObject headingIncreaseShortcut = request(
+        QStringLiteral("testShortcut"),
+        {{QStringLiteral("commandId"), QStringLiteral("increaseHeadingLevel")}});
+    const QJsonObject headingDecreaseShortcut = request(
+        QStringLiteral("testSetShortcut"),
+        {{QStringLiteral("commandId"), QStringLiteral("decreaseHeadingLevel")},
+         {QStringLiteral("sequence"), QStringLiteral("Ctrl+Num++")}});
+    addCheck(checks, details, QStringLiteral("newDefaultShortcuts"),
+             deleteLineShortcut.value(QStringLiteral("shortcut")).toString()
+                    == QStringLiteral("Ctrl+Shift+L")
+                 && oldHeadingShortcut.value(QStringLiteral("shortcut")).toString().isEmpty()
+                 && allHeadingShortcuts
+                 && headingOneShortcut.value(QStringLiteral("shortcut")).toString()
+                    == QStringLiteral("Ctrl+Num+1")
+                 && headingIncreaseShortcut.value(QStringLiteral("shortcut")).toString()
+                    == QStringLiteral("Ctrl+Num+-")
+                 && headingDecreaseShortcut.value(QStringLiteral("configured")).toBool()
+                 && headingDecreaseShortcut.value(QStringLiteral("shortcut")).toString()
+                    == QStringLiteral("Ctrl+Num++"),
+             headingDecreaseShortcut);
 
     const QJsonObject shortcut = request(
         QStringLiteral("testSetShortcut"),

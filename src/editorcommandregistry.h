@@ -8,6 +8,7 @@
 
 class QTextDocument;
 class AppSettings;
+class QEvent;
 
 class EditorCommandRegistry final : public QObject
 {
@@ -23,6 +24,7 @@ public:
     bool setShortcut(const QString &commandId, const QString &sequence, QString *errorMessage);
     void resetShortcuts();
     bool execute(const QString &commandId);
+    bool handleEditorEvent(QEvent *event);
 
     bool findNext(const QString &query, bool caseSensitive, bool backwards);
     bool replaceCurrent(const QString &query, const QString &replacement, bool caseSensitive);
@@ -46,6 +48,15 @@ private:
     const Definition *definition(const QString &commandId) const;
     bool wrapSelection(const QString &opening, const QString &closing);
     bool transformSelectedLines(const QString &commandId);
+    bool deleteSelectedLines();
+    bool handleTypedText(const QString &text);
+    bool insertPair(const QString &opening, const QString &closing);
+    bool insertFenceBlock();
+    bool jumpOutOfPair();
+    bool changeIndent(bool outdent);
+    void completeInputMethodCommit(const QString &committedText, const QString &beforeText,
+                                   const QString &selectedText, int selectionStart,
+                                   int selectionEnd);
     void selectRange(int start, int end);
     void focusEditor();
     QString selectedText() const;

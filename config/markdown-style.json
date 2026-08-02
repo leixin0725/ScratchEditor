@@ -1,0 +1,73 @@
+{
+  "baseText": {
+    "color": "#C2C0B6",
+    "fontStyle": "normal"
+  },
+  "inlineCode": {
+    "color": "#ffffff",
+    "backgroundColor": "#303030",
+    "fontStyle": "normal",
+    "fontFamilies": ["Cascadia Mono", "Microsoft YaHei UI"]
+  },
+  "codeBlock": {
+    "color": "#C2C0B6",
+    "backgroundColor": "#303030",
+    "fontStyle": "normal",
+    "fontFamilies": ["Cascadia Mono", "Microsoft YaHei UI"]
+  },
+  "codeFence": {
+    "color": "#C2C0B6",
+    "backgroundColor": "#303030",
+    "fontStyle": "normal",
+    "fontFamilies": ["Cascadia Mono", "Microsoft YaHei UI"]
+  },
+  "listMarker": {
+    "color": "#ffffff",
+    "fontStyle": "normal"
+  },
+  "quote": {
+    "color": "#999999",
+    "fontStyle": "italic"
+  },
+  "headings": [
+    { "level": 1, "color": "#d04255", "fontStyle": "bold" },
+    { "level": 2, "color": "#d5763f", "fontStyle": "bold" },
+    { "level": 3, "color": "#e5b567", "fontStyle": "bold" },
+    { "level": 4, "color": "#a8c373", "fontStyle": "bold" },
+    { "level": 5, "color": "#6c99bb", "fontStyle": "bold" },
+    { "level": 6, "color": "#9e86c8", "fontStyle": "bold" }
+  ],
+  "bold": {
+    "color": "#FFE6B7",
+    "fontStyle": "bold"
+  },
+  "italic": {
+    "color": "#999999",
+    "fontStyle": "italic"
+  },
+  "boldItalic": {
+    "color": "#FFE6B7",
+    "fontStyle": "bold italic"
+  },
+  "strikethrough": {
+    "color": "#999999",
+    "fontStyle": "strikethrough"
+  },
+  "link": {
+    "color": "#85c7c0",
+    "fontStyle": "normal",
+    "underline": true
+  },
+  "linkBrackets": {
+    "color": "#999999",
+    "fontStyle": "normal"
+  },
+  "completedTask": {
+    "color": "#999999",
+    "fontStyle": "strikethrough"
+  },
+  "checkboxBrackets": {
+    "color": "#4a4a4a",
+    "fontStyle": "normal"
+  }
+}

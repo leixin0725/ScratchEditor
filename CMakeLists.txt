@@ -21,6 +21,20 @@ qt_add_executable(ScratchEditor WIN32
     src/editorcommandregistry.h
     src/markdownhighlighter.cpp
     src/markdownhighlighter.h
+    src/markdownstyle.cpp
+    src/markdownstyle.h
+)
+
+set(SCRATCHEDITOR_MARKDOWN_STYLE
+    "${CMAKE_CURRENT_SOURCE_DIR}/config/markdown-style.json"
+)
+
+add_custom_command(TARGET ScratchEditor POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E make_directory "$<TARGET_FILE_DIR:ScratchEditor>/config"
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            "${SCRATCHEDITOR_MARKDOWN_STYLE}"
+            "$<TARGET_FILE_DIR:ScratchEditor>/config/markdown-style.json"
+    VERBATIM
 )
 
 qt_add_qml_module(ScratchEditor
@@ -114,3 +128,5 @@ install(TARGETS ScratchEditor ScratchEditorPerf ScratchEditorStage2Tests Scratch
         ScratchEditorStage4Tests
     RUNTIME DESTINATION .
 )
+
+install(FILES "${SCRATCHEDITOR_MARKDOWN_STYLE}" DESTINATION config)
