@@ -1280,6 +1280,10 @@ QJsonObject EditorController::statusObject() const
     status.insert(QStringLiteral("serverName"), serverName());
     status.insert(QStringLiteral("renderLoop"),
                   QString::fromLocal8Bit(qgetenv("QSG_RENDER_LOOP")));
+    status.insert(QStringLiteral("resizePresentationUnthrottled"),
+                  qEnvironmentVariableIntValue("QSG_NO_VSYNC") != 0);
+    status.insert(QStringLiteral("simpleAnimationDriver"),
+                  qEnvironmentVariableIntValue("QSG_USE_SIMPLE_ANIMATION_DRIVER") != 0);
     status.insert(QStringLiteral("statusMessage"), m_statusMessage);
     status.insert(QStringLiteral("clipboardHealthy"), m_clipboardHealthy);
     status.insert(QStringLiteral("settingsFile"), m_settings ? m_settings->fileName() : QString());

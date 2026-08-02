@@ -619,7 +619,7 @@ Window {
         color: "#78a9ff"
     }
 
-    XAnimator {
+    NumberAnimation {
         id: benchmarkAnimation
         target: animationProbe
         from: root.marginSize

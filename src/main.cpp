@@ -21,6 +21,20 @@ int main(int argc, char *argv[])
     if (qEnvironmentVariableIsEmpty("QSG_RENDER_LOOP")) {
         qputenv("QSG_RENDER_LOOP", QByteArrayLiteral("threaded"));
     }
+#ifdef Q_OS_WIN
+    // During native live resizing, the Windows client area can grow before a
+    // vsync-blocked Qt Quick render thread has resized and presented its
+    // swapchain. Let Qt's threaded loop use timer-driven presentation so the
+    // new client pixels receive a frame without waiting for the next vsync.
+    if (qEnvironmentVariableIsEmpty("QSG_NO_VSYNC")) {
+        qputenv("QSG_NO_VSYNC", QByteArrayLiteral("1"));
+    }
+    // Keep render-thread and GUI-thread animations tied to elapsed time when
+    // presentation is not used as the animation clock.
+    if (qEnvironmentVariableIsEmpty("QSG_USE_SIMPLE_ANIMATION_DRIVER")) {
+        qputenv("QSG_USE_SIMPLE_ANIMATION_DRIVER", QByteArrayLiteral("1"));
+    }
+#endif
 
     QGuiApplication::setHighDpiScaleFactorRoundingPolicy(
         Qt::HighDpiScaleFactorRoundingPolicy::PassThrough);

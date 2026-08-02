@@ -106,6 +106,11 @@ int main(int argc, char *argv[])
              initial.value(QStringLiteral("cornerResizeEnabled")).toBool()
                  && initial.value(QStringLiteral("edgeDragEnabled")).toBool()
                  && initial.value(QStringLiteral("windowShapeAnimationEnabled")).toBool()
+                 && initial.value(QStringLiteral("renderLoop")).toString()
+                    == QStringLiteral("threaded")
+                 && initial.value(
+                        QStringLiteral("resizePresentationUnthrottled")).toBool()
+                 && initial.value(QStringLiteral("simpleAnimationDriver")).toBool()
                  && initial.value(QStringLiteral("resizeMargin")).toInt() >= 8
                  && initial.value(QStringLiteral("edgeDragWidth")).toInt() > 0
                  && initial.value(QStringLiteral("themeEditorSurfaceColor")).toString()
