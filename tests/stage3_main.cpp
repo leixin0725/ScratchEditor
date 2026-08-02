@@ -224,6 +224,99 @@ int main(int argc, char *argv[])
     addCheck(checks, details, QStringLiteral("toggleItalic"),
              italicOn && editorText() == QStringLiteral("alpha"));
 
+    setTextAndSelection(QStringLiteral("a big rat"), 6, 6);
+    const QJsonObject boldNextWord = execute(QStringLiteral("toggleBold"));
+    setTextAndSelection(QStringLiteral("a big"), 5, 5);
+    const QJsonObject boldPreviousWord = execute(QStringLiteral("toggleBold"));
+    setTextAndSelection(QStringLiteral("a big "), 6, 6);
+    const QJsonObject boldAtEmptyBoundary = execute(QStringLiteral("toggleBold"));
+    addCheck(checks, details, QStringLiteral("collapsedFormattingUsesWordBoundaries"),
+             boldNextWord.value(QStringLiteral("text")).toString()
+                    == QStringLiteral("a big **rat**")
+                 && boldNextWord.value(QStringLiteral("cursorPosition")).toInt() == 8
+                 && boldPreviousWord.value(QStringLiteral("text")).toString()
+                    == QStringLiteral("a **big**")
+                 && boldPreviousWord.value(QStringLiteral("cursorPosition")).toInt() == 7
+                 && boldAtEmptyBoundary.value(QStringLiteral("text")).toString()
+                    == QStringLiteral("a big ****")
+                 && boldAtEmptyBoundary.value(QStringLiteral("cursorPosition")).toInt() == 8,
+             QJsonObject{{QStringLiteral("nextWord"), boldNextWord},
+                         {QStringLiteral("previousWord"), boldPreviousWord},
+                         {QStringLiteral("emptyBoundary"), boldAtEmptyBoundary}});
+
+    setTextAndSelection(QStringLiteral("**big rat**"), 4, 4);
+    const QJsonObject boldOffAtCursor = execute(QStringLiteral("toggleBold"));
+    setTextAndSelection(QStringLiteral("**big rat**"), 2, 5);
+    const QJsonObject boldOffAroundSelection = execute(QStringLiteral("toggleBold"));
+    setTextAndSelection(QStringLiteral("`code`"), 3, 3);
+    const QJsonObject codeOffAtCursor = execute(QStringLiteral("wrapCode"));
+    addCheck(checks, details, QStringLiteral("formattingTogglesContainingBlock"),
+             boldOffAtCursor.value(QStringLiteral("text")).toString()
+                    == QStringLiteral("big rat")
+                 && boldOffAtCursor.value(QStringLiteral("cursorPosition")).toInt() == 2
+                 && boldOffAroundSelection.value(QStringLiteral("text")).toString()
+                    == QStringLiteral("big rat")
+                 && boldOffAroundSelection.value(QStringLiteral("selectionStart")).toInt() == 0
+                 && boldOffAroundSelection.value(QStringLiteral("selectionEnd")).toInt() == 3
+                 && codeOffAtCursor.value(QStringLiteral("text")).toString()
+                    == QStringLiteral("code")
+                 && codeOffAtCursor.value(QStringLiteral("cursorPosition")).toInt() == 2,
+             QJsonObject{{QStringLiteral("cursor"), boldOffAtCursor},
+                         {QStringLiteral("selection"), boldOffAroundSelection},
+                         {QStringLiteral("code"), codeOffAtCursor}});
+
+    setTextAndSelection(QStringLiteral("***both***"), 5, 5);
+    const QJsonObject boldLayerOff = execute(QStringLiteral("toggleBold"));
+    setTextAndSelection(QStringLiteral("***both***"), 5, 5);
+    const QJsonObject italicLayerOff = execute(QStringLiteral("toggleItalic"));
+    addCheck(checks, details, QStringLiteral("boldItalicLayersToggleIndependently"),
+             boldLayerOff.value(QStringLiteral("text")).toString() == QStringLiteral("*both*")
+                 && italicLayerOff.value(QStringLiteral("text")).toString()
+                    == QStringLiteral("**both**"),
+             QJsonObject{{QStringLiteral("boldOff"), boldLayerOff},
+                         {QStringLiteral("italicOff"), italicLayerOff}});
+
+    const QString crossingBoldText = QStringLiteral("pre **bold** tail");
+    setTextAndSelection(crossingBoldText, 0, 12);
+    const QJsonObject crossingSameFormat = execute(QStringLiteral("toggleBold"));
+    setTextAndSelection(crossingBoldText, 0, 12);
+    const QJsonObject crossingDifferentFormat = execute(QStringLiteral("toggleItalic"));
+    setTextAndSelection(QStringLiteral("**bold**"), 2, 6);
+    const QJsonObject nestedDifferentFormat = execute(QStringLiteral("toggleItalic"));
+    addCheck(checks, details, QStringLiteral("crossingSelectionRespectsMarkerType"),
+             crossingSameFormat.value(QStringLiteral("text")).toString()
+                    == QStringLiteral("**pre bold** tail")
+                 && crossingDifferentFormat.value(QStringLiteral("text")).toString()
+                    == QStringLiteral("*pre **bold*** tail")
+                 && nestedDifferentFormat.value(QStringLiteral("text")).toString()
+                    == QStringLiteral("***bold***"),
+             QJsonObject{{QStringLiteral("same"), crossingSameFormat},
+                         {QStringLiteral("different"), crossingDifferentFormat},
+                         {QStringLiteral("nested"), nestedDifferentFormat}});
+
+    const QString crossingCodeText = QStringLiteral("pre `code` tail");
+    setTextAndSelection(crossingCodeText, 0, 10);
+    const QJsonObject crossingSameCode = execute(QStringLiteral("wrapCode"));
+    setTextAndSelection(crossingCodeText, 0, 10);
+    const QJsonObject crossingCodeWithBold = execute(QStringLiteral("toggleBold"));
+    setTextAndSelection(crossingBoldText, 0, 12);
+    const QJsonObject crossingBoldWithCode = execute(QStringLiteral("wrapCode"));
+    setTextAndSelection(QStringLiteral("`code`"), 1, 5);
+    const QJsonObject nestedBoldInCode = execute(QStringLiteral("toggleBold"));
+    addCheck(checks, details, QStringLiteral("inlineCodeComposesWithOtherMarkers"),
+             crossingSameCode.value(QStringLiteral("text")).toString()
+                    == QStringLiteral("`pre code` tail")
+                 && crossingCodeWithBold.value(QStringLiteral("text")).toString()
+                    == QStringLiteral("**pre `code`** tail")
+                 && crossingBoldWithCode.value(QStringLiteral("text")).toString()
+                    == QStringLiteral("`pre **bold**` tail")
+                 && nestedBoldInCode.value(QStringLiteral("text")).toString()
+                    == QStringLiteral("`**code**`"),
+             QJsonObject{{QStringLiteral("sameCode"), crossingSameCode},
+                         {QStringLiteral("codeWithBold"), crossingCodeWithBold},
+                         {QStringLiteral("boldWithCode"), crossingBoldWithCode},
+                         {QStringLiteral("nestedBold"), nestedBoldInCode}});
+
     setTextAndSelection(QStringLiteral("one\ntwo"), 0, 7);
     execute(QStringLiteral("cycleHeading"));
     const bool headingOne = editorText() == QStringLiteral("# one\n# two");
@@ -249,6 +342,22 @@ int main(int argc, char *argv[])
              allDirectHeadingLevels && headingThree && headingIncreased
                  && editorText() == QStringLiteral("### one\n### two"));
 
+    setTextAndSelection(QStringLiteral("plain"), 2, 2);
+    const QJsonObject collapsedDirectHeading = execute(QStringLiteral("setHeading2"));
+    setTextAndSelection(QStringLiteral("# plain"), 5, 5);
+    const QJsonObject collapsedCycledHeading = execute(QStringLiteral("cycleHeading"));
+    addCheck(checks, details, QStringLiteral("headingCommandsDoNotSelectCurrentLine"),
+             collapsedDirectHeading.value(QStringLiteral("text")).toString()
+                    == QStringLiteral("## plain")
+                 && collapsedDirectHeading.value(QStringLiteral("selectionStart")).toInt() == 5
+                 && collapsedDirectHeading.value(QStringLiteral("selectionEnd")).toInt() == 5
+                 && collapsedCycledHeading.value(QStringLiteral("text")).toString()
+                    == QStringLiteral("## plain")
+                 && collapsedCycledHeading.value(QStringLiteral("selectionStart")).toInt() == 6
+                 && collapsedCycledHeading.value(QStringLiteral("selectionEnd")).toInt() == 6,
+             QJsonObject{{QStringLiteral("direct"), collapsedDirectHeading},
+                         {QStringLiteral("cycle"), collapsedCycledHeading}});
+
     setTextAndSelection(QStringLiteral("one\ntwo"), 0, 7);
     execute(QStringLiteral("toggleList"));
     const bool listOn = editorText() == QStringLiteral("- one\n- two");
@@ -262,6 +371,36 @@ int main(int argc, char *argv[])
     const QJsonObject taskOff = execute(QStringLiteral("toggleTask"));
     addCheck(checks, details, QStringLiteral("toggleTask"),
              taskOn && editorText() == QStringLiteral("one\ntwo"), taskOff);
+
+    setTextAndSelection(QStringLiteral("note"), 2, 2);
+    const QJsonObject convertedCheckbox = execute(QStringLiteral("toggleCheckbox"));
+    const QJsonObject checkedCheckbox = execute(QStringLiteral("toggleCheckbox"));
+    const QJsonObject uncheckedCheckbox = execute(QStringLiteral("toggleCheckbox"));
+    setTextAndSelection(QStringLiteral("> - [x] done"), 12, 12);
+    const QJsonObject uncheckedQuotedCheckbox = execute(QStringLiteral("toggleCheckbox"));
+    setTextAndSelection(QStringLiteral("  > > todo"), 10, 10);
+    const QJsonObject convertedQuotedCheckbox = execute(QStringLiteral("toggleCheckbox"));
+    setTextAndSelection(QStringLiteral("3. item"), 7, 7);
+    const QJsonObject convertedOrderedCheckbox = execute(QStringLiteral("toggleCheckbox"));
+    addCheck(checks, details, QStringLiteral("toggleCurrentLineCheckbox"),
+             convertedCheckbox.value(QStringLiteral("text")).toString()
+                    == QStringLiteral("- [ ] note")
+                 && convertedCheckbox.value(QStringLiteral("cursorPosition")).toInt() == 8
+                 && checkedCheckbox.value(QStringLiteral("text")).toString()
+                    == QStringLiteral("- [x] note")
+                 && uncheckedCheckbox.value(QStringLiteral("text")).toString()
+                    == QStringLiteral("- [ ] note")
+                 && uncheckedQuotedCheckbox.value(QStringLiteral("text")).toString()
+                    == QStringLiteral("> - [ ] done")
+                 && convertedQuotedCheckbox.value(QStringLiteral("text")).toString()
+                    == QStringLiteral("  > > - [ ] todo")
+                 && convertedOrderedCheckbox.value(QStringLiteral("text")).toString()
+                    == QStringLiteral("3. [ ] item"),
+             QJsonObject{{QStringLiteral("converted"), convertedCheckbox},
+                         {QStringLiteral("checked"), checkedCheckbox},
+                         {QStringLiteral("quoted"), uncheckedQuotedCheckbox},
+                         {QStringLiteral("quotedPlain"), convertedQuotedCheckbox},
+                         {QStringLiteral("ordered"), convertedOrderedCheckbox}});
 
     setTextAndSelection(QStringLiteral("one\ntwo"), 0, 7);
     execute(QStringLiteral("toggleQuote"));
@@ -336,6 +475,123 @@ int main(int argc, char *argv[])
                  && fencedCode.value(QStringLiteral("cursorPosition")).toInt() == 3,
              fencedCode);
 
+    setTextAndSelection(QStringLiteral("**"), 1, 1);
+    const QJsonObject deletedItalicPair = keyPress({}, QStringLiteral("Backspace"));
+    setTextAndSelection(QStringLiteral("****"), 2, 2);
+    const QJsonObject deletedBoldPair = keyPress({}, QStringLiteral("Backspace"));
+    setTextAndSelection(QStringLiteral("``"), 1, 1);
+    const QJsonObject deletedCodePair = keyPress({}, QStringLiteral("Backspace"));
+    setTextAndSelection(QStringLiteral("```\n```"), 3, 3);
+    const QJsonObject deletedFencePair = keyPress({}, QStringLiteral("Backspace"));
+    setTextAndSelection(QStringLiteral("()"), 1, 1);
+    const QJsonObject unchangedBracketBackspace = keyPress({}, QStringLiteral("Backspace"));
+    addCheck(checks, details, QStringLiteral("backspaceDeletesEmptyMarkdownPairs"),
+             deletedItalicPair.value(QStringLiteral("text")).toString().isEmpty()
+                 && deletedBoldPair.value(QStringLiteral("text")).toString().isEmpty()
+                 && deletedCodePair.value(QStringLiteral("text")).toString().isEmpty()
+                 && deletedFencePair.value(QStringLiteral("text")).toString().isEmpty()
+                 && unchangedBracketBackspace.value(QStringLiteral("text")).toString()
+                    == QStringLiteral(")"),
+             QJsonObject{{QStringLiteral("italic"), deletedItalicPair},
+                         {QStringLiteral("bold"), deletedBoldPair},
+                         {QStringLiteral("code"), deletedCodePair},
+                         {QStringLiteral("fence"), deletedFencePair},
+                         {QStringLiteral("bracket"), unchangedBracketBackspace}});
+
+    setTextAndSelection(QString(), 0, 0);
+    const QJsonObject autoListSpace = keyPress(QStringLiteral("-"));
+    setTextAndSelection(QStringLiteral("……"), 2, 2);
+    const QJsonObject deletedEllipsis = keyPress({}, QStringLiteral("Backspace"));
+    setTextAndSelection(QStringLiteral("——"), 2, 2);
+    const QJsonObject deletedDash = keyPress({}, QStringLiteral("Backspace"));
+    addCheck(checks, details, QStringLiteral("lineDashAndWholePunctuationRules"),
+             autoListSpace.value(QStringLiteral("text")).toString() == QStringLiteral("- ")
+                 && autoListSpace.value(QStringLiteral("cursorPosition")).toInt() == 2
+                 && deletedEllipsis.value(QStringLiteral("text")).toString().isEmpty()
+                 && deletedDash.value(QStringLiteral("text")).toString().isEmpty(),
+             QJsonObject{{QStringLiteral("list"), autoListSpace},
+                         {QStringLiteral("ellipsis"), deletedEllipsis},
+                         {QStringLiteral("dash"), deletedDash}});
+
+    setTextAndSelection(QStringLiteral("- one"), 5, 5);
+    const QJsonObject continuedBullet = keyPress({}, QStringLiteral("Enter"));
+    const QJsonObject exitedBullet = keyPress({}, QStringLiteral("Enter"));
+    setTextAndSelection(QStringLiteral("- [x] done"), 10, 10);
+    const QJsonObject continuedTask = keyPress({}, QStringLiteral("Enter"));
+    setTextAndSelection(QStringLiteral("3) item"), 7, 7);
+    const QJsonObject continuedParenthesizedNumber = keyPress({}, QStringLiteral("Enter"));
+    addCheck(checks, details, QStringLiteral("enterContinuesListsAndTasks"),
+             continuedBullet.value(QStringLiteral("text")).toString()
+                    == QStringLiteral("- one\n- ")
+                 && continuedBullet.value(QStringLiteral("cursorPosition")).toInt() == 8
+                 && exitedBullet.value(QStringLiteral("text")).toString()
+                    == QStringLiteral("- one\n")
+                 && exitedBullet.value(QStringLiteral("cursorPosition")).toInt() == 6
+                 && continuedTask.value(QStringLiteral("text")).toString()
+                    == QStringLiteral("- [x] done\n- [ ] ")
+                 && continuedTask.value(QStringLiteral("cursorPosition")).toInt() == 17
+                 && continuedParenthesizedNumber.value(QStringLiteral("text")).toString()
+                    == QStringLiteral("3) item\n4) "),
+             QJsonObject{{QStringLiteral("bullet"), continuedBullet},
+                         {QStringLiteral("exit"), exitedBullet},
+                         {QStringLiteral("task"), continuedTask},
+                         {QStringLiteral("parenthesized"), continuedParenthesizedNumber}});
+
+    const QString orderedList = QStringLiteral("1. one\n2. two\n3. three");
+    setTextAndSelection(orderedList, 6, 6);
+    const QJsonObject insertedOrderedItem = keyPress({}, QStringLiteral("Enter"));
+    const QString nestedOrderedList = QStringLiteral("1. one\n    1. child\n2. two");
+    setTextAndSelection(nestedOrderedList, 6, 6);
+    const QJsonObject insertedBeforeNestedItem = keyPress({}, QStringLiteral("Enter"));
+    addCheck(checks, details, QStringLiteral("orderedListNumbersStaySequential"),
+             insertedOrderedItem.value(QStringLiteral("text")).toString()
+                    == QStringLiteral("1. one\n2. \n3. two\n4. three")
+                 && insertedOrderedItem.value(QStringLiteral("cursorPosition")).toInt() == 10
+                 && insertedBeforeNestedItem.value(QStringLiteral("text")).toString()
+                    == QStringLiteral("1. one\n2. \n    1. child\n3. two")
+                 && insertedBeforeNestedItem.value(QStringLiteral("cursorPosition")).toInt()
+                    == 10,
+             QJsonObject{{QStringLiteral("flat"), insertedOrderedItem},
+                         {QStringLiteral("nested"), insertedBeforeNestedItem}});
+
+    setTextAndSelection(QStringLiteral("- aaa\n- bbb\n- \n- ddd"), 14, 14);
+    const QJsonObject backspaceEmptyBullet = keyPress({}, QStringLiteral("Backspace"));
+    setTextAndSelection(QStringLiteral("- aaa\n- bbb\n- \n- ddd"), 14, 14);
+    const QJsonObject enterEmptyBullet = keyPress({}, QStringLiteral("Enter"));
+    setTextAndSelection(QStringLiteral("1. aaa\n2. bbb\n3. \n4. ddd"), 17, 17);
+    const QJsonObject backspaceEmptyOrdered = keyPress({}, QStringLiteral("Backspace"));
+    setTextAndSelection(QStringLiteral("- \n- ddd"), 2, 2);
+    const QJsonObject backspaceFirstEmptyItem = keyPress({}, QStringLiteral("Backspace"));
+    addCheck(checks, details, QStringLiteral("emptyListEnterAndBackspaceDiffer"),
+             backspaceEmptyBullet.value(QStringLiteral("text")).toString()
+                    == QStringLiteral("- aaa\n- bbb\n- ddd")
+                 && backspaceEmptyBullet.value(QStringLiteral("cursorPosition")).toInt() == 11
+                 && enterEmptyBullet.value(QStringLiteral("text")).toString()
+                    == QStringLiteral("- aaa\n- bbb\n\n- ddd")
+                 && enterEmptyBullet.value(QStringLiteral("cursorPosition")).toInt() == 12
+                 && backspaceEmptyOrdered.value(QStringLiteral("text")).toString()
+                    == QStringLiteral("1. aaa\n2. bbb\n3. ddd")
+                 && backspaceEmptyOrdered.value(QStringLiteral("cursorPosition")).toInt() == 13
+                 && backspaceFirstEmptyItem.value(QStringLiteral("text")).toString()
+                    == QStringLiteral("- ddd")
+                 && backspaceFirstEmptyItem.value(QStringLiteral("cursorPosition")).toInt() == 0,
+             QJsonObject{{QStringLiteral("backspaceBullet"), backspaceEmptyBullet},
+                         {QStringLiteral("enterBullet"), enterEmptyBullet},
+                         {QStringLiteral("backspaceOrdered"), backspaceEmptyOrdered},
+                         {QStringLiteral("backspaceFirst"), backspaceFirstEmptyItem}});
+
+    setTextAndSelection(QStringLiteral("- item"), 6, 6);
+    const QJsonObject softListBreak = keyPress({}, QStringLiteral("Enter"), true);
+    setTextAndSelection(QStringLiteral("```\n- code\n```"), 10, 10);
+    const QJsonObject fencedListBreak = keyPress({}, QStringLiteral("Enter"));
+    addCheck(checks, details, QStringLiteral("listContinuationRespectsSoftBreakAndFences"),
+             softListBreak.value(QStringLiteral("text")).toString()
+                    == QStringLiteral("- item\n")
+                 && fencedListBreak.value(QStringLiteral("text")).toString()
+                    == QStringLiteral("```\n- code\n\n```"),
+             QJsonObject{{QStringLiteral("softBreak"), softListBreak},
+                         {QStringLiteral("fence"), fencedListBreak}});
+
     setTextAndSelection(QStringLiteral("***bold italic***"), 8, 8);
     const QJsonObject boldItalicTab = keyPress({}, QStringLiteral("Tab"));
     addCheck(checks, details, QStringLiteral("tabOutOfMarkdownEmphasis"),
@@ -375,6 +631,28 @@ int main(int argc, char *argv[])
                  && tabAfterClosedBold.value(QStringLiteral("cursorPosition")).toInt()
                     == firstLineEnd + 4,
              tabAfterClosedBold);
+
+    const QString verticalBoundaryText = QStringLiteral("first line\nlast line");
+    setTextAndSelection(verticalBoundaryText, 14, 14);
+    const QJsonObject downAtLastLine = keyPress({}, QStringLiteral("Down"));
+    setTextAndSelection(verticalBoundaryText, 3, 3);
+    const QJsonObject upAtFirstLine = keyPress({}, QStringLiteral("Up"));
+    setTextAndSelection(verticalBoundaryText, 3, 3);
+    const QJsonObject downAcrossLines = keyPress({}, QStringLiteral("Down"));
+    const QJsonObject upAcrossLines = keyPress({}, QStringLiteral("Up"));
+    addCheck(checks, details, QStringLiteral("verticalArrowMovesAtDocumentBoundary"),
+             downAtLastLine.value(QStringLiteral("cursorPosition")).toInt()
+                    == verticalBoundaryText.size()
+                 && upAtFirstLine.value(QStringLiteral("cursorPosition")).toInt() == 0
+                 && downAcrossLines.value(QStringLiteral("cursorPosition")).toInt()
+                    > verticalBoundaryText.indexOf(QLatin1Char('\n'))
+                 && downAcrossLines.value(QStringLiteral("cursorPosition")).toInt()
+                    < verticalBoundaryText.size()
+                 && upAcrossLines.value(QStringLiteral("cursorPosition")).toInt() == 3,
+             QJsonObject{{QStringLiteral("down"), downAtLastLine},
+                         {QStringLiteral("up"), upAtFirstLine},
+                         {QStringLiteral("downAcrossLines"), downAcrossLines},
+                         {QStringLiteral("upAcrossLines"), upAcrossLines}});
 
     setTextAndSelection(QStringLiteral("code"), 0, 4);
     execute(QStringLiteral("wrapCode"));
@@ -442,6 +720,9 @@ int main(int argc, char *argv[])
     const QJsonObject deleteLineShortcut = request(
         QStringLiteral("testShortcut"),
         {{QStringLiteral("commandId"), QStringLiteral("deleteLine")}});
+    const QJsonObject checkboxShortcut = request(
+        QStringLiteral("testShortcut"),
+        {{QStringLiteral("commandId"), QStringLiteral("toggleCheckbox")}});
     const QJsonObject oldHeadingShortcut = request(
         QStringLiteral("testShortcut"),
         {{QStringLiteral("commandId"), QStringLiteral("cycleHeading")}});
@@ -467,6 +748,8 @@ int main(int argc, char *argv[])
     addCheck(checks, details, QStringLiteral("newDefaultShortcuts"),
              deleteLineShortcut.value(QStringLiteral("shortcut")).toString()
                     == QStringLiteral("Ctrl+Shift+L")
+                 && checkboxShortcut.value(QStringLiteral("shortcut")).toString()
+                    == QStringLiteral("Ctrl+L")
                  && oldHeadingShortcut.value(QStringLiteral("shortcut")).toString().isEmpty()
                  && allHeadingShortcuts
                  && headingOneShortcut.value(QStringLiteral("shortcut")).toString()

@@ -49,9 +49,12 @@ private:
     bool wrapSelection(const QString &opening, const QString &closing);
     bool transformSelectedLines(const QString &commandId);
     bool deleteSelectedLines();
+    bool toggleCurrentCheckbox();
     bool handleTypedText(const QString &text);
     bool insertPair(const QString &opening, const QString &closing);
     bool insertFenceBlock();
+    bool handleSpecialBackspace();
+    bool handleListEnter();
     bool jumpOutOfPair();
     bool changeIndent(bool outdent);
     void completeInputMethodCommit(const QString &committedText, const QString &beforeText,

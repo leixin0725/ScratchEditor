@@ -580,6 +580,14 @@ void EditorController::dispatchCommand(QLocalSocket *socket, const QJsonObject &
         int key = Qt::Key_unknown;
         if (keyName == QStringLiteral("Tab")) {
             key = shift ? Qt::Key_Backtab : Qt::Key_Tab;
+        } else if (keyName == QStringLiteral("Down")) {
+            key = Qt::Key_Down;
+        } else if (keyName == QStringLiteral("Up")) {
+            key = Qt::Key_Up;
+        } else if (keyName == QStringLiteral("Backspace")) {
+            key = Qt::Key_Backspace;
+        } else if (keyName == QStringLiteral("Enter")) {
+            key = Qt::Key_Return;
         } else if (!text.isEmpty()) {
             key = text.front().unicode();
         }
