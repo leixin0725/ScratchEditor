@@ -18,15 +18,17 @@
 #include <QLocalSocket>
 #include <QMetaObject>
 #include <QMutexLocker>
-#include <QPropertyAnimation>
+#include <QParallelAnimationGroup>
 #include <QQuickWindow>
 #include <QQuickTextDocument>
 #include <QScreen>
+#include <QSignalBlocker>
 #include <QThread>
 #include <QTimer>
 #include <QTextDocument>
 #include <QTextBlock>
 #include <QTextLayout>
+#include <QVariantAnimation>
 #include <QtMath>
 
 #include <algorithm>
@@ -208,8 +210,24 @@ void EditorController::registerWindow(QQuickWindow *window)
 {
     m_window = window;
     if (m_window) {
-        m_windowOpacityAnimation = new QPropertyAnimation(m_window, "opacity", this);
-        connect(m_windowOpacityAnimation, &QPropertyAnimation::finished, this, [this] {
+        m_windowTransitionGroup = new QParallelAnimationGroup(this);
+        m_windowOpacityAnimation = new QVariantAnimation;
+        m_windowGeometryAnimation = new QVariantAnimation;
+        connect(m_windowOpacityAnimation, &QVariantAnimation::valueChanged, this,
+                [this](const QVariant &value) {
+                    if (m_window) {
+                        m_window->setOpacity(value.toDouble());
+                    }
+                });
+        connect(m_windowGeometryAnimation, &QVariantAnimation::valueChanged, this,
+                [this](const QVariant &value) {
+                    if (m_window) {
+                        m_window->setGeometry(value.toRect());
+                    }
+                });
+        m_windowTransitionGroup->addAnimation(m_windowOpacityAnimation);
+        m_windowTransitionGroup->addAnimation(m_windowGeometryAnimation);
+        connect(m_windowTransitionGroup, &QParallelAnimationGroup::finished, this, [this] {
             if (m_hideWhenAnimationFinishes && m_hiding) {
                 finishWindowHide();
             }
@@ -659,6 +677,7 @@ void EditorController::dispatchCommand(QLocalSocket *socket, const QJsonObject &
                               request.value(QStringLiteral("width")).toInt(),
                               request.value(QStringLiteral("height")).toInt());
         m_window->setGeometry(validatedWindowGeometry(requested));
+        m_windowRestingGeometry = m_window->geometry();
         m_positioned = true;
         QJsonObject response = statusObject();
         response.insert(QStringLiteral("command"), command);
@@ -667,6 +686,7 @@ void EditorController::dispatchCommand(QLocalSocket *socket, const QJsonObject &
         m_settings->resetAll();
         resetShortcuts();
         reloadAppearance();
+        m_windowRestingGeometry = {};
         m_positioned = false;
         QJsonObject response = statusObject();
         response.insert(QStringLiteral("command"), command);
@@ -817,22 +837,30 @@ void EditorController::showEditor()
                 available.y() + (available.height() - m_window->height()) / 2);
         }
         m_positioned = true;
+        m_windowRestingGeometry = m_window->geometry();
     }
 
     const bool wasNativeVisible = m_window->isVisible();
-    if (m_windowOpacityAnimation) {
-        m_windowOpacityAnimation->stop();
+    const QRect restingGeometry = m_windowRestingGeometry.isValid()
+        ? m_windowRestingGeometry
+        : m_window->geometry();
+    if (m_windowTransitionGroup) {
+        m_windowTransitionGroup->stop();
     }
     m_hideWhenAnimationFinishes = false;
     m_hiding = false;
+    m_windowRestingGeometry = restingGeometry;
     if (!wasNativeVisible) {
         m_window->setOpacity(m_animationsEnabled ? 0.0 : 1.0);
+        m_window->setGeometry(m_animationsEnabled
+                                  ? scaledWindowGeometry(restingGeometry)
+                                  : restingGeometry);
     }
     m_window->show();
     m_window->raise();
     m_window->requestActivate();
     emit visibleChanged();
-    startWindowOpacityAnimation(1.0, false);
+    startWindowTransition(1.0, restingGeometry, false);
 
     QTimer::singleShot(0, this, [this] {
         if (!m_window || !m_editor || !m_window->isVisible()) {
@@ -883,16 +911,22 @@ bool EditorController::commitAndHide()
         }
     }
     setClipboardState(true);
+    const bool transitionRunning = m_windowTransitionGroup
+        && m_windowTransitionGroup->state() == QAbstractAnimation::Running;
+    if (!transitionRunning || !m_windowRestingGeometry.isValid()) {
+        m_windowRestingGeometry = m_window->geometry();
+    }
     saveWindowGeometry();
     if (m_animationsEnabled) {
         m_hiding = true;
         emit visibleChanged();
-        startWindowOpacityAnimation(0.0, true);
+        startWindowTransition(0.0, scaledWindowGeometry(m_windowRestingGeometry), true);
         return true;
     }
 
     m_window->hide();
     m_window->setOpacity(1.0);
+    m_window->setGeometry(m_windowRestingGeometry);
     emit visibleChanged();
     const quint64 focusGeneration = ++m_focusGeneration;
     QTimer::singleShot(0, this, [this, focusGeneration] {
@@ -903,28 +937,54 @@ bool EditorController::commitAndHide()
     return true;
 }
 
-void EditorController::startWindowOpacityAnimation(qreal targetOpacity, bool hideWhenFinished)
+void EditorController::startWindowTransition(qreal targetOpacity, const QRect &targetGeometry,
+                                             bool hideWhenFinished)
 {
     if (!m_window) {
         return;
     }
 
     m_hideWhenAnimationFinishes = hideWhenFinished;
-    if (!m_animationsEnabled || !m_windowOpacityAnimation) {
+    if (!m_animationsEnabled || !m_windowTransitionGroup || !m_windowOpacityAnimation
+        || !m_windowGeometryAnimation) {
         m_window->setOpacity(targetOpacity);
+        m_window->setGeometry(targetGeometry);
         if (hideWhenFinished) {
             finishWindowHide();
         }
         return;
     }
 
-    m_windowOpacityAnimation->stop();
-    m_windowOpacityAnimation->setDuration(120);
-    m_windowOpacityAnimation->setStartValue(m_window->opacity());
-    m_windowOpacityAnimation->setEndValue(targetOpacity);
-    m_windowOpacityAnimation->setEasingCurve(hideWhenFinished ? QEasingCurve::InCubic
-                                                              : QEasingCurve::OutCubic);
-    m_windowOpacityAnimation->start();
+    const qreal startOpacity = m_window->opacity();
+    const QRect startGeometry = m_window->geometry();
+    m_windowTransitionGroup->stop();
+    {
+        // A completed QVariantAnimation remains at its end time. Reconfiguring
+        // its end value in that state emits valueChanged immediately, which
+        // used to apply the next transition's target geometry for one frame
+        // before start() reset the timeline to zero. Block both animations
+        // while rewinding and replacing their endpoints.
+        const QSignalBlocker opacityBlocker(m_windowOpacityAnimation);
+        const QSignalBlocker geometryBlocker(m_windowGeometryAnimation);
+        m_windowTransitionGroup->setCurrentTime(0);
+        m_windowOpacityAnimation->setDuration(120);
+        m_windowOpacityAnimation->setStartValue(startOpacity);
+        m_windowOpacityAnimation->setEndValue(targetOpacity);
+        m_windowOpacityAnimation->setEasingCurve(hideWhenFinished ? QEasingCurve::InCubic
+                                                                  : QEasingCurve::OutCubic);
+        m_windowGeometryAnimation->setDuration(120);
+        m_windowGeometryAnimation->setStartValue(startGeometry);
+        m_windowGeometryAnimation->setEndValue(targetGeometry);
+        m_windowGeometryAnimation->setEasingCurve(hideWhenFinished ? QEasingCurve::InCubic
+                                                                   : QEasingCurve::OutCubic);
+    }
+    m_windowTransitionPreparationStable = m_windowTransitionPreparationStable
+        && qAbs(m_window->opacity() - startOpacity) <= 0.0001
+        && m_window->geometry() == startGeometry;
+    // Preserve the exact captured state across animation reconfiguration.
+    m_window->setOpacity(startOpacity);
+    m_window->setGeometry(startGeometry);
+    m_windowTransitionGroup->start();
 }
 
 void EditorController::finishWindowHide()
@@ -933,12 +993,21 @@ void EditorController::finishWindowHide()
         return;
     }
 
-    if (m_windowOpacityAnimation) {
-        m_windowOpacityAnimation->stop();
+    if (m_windowTransitionGroup) {
+        m_windowTransitionGroup->stop();
     }
     m_hideWhenAnimationFinishes = false;
+    // Commit the fully transparent frame before unmapping the native window.
+    // Without this compositor barrier, DWM can replay the last full-size Qt
+    // Quick surface while processing ShowWindow(SW_HIDE), producing a visible
+    // one-frame expansion even though QWindow::geometry() never rebounds.
+    m_window->setOpacity(0.0);
+#ifdef Q_OS_WIN
+    DwmFlush();
+#endif
     m_window->hide();
-    m_window->setOpacity(1.0);
+    // Keep the final shrunken geometry while hidden. showEditor() restores the
+    // logical resting geometry as part of the next opening animation.
     m_hiding = false;
 
     const quint64 focusGeneration = ++m_focusGeneration;
@@ -947,6 +1016,22 @@ void EditorController::finishWindowHide()
             restorePreviousFocus();
         }
     });
+}
+
+QRect EditorController::scaledWindowGeometry(const QRect &restingGeometry) const
+{
+    if (!restingGeometry.isValid()) {
+        return restingGeometry;
+    }
+
+    constexpr qreal shapeScale = 0.98;
+    const int minimumWidth = m_window ? m_window->minimumWidth() : 1;
+    const int minimumHeight = m_window ? m_window->minimumHeight() : 1;
+    const QSize scaledSize(qMax(minimumWidth, qRound(restingGeometry.width() * shapeScale)),
+                           qMax(minimumHeight, qRound(restingGeometry.height() * shapeScale)));
+    QRect scaled(QPoint(), scaledSize);
+    scaled.moveCenter(restingGeometry.center());
+    return scaled;
 }
 
 void EditorController::shutdown()
@@ -1148,7 +1233,12 @@ void EditorController::saveWindowGeometry()
     if (!m_window || !m_settings || !m_positioned) {
         return;
     }
-    m_settings->setWindowGeometry(m_window->geometry());
+    const bool transitionRunning = m_windowTransitionGroup
+        && m_windowTransitionGroup->state() == QAbstractAnimation::Running;
+    const bool useRestingGeometry = m_windowRestingGeometry.isValid()
+        && (transitionRunning || m_hiding || !m_window->isVisible());
+    m_settings->setWindowGeometry(useRestingGeometry ? m_windowRestingGeometry
+                                                     : m_window->geometry());
 }
 
 void EditorController::restorePreviousFocus()
@@ -1245,8 +1335,13 @@ QJsonObject EditorController::statusObject() const
                       m_window->property("edgeDragEnabled").toBool());
         status.insert(QStringLiteral("windowOpacity"), m_window->opacity());
         status.insert(QStringLiteral("windowTransitionActive"),
-                      m_windowOpacityAnimation
-                          && m_windowOpacityAnimation->state() == QAbstractAnimation::Running);
+                      m_windowTransitionGroup
+                          && m_windowTransitionGroup->state() == QAbstractAnimation::Running);
+        status.insert(QStringLiteral("windowShapeAnimationEnabled"), m_animationsEnabled);
+        status.insert(QStringLiteral("windowTransitionPreparationStable"),
+                      m_windowTransitionPreparationStable);
+        status.insert(QStringLiteral("windowRestingWidth"), m_windowRestingGeometry.width());
+        status.insert(QStringLiteral("windowRestingHeight"), m_windowRestingGeometry.height());
 #ifdef Q_OS_WIN
         status.insert(QStringLiteral("hwnd"),
                       QString::number(reinterpret_cast<quintptr>(m_window->winId())));

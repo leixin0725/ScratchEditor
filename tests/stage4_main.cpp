@@ -5,6 +5,7 @@
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QLocalSocket>
+#include <QThread>
 
 namespace {
 
@@ -104,11 +105,66 @@ int main(int argc, char *argv[])
     addCheck(checks, details, QStringLiteral("windowInteractionLayout"),
              initial.value(QStringLiteral("cornerResizeEnabled")).toBool()
                  && initial.value(QStringLiteral("edgeDragEnabled")).toBool()
+                 && initial.value(QStringLiteral("windowShapeAnimationEnabled")).toBool()
                  && initial.value(QStringLiteral("resizeMargin")).toInt() >= 8
                  && initial.value(QStringLiteral("edgeDragWidth")).toInt() > 0
                  && initial.value(QStringLiteral("themeEditorSurfaceColor")).toString()
                     != initial.value(QStringLiteral("themeBackgroundColor")).toString(),
              initial);
+
+    constexpr int animationStressRounds = 20;
+    bool closingShapeStable = true;
+    QJsonObject hiddenWindow;
+    QJsonObject parkedWindow;
+    QJsonObject reopenedWindow;
+    for (int round = 0; round < animationStressRounds; ++round) {
+        const QJsonObject opening = request(QStringLiteral("show"));
+        QThread::msleep(180);
+        const QJsonObject openedWindow = request(QStringLiteral("status"));
+        const QJsonObject closing = request(QStringLiteral("hide"));
+        QThread::msleep(180);
+        hiddenWindow = request(QStringLiteral("status"));
+        QThread::msleep(100);
+        parkedWindow = request(QStringLiteral("status"));
+        request(QStringLiteral("show"));
+        QThread::msleep(180);
+        reopenedWindow = request(QStringLiteral("status"));
+
+        closingShapeStable = closingShapeStable
+            && opening.value(QStringLiteral("visible")).toBool()
+            && openedWindow.value(QStringLiteral("visible")).toBool()
+            && !closing.value(QStringLiteral("visible")).toBool()
+            && !hiddenWindow.value(QStringLiteral("visible")).toBool()
+            && !hiddenWindow.value(QStringLiteral("windowTransitionActive")).toBool()
+            && hiddenWindow.value(QStringLiteral("windowOpacity")).toDouble() <= 0.001
+            && hiddenWindow.value(QStringLiteral("width")).toInt()
+                < hiddenWindow.value(QStringLiteral("windowRestingWidth")).toInt()
+            && hiddenWindow.value(QStringLiteral("height")).toInt()
+                < hiddenWindow.value(QStringLiteral("windowRestingHeight")).toInt()
+            && parkedWindow.value(QStringLiteral("x")).toInt()
+                == hiddenWindow.value(QStringLiteral("x")).toInt()
+            && parkedWindow.value(QStringLiteral("y")).toInt()
+                == hiddenWindow.value(QStringLiteral("y")).toInt()
+            && parkedWindow.value(QStringLiteral("width")).toInt()
+                == hiddenWindow.value(QStringLiteral("width")).toInt()
+            && parkedWindow.value(QStringLiteral("height")).toInt()
+                == hiddenWindow.value(QStringLiteral("height")).toInt()
+            && reopenedWindow.value(QStringLiteral("visible")).toBool()
+            && reopenedWindow.value(QStringLiteral("width")).toInt()
+                == reopenedWindow.value(QStringLiteral("windowRestingWidth")).toInt()
+            && reopenedWindow.value(QStringLiteral("height")).toInt()
+                == reopenedWindow.value(QStringLiteral("windowRestingHeight")).toInt()
+            && reopenedWindow.value(QStringLiteral("windowOpacity")).toDouble() >= 0.999
+            && reopenedWindow.value(
+                   QStringLiteral("windowTransitionPreparationStable")).toBool();
+    }
+    addCheck(checks, details, QStringLiteral("closingShapeDoesNotRebound"), closingShapeStable,
+             QJsonObject{{QStringLiteral("rounds"), animationStressRounds},
+                         {QStringLiteral("hidden"), hiddenWindow},
+                         {QStringLiteral("parked"), parkedWindow},
+                         {QStringLiteral("reopened"), reopenedWindow}});
+    request(QStringLiteral("hide"));
+    QThread::msleep(180);
 
     const QJsonObject opened = execute(QStringLiteral("settings"));
     addCheck(checks, details, QStringLiteral("lazySettingsPage"),
