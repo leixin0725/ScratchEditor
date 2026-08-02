@@ -67,7 +67,6 @@
 - 编辑文档：`QQuickTextDocument` / `QTextDocument`。
 - Markdown 源码编辑：纯文本 `TextArea` 或 `TextEdit`。
 - 语法着色：C++ `QSyntaxHighlighter`。
-- Markdown 预览：独立的只读 `TextEdit.MarkdownText` 或 `QTextDocument::setMarkdown()`。
 - 命令系统：C++ Command Registry，向 QML 暴露 `Action`。
 - 单实例与进程通信：`QLocalServer` / `QLocalSocket`。
 - 设置持久化：`QSettings` 或轻量 JSON。
@@ -98,24 +97,21 @@ Tauri 2 是最有竞争力的备选方案。它可以直接使用 CodeMirror 6�
 
 ### 5.2 Markdown 编辑方式
 
-不建议直接把 Markdown WYSIWYG 视图作为主要输入控件。Qt 文档指出，`MarkdownText` 可以渲染 Markdown，但不支持在 WYSIWYG 模式中直接输入 Markdown 标记后即时转换。
-
-推荐采用源码与预览分离的模型：
+不建议直接把 Markdown WYSIWYG 视图作为主要输入控件。按最终产品决定，编辑器只提供
+Markdown 源码编辑与原生语法高亮，不提供预览：
 
 ```text
 Markdown 纯文本源
        │
-       ├── 编辑区：PlainText + QSyntaxHighlighter
-       │
-       └── 预览区：MarkdownText / QTextDocument
+       └── 编辑区：PlainText + QSyntaxHighlighter
 ```
 
 这样可以保证：
 
 - 原始 Markdown 不会因富文本转换而发生不可控变化。
 - 快捷编辑命令可以直接处理选区和文本范围。
-- 预览区可以按需创建，不影响首次唤出速度。
-- 后续可以加入分栏预览、预览滚动同步或阅读模式。
+- 不引入额外渲染视图、浏览器内核或预览同步状态。
+- 首次唤出只需准备源码编辑界面。
 
 ## 6. 推荐架构
 
@@ -131,13 +127,13 @@ Markdown 纯文本源
 │ Qt/C++ 单实例常驻进程                    │
 ├─────────────────────────────────────────┤
 │ Application Core                        │
-│ 生命周期、剪贴板、设置、窗口状态、IPC    │
+│ 生命周期、剪贴板、设置、窗口状态/过渡、IPC │
 ├─────────────────────────────────────────┤
 │ Editor Core                             │
 │ 文档、撤销栈、选区、命令、Markdown 操作  │
 ├─────────────────────────────────────────┤
 │ QML UI                                  │
-│ 编辑器、标题栏、动画、命令面板、预览区   │
+│ 编辑器、标题栏、界面动效、命令面板、设置页 │
 └─────────────────────────────────────────┘
 ```
 
@@ -170,7 +166,6 @@ moveLineUp
 moveLineDown
 duplicateSelection
 openCommandPalette
-togglePreview
 ```
 
 每个命令应包含：
@@ -191,10 +186,10 @@ togglePreview
 - 使用 Qt 自带 Markdown 解析和文本布局。
 - 预编译 QML。
 - 启动时只创建标题栏和基础编辑器。
-- Markdown 预览、设置页和命令面板延迟创建。
-- 动画使用 `Animator`、`Behavior` 和 `Transition`，避免逐帧 JavaScript。
+- 设置页和命令面板延迟创建。
+- QML 界面动效使用 `Animator`、`Behavior` 和 `Transition`；窗口级透明度与几何过渡使用 Qt C++ 动画类，均避免逐帧 JavaScript。
 - 空闲时不运行高频定时器。
-- 文档解析采用增量或防抖策略，避免每次按键同步重建完整预览。
+- Markdown 高亮按文本块增量更新，避免每次按键同步重建整个文档格式。
 - 窗口关闭时隐藏并复用，不重复构造字体、文档和渲染树。
 
 ### 7.2 原型验收目标
@@ -214,6 +209,9 @@ togglePreview
 最终门槛应在实际目标电脑上测量。若 Qt 原型无法达到热唤出、输入延迟或内存目标，应先分析实现问题，再决定是否降低 UI 复杂度。
 
 ## 8. 分阶段迁移路线
+
+当前阶段 1–6 均已完成。以下内容保留各阶段的范围定义；实际验收结果见
+[`docs/README.md`](docs/README.md)。
 
 ### 阶段 0：冻结 AHK UI 功能范围
 
@@ -249,7 +247,7 @@ togglePreview
 - 加粗、斜体、标题、列表、任务、引用和代码块命令。
 - 搜索替换。
 - 命令面板。
-- 按需加载的 Markdown 预览。
+- 明确不提供 Markdown 预览。
 - 可配置快捷键。
 
 ### 阶段 4：扩展 UI，完善配置管理
@@ -265,9 +263,9 @@ togglePreview
 
 - 清理项目目录，集中留存测试文件，工作文档等，更新项目文档，初始化git仓库并提交。
 
-### 阶段 6（**需要等待批准后执行**）：移除 AHK 编辑器模块
+### 阶段 6：移除 AHK 编辑器模块（已完成）
 
-当 Qt 版本达到功能对等并稳定使用一段时间后：
+经用户明确批准并先创建同目录备份后：
 
 - 从 `KeysRedirect.ahk` 删除旧 GUI 实现。
 - 保留快捷键和 IPC 调用。
@@ -279,7 +277,7 @@ togglePreview
 
 - Qt Quick 外观需要自行设计，无法自动获得完全一致的 WinUI 3 控件表现。
 - 多光标、LSP 和完整插件系统不是 Qt 文本控件的开箱功能。
-- 大文档下的 Markdown 高亮与预览必须做增量处理。
+- 大文档下的 Markdown 高亮必须按文本块增量处理。
 - 发布前需要确认所选 Qt 版本、许可和链接方式满足分发要求。
 
 ### 何时改选 Tauri + CodeMirror 6
@@ -303,7 +301,7 @@ togglePreview
 
 当前决策为：
 
-> 使用 Qt 6 Quick/QML + C++ 构建独立的 `ScratchEditor.exe`；AHK 继续负责全局快捷键并通过本地 IPC 控制编辑器。编辑器采用纯 Markdown 源码模式、原生语法高亮和按需预览，不引入浏览器内核。
+> 使用 Qt 6 Quick/QML + C++ 构建独立的 `ScratchEditor.exe`；AHK 继续负责全局快捷键并通过本地 IPC 控制编辑器。编辑器采用纯 Markdown 源码模式和原生语法高亮，不提供 Markdown 预览，也不引入浏览器内核。
 
 这个方案并非拥有最完整的现成编辑器生态，但在当前三个优先级之间取得了最合适的平衡：
 
@@ -311,4 +309,5 @@ togglePreview
 2. C++ 原生进程和常驻窗口满足快速唤出与运行效率目标。
 3. Qt 文本系统足以支持当前规划的 Markdown、快捷键和快捷编辑功能。
 
-在正式迁移前，应先完成阶段 1 的垂直原型并以实测数据验证启动、内存、输入和动画表现。
+阶段 1 的垂直原型及后续全量回归已用实测数据验证启动、内存、输入和动画表现；
+最终状态与证据索引见 [`docs/README.md`](docs/README.md)。
