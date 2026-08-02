@@ -29,6 +29,10 @@
 - Qt 启动失败时剪贴板内容保持不变。
 - 隔离 `show` / `hide` / `quit` 持久 IPC 正常，用户进程不被中断。
 
+这里的 `quit` 是测试客户端通过命名管道发送的 JSON IPC 命令，只对 `--test-mode`
+实例开放；它不是 `ScratchEditor.exe --quit` 命令行参数。测试清理应记录并停止隔离 PID，
+或复用测试脚本中的 IPC 退出逻辑，不能向可执行文件传入 `--quit`。
+
 ## 推荐执行顺序
 
 1. `scripts/build.ps1 -Preset stage4`

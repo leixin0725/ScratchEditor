@@ -1,6 +1,6 @@
 # 临时编辑器迁移调查与技术建议
 
-更新日期：2026-08-01
+更新日期：2026-08-02
 
 ## 1. 文档目的
 
@@ -157,16 +157,23 @@ Markdown 纯文本源
 toggleBold
 toggleItalic
 cycleHeading
+setHeading1 ... setHeading6
+increaseHeadingLevel
+decreaseHeadingLevel
+deleteLine
+toggleList
 toggleTask
-continueList
-indentSelection
-outdentSelection
+toggleCheckbox
+toggleQuote
 wrapCode
-moveLineUp
-moveLineDown
-duplicateSelection
-openCommandPalette
+find
+replace
+commandPalette
+settings
 ```
+
+列表接续、空列表退出、Tab 缩进和 Shift+Tab 反缩进属于编辑器按键事件行为，不单独
+注册为命令。上述列表反映当前稳定命令 ID；后续新增命令仍应遵守同一注册表约束。
 
 每个命令应包含：
 
