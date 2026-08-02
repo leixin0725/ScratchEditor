@@ -1,0 +1,149 @@
+diff --git "a/D:\\_Dev\\ScratchEditor\\dev-links\\AutoHotkey\\KeysRedirect.ahk" "b/D:\\_Dev\\ScratchEditor\\integration\\KeysRedirect.QtMigration.ahk"
+index ec70b48..54bfaed 100644
+--- "a/D:\\_Dev\\ScratchEditor\\dev-links\\AutoHotkey\\KeysRedirect.ahk"
++++ "b/D:\\_Dev\\ScratchEditor\\integration\\KeysRedirect.QtMigration.ahk"
+@@ -20,6 +20,20 @@
+ 
+ global LastActiveWindow := 0
+ global IsTogglingObsidian := false
++; 阶段 2 回退开关：false 立即回到下方保留的原 AHK 临时编辑器。
++global UseQtScratchEditor := true
++global QtScratchEditorPipe := "\\.\pipe\ScratchEditor.Stage1.v1"
++global QtScratchEditorExe := A_ScriptDir "\..\build\release\ScratchEditor.exe"
++global QtScratchEditorPipeHandle := -1
++
++; 隔离副本专用验证入口：在注册业务热键前测试持久 IPC，然后立即退出。
++if A_Args.Length >= 1 && A_Args[1] = "--migration-ipc-test" {
++    shown := EnsureQtScratchEditorAndSend("show")
++    Sleep 300
++    hidden := EnsureQtScratchEditorAndSend("hide")
++    FileAppend(shown && hidden ? "qt-ipc-pass`n" : "qt-ipc-fail`n", "*")
++    ExitApp(shown && hidden ? 0 : 1)
++}
+ 
+ #InputLevel 1
+ SendLevel 1    
+@@ -32,6 +46,7 @@ SetCapsLockState "AlwaysOff"
+ 
+ ; 某些远程桌面、虚拟机或高权限程序可能重置 CapsLock 状态，这里定期拉回。
+ SetTimer EnforceCapsLockOff, 2000
++SetTimer StartQtScratchEditorResident, -1
+ EnforceCapsLockOff() {
+     if GetKeyState("CapsLock", "T") {
+         SetCapsLockState "AlwaysOff"
+@@ -398,6 +413,7 @@ global ChromeLastToggleTime := 0
+ global ScratchGui := ""
+ global ScratchVisible := false
+ OnExit(CloseScratchOnExit)
++OnExit((*) => CloseQtScratchEditorPipe())
+ 
+ ; 窗口与编辑区参数。
+ 
+@@ -426,7 +442,106 @@ OnMessage(0x0201, TryNativeDrag) ; WM_LBUTTONDOWN
+ OnMessage(0x0203, TryNativeDrag) ; WM_LBUTTONDBLCLK
+ OnMessage(0x0084, ScratchHitTest) ; WM_NCHITTEST
+ 
+-ScrollLock::ToggleScratch()
++ScrollLock::ToggleScratchWithMigration()
++
++
++ToggleScratchWithMigration() {
++    global UseQtScratchEditor
++
++    if UseQtScratchEditor && EnsureQtScratchEditorAndSend("toggle") {
++        return
++    }
++    ToggleScratch()
++}
++
++
++StartQtScratchEditorResident() {
++    global UseQtScratchEditor
++
++    if UseQtScratchEditor {
++        EnsureQtScratchEditorResident()
++    }
++}
++
++
++EnsureQtScratchEditorResident() {
++    global QtScratchEditorExe, QtScratchEditorPipe
++
++    if SendQtScratchEditorCommand("ping") {
++        return true
++    }
++    if !FileExist(QtScratchEditorExe) {
++        return false
++    }
++
++    try {
++        Run('"' QtScratchEditorExe '" --background')
++    } catch {
++        return false
++    }
++    return DllCall("WaitNamedPipeW", "Str", QtScratchEditorPipe, "UInt", 1500)
++}
++
++
++EnsureQtScratchEditorAndSend(command) {
++    if SendQtScratchEditorCommand(command) {
++        return true
++    }
++    if !EnsureQtScratchEditorResident() {
++        return false
++    }
++    return SendQtScratchEditorCommand(command)
++}
++
++
++SendQtScratchEditorCommand(command) {
++    global QtScratchEditorPipe, QtScratchEditorPipeHandle
++
++    if QtScratchEditorPipeHandle = -1 {
++        QtScratchEditorPipeHandle := DllCall(
++            "CreateFileW",
++            "Str", QtScratchEditorPipe,
++            "UInt", 0x40000000, ; GENERIC_WRITE
++            "UInt", 0,
++            "Ptr", 0,
++            "UInt", 3,          ; OPEN_EXISTING
++            "UInt", 0,
++            "Ptr", 0,
++            "Ptr"
++        )
++    }
++    if QtScratchEditorPipeHandle = -1 {
++        return false
++    }
++
++    payloadChars := StrPut(command "`n", "UTF-8")
++    payload := Buffer(payloadChars)
++    payloadBytes := StrPut(command "`n", payload, "UTF-8") - 1
++    bytesWritten := 0
++    ok := DllCall(
++        "WriteFile",
++        "Ptr", QtScratchEditorPipeHandle,
++        "Ptr", payload,
++        "UInt", payloadBytes,
++        "UInt*", &bytesWritten,
++        "Ptr", 0
++    )
++    if !ok || bytesWritten != payloadBytes {
++        CloseQtScratchEditorPipe()
++        return false
++    }
++    return true
++}
++
++
++CloseQtScratchEditorPipe() {
++    global QtScratchEditorPipeHandle
++
++    if QtScratchEditorPipeHandle != -1 {
++        DllCall("CloseHandle", "Ptr", QtScratchEditorPipeHandle)
++        QtScratchEditorPipeHandle := -1
++    }
++}
+ 
+ 
+ ToggleScratch() {

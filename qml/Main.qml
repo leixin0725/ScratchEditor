@@ -1,0 +1,1259 @@
+import QtQuick
+
+Window {
+    id: root
+
+    width: 920
+    height: 640
+    minimumWidth: 500
+    minimumHeight: 320
+    visible: false
+    color: themeBackgroundColor
+    title: "ScratchEditor"
+    flags: Qt.Tool | Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint
+
+    readonly property int dragZoneHeight: 52
+    readonly property int marginSize: 18
+    readonly property int resizeMargin: 8
+    readonly property bool verticalScrollBarVisible: scrollThumb.visible
+    readonly property bool commandPaletteLoaded: commandPaletteLoader.active
+    readonly property bool findPanelVisible: findPanel.visible
+    readonly property bool settingsPageLoaded: settingsLoader.active
+    readonly property bool settingsPageVisible: settingsLoader.active
+    readonly property bool darkTheme: controller.theme !== "light"
+    readonly property color themeBackgroundColor: darkTheme ? "#252525" : "#f7f8fa"
+    readonly property color themeHeaderColor: darkTheme ? "#202020" : "#eef1f5"
+    readonly property color themePanelColor: darkTheme ? "#292929" : "#ffffff"
+    readonly property color themeFieldColor: darkTheme ? "#1d1d1d" : "#f5f7fa"
+    readonly property color themeTextColor: darkTheme ? "#f2f2f2" : "#24292f"
+    readonly property color themeStrongTextColor: darkTheme ? "#ffffff" : "#111111"
+    readonly property color themeMutedTextColor: darkTheme ? "#9a9a9a" : "#57606a"
+    readonly property color themeBorderColor: darkTheme ? "#505050" : "#d0d7de"
+    readonly property color themeButtonColor: darkTheme ? "#393939" : "#eaeef2"
+    readonly property color themeAccentColor: darkTheme ? "#3d648f" : "#0969da"
+    readonly property color themeFocusColor: darkTheme ? "#78a9ff" : "#0969da"
+    readonly property color themeSelectionColor: darkTheme ? "#3d648f" : "#b6d7ff"
+    readonly property color themeSelectedTextColor: darkTheme ? "#ffffff" : "#111111"
+    readonly property color themeDangerColor: darkTheme ? "#ff8a80" : "#cf222e"
+    readonly property string uiFontFamily: "Microsoft YaHei UI"
+    readonly property int transitionDuration: controller.animationsEnabled ? 120 : 0
+    property real scrollContentHeight: 0
+    property bool replaceMode: false
+    property string searchStatus: ""
+
+    function scrollToBottom() {
+        editorViewport.contentY = Math.max(0, editorViewport.contentHeight - editorViewport.height)
+    }
+
+    function resetScroll() {
+        editorViewport.contentY = 0
+    }
+
+    function runBenchmarkAnimation() {
+        animationProbe.visible = true
+        animationProbe.x = marginSize
+        benchmarkAnimation.restart()
+    }
+
+    function refreshScrollMetrics() {
+        scrollContentHeight = editorViewport.contentHeight
+    }
+
+    function showFindPanel(withReplace) {
+        commandPaletteLoader.active = false
+        settingsLoader.active = false
+        replaceMode = withReplace
+        findPanel.visible = true
+        searchStatus = ""
+        Qt.callLater(function() {
+            findInput.forceActiveFocus()
+            findInput.selectAll()
+        })
+    }
+
+    function hideFindPanel() {
+        findPanel.visible = false
+        editor.forceActiveFocus()
+    }
+
+    function findInDocument(backwards) {
+        if (findInput.text.length === 0) {
+            searchStatus = "请输入查找内容"
+            return
+        }
+        searchStatus = controller.findNext(findInput.text, caseSensitiveToggle.enabledValue,
+                                           backwards) ? "已定位" : "未找到"
+    }
+
+    function openCommandPalette() {
+        findPanel.visible = false
+        settingsLoader.active = false
+        commandPaletteLoader.active = true
+        Qt.callLater(function() {
+            if (commandPaletteLoader.item) {
+                commandPaletteLoader.item.activate()
+            }
+        })
+    }
+
+    function closeCommandPalette() {
+        commandPaletteLoader.active = false
+        editor.forceActiveFocus()
+    }
+
+    function openSettings() {
+        findPanel.visible = false
+        commandPaletteLoader.active = false
+        settingsLoader.active = true
+        Qt.callLater(function() {
+            if (settingsLoader.item) {
+                settingsLoader.item.activate()
+            }
+        })
+    }
+
+    function closeSettings() {
+        settingsLoader.active = false
+        editor.forceActiveFocus()
+    }
+
+    Component.onCompleted: {
+        controller.registerWindow(root)
+        controller.registerEditor(editor)
+        refreshScrollMetrics()
+    }
+
+    Timer {
+        id: scrollMetricsTimer
+        interval: 60
+        repeat: false
+        onTriggered: root.refreshScrollMetrics()
+    }
+
+    Connections {
+        target: editorViewport
+
+        function onContentHeightChanged() {
+            scrollMetricsTimer.restart()
+        }
+
+        function onHeightChanged() {
+            scrollMetricsTimer.restart()
+        }
+    }
+
+    onClosing: function(close) {
+        close.accepted = false
+        controller.hideEditor()
+    }
+
+    Shortcut {
+        sequence: "Escape"
+        context: Qt.WindowShortcut
+        enabled: root.visible && !findPanel.visible && !commandPaletteLoader.active
+                 && !settingsLoader.active
+        onActivated: controller.hideEditor()
+    }
+
+    Shortcut {
+        sequence: "F3"
+        context: Qt.WindowShortcut
+        enabled: root.visible && findPanel.visible
+        onActivated: root.findInDocument(false)
+    }
+
+    Shortcut {
+        sequence: "Shift+F3"
+        context: Qt.WindowShortcut
+        enabled: root.visible && findPanel.visible
+        onActivated: root.findInDocument(true)
+    }
+
+    Instantiator {
+        model: controller.commands
+
+        delegate: Shortcut {
+            required property var modelData
+            sequence: modelData.shortcut
+            context: Qt.WindowShortcut
+            enabled: root.visible && sequence.length > 0
+            onActivated: controller.executeCommand(modelData.id)
+        }
+    }
+
+    Connections {
+        target: controller
+
+        function onUiCommandRequested(commandId) {
+            if (commandId === "find") {
+                root.showFindPanel(false)
+            } else if (commandId === "replace") {
+                root.showFindPanel(true)
+            } else if (commandId === "commandPalette") {
+                root.openCommandPalette()
+            } else if (commandId === "settings") {
+                root.openSettings()
+            }
+        }
+    }
+
+    Rectangle {
+        anchors.fill: parent
+        color: root.themeBackgroundColor
+
+        Behavior on color {
+            ColorAnimation { duration: root.transitionDuration }
+        }
+    }
+
+    Rectangle {
+        id: header
+        x: root.resizeMargin
+        y: root.resizeMargin
+        width: root.width - root.resizeMargin * 2
+        height: root.dragZoneHeight - root.resizeMargin
+        color: root.themeHeaderColor
+
+        Behavior on color {
+            ColorAnimation { duration: root.transitionDuration }
+        }
+
+        Text {
+            anchors.left: parent.left
+            anchors.leftMargin: root.marginSize - root.resizeMargin
+            anchors.verticalCenter: parent.verticalCenter
+            text: "临时编辑器"
+            color: root.themeStrongTextColor
+            font.family: root.uiFontFamily
+            font.pointSize: 11
+            font.weight: Font.DemiBold
+        }
+
+        Text {
+            anchors.right: parent.right
+            anchors.rightMargin: root.marginSize - root.resizeMargin
+            anchors.verticalCenter: parent.verticalCenter
+            width: Math.min(360, parent.width * 0.55)
+            horizontalAlignment: Text.AlignRight
+            elide: Text.ElideLeft
+            text: controller.statusMessage
+            color: controller.clipboardHealthy ? root.themeMutedTextColor : root.themeDangerColor
+            font.family: root.uiFontFamily
+            font.pointSize: 9
+        }
+
+        MouseArea {
+            anchors.fill: parent
+            acceptedButtons: Qt.LeftButton
+            onPressed: root.startSystemMove()
+        }
+    }
+
+    Rectangle {
+        id: findPanel
+        z: 60
+        visible: false
+        x: Math.round((root.width - width) / 2)
+        y: root.dragZoneHeight + 8
+        width: Math.min(760, root.width - 48)
+        height: root.replaceMode ? 104 : 66
+        radius: 4
+        color: root.themePanelColor
+        border.color: root.themeBorderColor
+        border.width: 1
+        opacity: visible ? 1 : 0
+
+        Behavior on opacity {
+            NumberAnimation { duration: root.transitionDuration; easing.type: Easing.OutCubic }
+        }
+
+        Behavior on color {
+            ColorAnimation { duration: root.transitionDuration }
+        }
+
+        Rectangle {
+            id: findFieldFrame
+            x: 12
+            y: 10
+            width: findPanel.width - 328
+            height: 32
+            radius: 3
+            color: root.themeFieldColor
+            border.color: findInput.activeFocus ? root.themeFocusColor : root.themeBorderColor
+
+            TextInput {
+                id: findInput
+                anchors.fill: parent
+                anchors.leftMargin: 9
+                anchors.rightMargin: 9
+                verticalAlignment: TextInput.AlignVCenter
+                color: root.themeTextColor
+                selectionColor: root.themeSelectionColor
+                selectedTextColor: root.themeSelectedTextColor
+                font.family: root.uiFontFamily
+                font.pointSize: 10
+                selectByMouse: true
+                clip: true
+
+                Keys.onReturnPressed: root.findInDocument(false)
+                Keys.onEnterPressed: root.findInDocument(false)
+                Keys.onEscapePressed: root.hideFindPanel()
+            }
+        }
+
+        Rectangle {
+            id: caseSensitiveToggle
+            property bool enabledValue: false
+            x: findFieldFrame.x + findFieldFrame.width + 8
+            y: 10
+            width: 42
+            height: 32
+            radius: 3
+            color: enabledValue ? root.themeAccentColor : root.themeButtonColor
+
+            Text {
+                anchors.centerIn: parent
+                text: "Aa"
+                color: root.themeStrongTextColor
+                font.family: "Cascadia Mono"
+                font.pointSize: 9
+            }
+
+            MouseArea {
+                anchors.fill: parent
+                cursorShape: Qt.PointingHandCursor
+                onClicked: caseSensitiveToggle.enabledValue = !caseSensitiveToggle.enabledValue
+            }
+        }
+
+        Rectangle {
+            x: caseSensitiveToggle.x + caseSensitiveToggle.width + 8
+            y: 10
+            width: 54
+            height: 32
+            radius: 3
+            color: root.themeButtonColor
+            Text { anchors.centerIn: parent; text: "上一个"; color: root.themeTextColor; font.pointSize: 9 }
+            MouseArea {
+                anchors.fill: parent
+                cursorShape: Qt.PointingHandCursor
+                onClicked: root.findInDocument(true)
+            }
+        }
+
+        Rectangle {
+            x: caseSensitiveToggle.x + caseSensitiveToggle.width + 70
+            y: 10
+            width: 54
+            height: 32
+            radius: 3
+            color: root.themeAccentColor
+            Text { anchors.centerIn: parent; text: "下一个"; color: "#ffffff"; font.pointSize: 9 }
+            MouseArea {
+                anchors.fill: parent
+                cursorShape: Qt.PointingHandCursor
+                onClicked: root.findInDocument(false)
+            }
+        }
+
+        Rectangle {
+            x: findPanel.width - 42
+            y: 10
+            width: 30
+            height: 32
+            radius: 3
+            color: root.themeButtonColor
+            Text { anchors.centerIn: parent; text: "×"; color: root.themeTextColor; font.pointSize: 13 }
+            MouseArea {
+                anchors.fill: parent
+                cursorShape: Qt.PointingHandCursor
+                onClicked: root.hideFindPanel()
+            }
+        }
+
+        Rectangle {
+            id: replaceFieldFrame
+            visible: root.replaceMode
+            x: 12
+            y: 52
+            width: findFieldFrame.width
+            height: 32
+            radius: 3
+            color: root.themeFieldColor
+            border.color: replaceInput.activeFocus ? root.themeFocusColor : root.themeBorderColor
+
+            TextInput {
+                id: replaceInput
+                anchors.fill: parent
+                anchors.leftMargin: 9
+                anchors.rightMargin: 9
+                verticalAlignment: TextInput.AlignVCenter
+                color: root.themeTextColor
+                selectionColor: root.themeSelectionColor
+                selectedTextColor: root.themeSelectedTextColor
+                font.family: root.uiFontFamily
+                font.pointSize: 10
+                selectByMouse: true
+                clip: true
+                Keys.onEscapePressed: root.hideFindPanel()
+            }
+        }
+
+        Rectangle {
+            visible: root.replaceMode
+            x: replaceFieldFrame.x + replaceFieldFrame.width + 8
+            y: 52
+            width: 70
+            height: 32
+            radius: 3
+            color: root.themeButtonColor
+            Text { anchors.centerIn: parent; text: "替换当前"; color: root.themeTextColor; font.pointSize: 9 }
+            MouseArea {
+                anchors.fill: parent
+                cursorShape: Qt.PointingHandCursor
+                onClicked: {
+                    root.searchStatus = controller.replaceCurrent(
+                        findInput.text, replaceInput.text, caseSensitiveToggle.enabledValue
+                    ) ? "已处理当前匹配" : "未找到"
+                }
+            }
+        }
+
+        Rectangle {
+            visible: root.replaceMode
+            x: replaceFieldFrame.x + replaceFieldFrame.width + 86
+            y: 52
+            width: 70
+            height: 32
+            radius: 3
+            color: root.themeAccentColor
+            Text { anchors.centerIn: parent; text: "全部替换"; color: "#ffffff"; font.pointSize: 9 }
+            MouseArea {
+                anchors.fill: parent
+                cursorShape: Qt.PointingHandCursor
+                onClicked: {
+                    const count = controller.replaceAll(
+                        findInput.text, replaceInput.text, caseSensitiveToggle.enabledValue
+                    )
+                    root.searchStatus = "已替换 " + count + " 处"
+                }
+            }
+        }
+
+        Text {
+            x: findPanel.width - 154
+            y: root.replaceMode ? 86 : 47
+            width: 142
+            horizontalAlignment: Text.AlignRight
+            elide: Text.ElideLeft
+            text: root.searchStatus
+            color: root.themeMutedTextColor
+            font.family: root.uiFontFamily
+            font.pointSize: 8
+        }
+    }
+
+    Flickable {
+        id: editorViewport
+        x: root.marginSize
+        y: root.dragZoneHeight
+        width: root.width - root.marginSize * 2
+        height: root.height - root.dragZoneHeight - root.marginSize
+        clip: true
+        boundsBehavior: Flickable.StopAtBounds
+        contentWidth: width
+        contentHeight: Math.max(height, editor.contentHeight + 20)
+        pixelAligned: true
+
+        TextEdit {
+            id: editor
+            objectName: "scratchText"
+            x: 12
+            y: 8
+            width: editorViewport.width - 24
+            height: Math.max(editorViewport.height - 16, contentHeight)
+            color: root.themeTextColor
+            selectionColor: root.themeSelectionColor
+            selectedTextColor: root.themeSelectedTextColor
+            font.family: controller.editorFontFamily
+            font.pointSize: controller.editorFontPointSize
+            textFormat: TextEdit.PlainText
+            wrapMode: TextEdit.Wrap
+            selectByMouse: true
+            persistentSelection: true
+            activeFocusOnPress: true
+            inputMethodHints: Qt.ImhMultiLine
+
+            onCursorRectangleChanged: {
+                const top = cursorRectangle.y
+                const bottom = cursorRectangle.y + cursorRectangle.height
+                if (top < editorViewport.contentY) {
+                    editorViewport.contentY = Math.max(0, top)
+                } else if (bottom > editorViewport.contentY + editorViewport.height) {
+                    editorViewport.contentY = Math.min(
+                        Math.max(0, editorViewport.contentHeight - editorViewport.height),
+                        bottom - editorViewport.height
+                    )
+                }
+            }
+        }
+    }
+
+    Rectangle {
+        id: scrollThumb
+        z: 20
+        // Keep the opaque thumb in the reserved margin so it does not force a
+        // blended render pass over the large text scene.
+        x: root.width - root.marginSize + 2
+        y: editorViewport.y
+            + (editorViewport.contentY
+               / Math.max(1, editorViewport.contentHeight - editorViewport.height))
+              * Math.max(0, editorViewport.height - height)
+        width: 5
+        height: Math.max(
+            28,
+            editorViewport.height * editorViewport.height
+                / Math.max(editorViewport.height, root.scrollContentHeight)
+        )
+        radius: 0
+        visible: root.scrollContentHeight > editorViewport.height + 0.5
+        color: scrollHover.hovered || editorViewport.movingVertically
+               ? (root.darkTheme ? "#8b8b8b" : "#6e7781")
+               : (root.darkTheme ? "#555555" : "#afb8c1")
+
+        Behavior on color {
+            ColorAnimation { duration: root.transitionDuration }
+        }
+
+        HoverHandler {
+            id: scrollHover
+        }
+
+        MouseArea {
+            anchors.fill: parent
+            acceptedButtons: Qt.LeftButton
+            cursorShape: Qt.PointingHandCursor
+            property real grabOffset: 0
+
+            onPressed: function(mouse) {
+                grabOffset = mouse.y
+            }
+            onPositionChanged: function(mouse) {
+                if (!pressed) {
+                    return
+                }
+                const trackRange = Math.max(1, editorViewport.height - scrollThumb.height)
+                const requestedTop = Math.max(
+                    editorViewport.y,
+                    Math.min(
+                        editorViewport.y + trackRange,
+                        scrollThumb.y + mouse.y - grabOffset
+                    )
+                )
+                editorViewport.contentY =
+                    (requestedTop - editorViewport.y) / trackRange
+                    * Math.max(0, editorViewport.contentHeight - editorViewport.height)
+            }
+        }
+    }
+
+    Rectangle {
+        id: animationProbe
+        visible: false
+        z: 10
+        x: root.marginSize
+        y: root.dragZoneHeight - 4
+        width: 40
+        height: 2
+        radius: 1
+        color: "#78a9ff"
+    }
+
+    XAnimator {
+        id: benchmarkAnimation
+        target: animationProbe
+        from: root.marginSize
+        to: Math.max(root.marginSize, root.width - root.marginSize - animationProbe.width)
+        duration: 1000
+        easing.type: Easing.Linear
+        onFinished: {
+            animationProbe.visible = false
+            controller.animationBenchmarkFinished()
+        }
+    }
+
+    Loader {
+        id: settingsLoader
+        z: 90
+        anchors.fill: parent
+        active: false
+        sourceComponent: settingsComponent
+    }
+
+    Component {
+        id: settingsComponent
+
+        Item {
+            id: settingsRoot
+            focus: true
+            opacity: 0
+            property string draftTheme: "dark"
+            property string draftFontFamily: ""
+            property int draftFontPointSize: 13
+            property bool draftAnimationsEnabled: true
+            property string saveStatus: ""
+
+            Behavior on opacity {
+                NumberAnimation { duration: root.transitionDuration; easing.type: Easing.OutCubic }
+            }
+
+            function activate() {
+                draftTheme = controller.theme
+                draftFontFamily = controller.editorFontFamily
+                draftFontPointSize = controller.editorFontPointSize
+                draftAnimationsEnabled = controller.animationsEnabled
+                fontFamilyInput.text = draftFontFamily
+                fontSizeInput.text = draftFontPointSize.toString()
+                saveStatus = ""
+                opacity = 1
+                forceActiveFocus()
+            }
+
+            function save() {
+                const requestedSize = Number(fontSizeInput.text)
+                if (controller.applyAppearance(draftTheme, fontFamilyInput.text,
+                                               requestedSize, draftAnimationsEnabled)) {
+                    saveStatus = "设置已保存"
+                    draftFontFamily = controller.editorFontFamily
+                    draftFontPointSize = controller.editorFontPointSize
+                } else {
+                    saveStatus = controller.settingsError
+                }
+            }
+
+            Keys.onEscapePressed: root.closeSettings()
+
+            Rectangle {
+                anchors.fill: parent
+                color: "#88000000"
+                MouseArea {
+                    anchors.fill: parent
+                    onClicked: root.closeSettings()
+                }
+            }
+
+            Rectangle {
+                id: settingsPanel
+                x: Math.round((parent.width - width) / 2)
+                y: Math.round((parent.height - height) / 2)
+                width: Math.min(640, parent.width - 40)
+                height: Math.min(430, parent.height - 32)
+                radius: 7
+                color: root.themePanelColor
+                border.color: root.themeBorderColor
+                border.width: 1
+
+                Behavior on color {
+                    ColorAnimation { duration: root.transitionDuration }
+                }
+
+                MouseArea {
+                    anchors.fill: parent
+                    acceptedButtons: Qt.LeftButton
+                    onClicked: function(mouse) { mouse.accepted = true }
+                }
+
+                Text {
+                    x: 20
+                    y: 16
+                    text: "设置"
+                    color: root.themeStrongTextColor
+                    font.family: root.uiFontFamily
+                    font.pointSize: 13
+                    font.weight: Font.DemiBold
+                }
+
+                Text {
+                    anchors.right: parent.right
+                    anchors.rightMargin: 18
+                    y: 18
+                    text: "×"
+                    color: root.themeMutedTextColor
+                    font.pointSize: 13
+                    MouseArea {
+                        anchors.fill: parent
+                        anchors.margins: -8
+                        cursorShape: Qt.PointingHandCursor
+                        onClicked: root.closeSettings()
+                    }
+                }
+
+                Flickable {
+                    id: settingsContent
+                    x: 20
+                    y: 52
+                    width: parent.width - 40
+                    height: parent.height - 112
+                    contentWidth: width
+                    contentHeight: 246
+                    clip: true
+                    boundsBehavior: Flickable.StopAtBounds
+
+                    Item {
+                        width: settingsContent.width
+                        height: settingsContent.contentHeight
+
+                        Text {
+                            x: 0
+                            y: 8
+                            width: 118
+                            text: "主题"
+                            color: root.themeTextColor
+                            font.family: root.uiFontFamily
+                            font.pointSize: 10
+                        }
+
+                        Rectangle {
+                            x: 126
+                            y: 0
+                            width: 86
+                            height: 34
+                            radius: 4
+                            color: settingsRoot.draftTheme === "dark"
+                                   ? root.themeAccentColor : root.themeButtonColor
+                            border.color: root.themeBorderColor
+                            Text {
+                                anchors.centerIn: parent
+                                text: "深色"
+                                color: settingsRoot.draftTheme === "dark"
+                                       ? "#ffffff" : root.themeTextColor
+                                font.family: root.uiFontFamily
+                            }
+                            MouseArea {
+                                anchors.fill: parent
+                                cursorShape: Qt.PointingHandCursor
+                                onClicked: settingsRoot.draftTheme = "dark"
+                            }
+                        }
+
+                        Rectangle {
+                            x: 220
+                            y: 0
+                            width: 86
+                            height: 34
+                            radius: 4
+                            color: settingsRoot.draftTheme === "light"
+                                   ? root.themeAccentColor : root.themeButtonColor
+                            border.color: root.themeBorderColor
+                            Text {
+                                anchors.centerIn: parent
+                                text: "浅色"
+                                color: settingsRoot.draftTheme === "light"
+                                       ? "#ffffff" : root.themeTextColor
+                                font.family: root.uiFontFamily
+                            }
+                            MouseArea {
+                                anchors.fill: parent
+                                cursorShape: Qt.PointingHandCursor
+                                onClicked: settingsRoot.draftTheme = "light"
+                            }
+                        }
+
+                        Text {
+                            x: 0
+                            y: 57
+                            width: 118
+                            text: "编辑字体"
+                            color: root.themeTextColor
+                            font.family: root.uiFontFamily
+                            font.pointSize: 10
+                        }
+
+                        Rectangle {
+                            x: 126
+                            y: 48
+                            width: parent.width - 126
+                            height: 34
+                            radius: 4
+                            color: root.themeFieldColor
+                            border.color: fontFamilyInput.activeFocus
+                                          ? root.themeFocusColor : root.themeBorderColor
+                            TextInput {
+                                id: fontFamilyInput
+                                anchors.fill: parent
+                                anchors.leftMargin: 10
+                                anchors.rightMargin: 10
+                                verticalAlignment: TextInput.AlignVCenter
+                                color: root.themeTextColor
+                                selectionColor: root.themeSelectionColor
+                                selectedTextColor: root.themeSelectedTextColor
+                                font.family: root.uiFontFamily
+                                font.pointSize: 10
+                                selectByMouse: true
+                                clip: true
+                            }
+                        }
+
+                        Text {
+                            x: 0
+                            y: 105
+                            width: 118
+                            text: "字号（9–24）"
+                            color: root.themeTextColor
+                            font.family: root.uiFontFamily
+                            font.pointSize: 10
+                        }
+
+                        Rectangle {
+                            x: 126
+                            y: 96
+                            width: 86
+                            height: 34
+                            radius: 4
+                            color: root.themeFieldColor
+                            border.color: fontSizeInput.activeFocus
+                                          ? root.themeFocusColor : root.themeBorderColor
+                            TextInput {
+                                id: fontSizeInput
+                                anchors.fill: parent
+                                horizontalAlignment: TextInput.AlignHCenter
+                                verticalAlignment: TextInput.AlignVCenter
+                                color: root.themeTextColor
+                                selectionColor: root.themeSelectionColor
+                                selectedTextColor: root.themeSelectedTextColor
+                                font.family: root.uiFontFamily
+                                font.pointSize: 10
+                                validator: IntValidator { bottom: 9; top: 24 }
+                            }
+                        }
+
+                        Text {
+                            x: 0
+                            y: 153
+                            width: 118
+                            text: "轻量动画"
+                            color: root.themeTextColor
+                            font.family: root.uiFontFamily
+                            font.pointSize: 10
+                        }
+
+                        Rectangle {
+                            x: 126
+                            y: 144
+                            width: 86
+                            height: 34
+                            radius: 17
+                            color: settingsRoot.draftAnimationsEnabled
+                                   ? root.themeAccentColor : root.themeButtonColor
+                            border.color: root.themeBorderColor
+                            Text {
+                                anchors.centerIn: parent
+                                text: settingsRoot.draftAnimationsEnabled ? "开启" : "关闭"
+                                color: settingsRoot.draftAnimationsEnabled
+                                       ? "#ffffff" : root.themeTextColor
+                                font.family: root.uiFontFamily
+                                font.pointSize: 9
+                            }
+                            MouseArea {
+                                anchors.fill: parent
+                                cursorShape: Qt.PointingHandCursor
+                                onClicked: settingsRoot.draftAnimationsEnabled =
+                                           !settingsRoot.draftAnimationsEnabled
+                            }
+                        }
+
+                        Text {
+                            x: 0
+                            y: 195
+                            text: "集中配置文件"
+                            color: root.themeMutedTextColor
+                            font.family: root.uiFontFamily
+                            font.pointSize: 8
+                        }
+
+                        Text {
+                            x: 0
+                            y: 216
+                            width: parent.width
+                            text: controller.settingsFile
+                            color: root.themeMutedTextColor
+                            font.family: "Cascadia Mono"
+                            font.pointSize: 8
+                            elide: Text.ElideMiddle
+                        }
+                    }
+                }
+
+                Text {
+                    x: 20
+                    anchors.bottom: parent.bottom
+                    anchors.bottomMargin: 19
+                    width: parent.width - 300
+                    text: settingsRoot.saveStatus
+                    color: settingsRoot.saveStatus === "设置已保存"
+                           ? root.themeMutedTextColor : root.themeDangerColor
+                    font.family: root.uiFontFamily
+                    font.pointSize: 9
+                    elide: Text.ElideRight
+                }
+
+                Rectangle {
+                    anchors.right: applySettingsButton.left
+                    anchors.rightMargin: 10
+                    anchors.bottom: parent.bottom
+                    anchors.bottomMargin: 12
+                    width: 92
+                    height: 36
+                    radius: 4
+                    color: root.themeButtonColor
+                    border.color: root.themeBorderColor
+                    Text {
+                        anchors.centerIn: parent
+                        text: "恢复默认"
+                        color: root.themeTextColor
+                        font.family: root.uiFontFamily
+                    }
+                    MouseArea {
+                        anchors.fill: parent
+                        cursorShape: Qt.PointingHandCursor
+                        onClicked: {
+                            controller.resetAppearance()
+                            settingsRoot.activate()
+                            settingsRoot.saveStatus = "已恢复默认设置"
+                        }
+                    }
+                }
+
+                Rectangle {
+                    id: applySettingsButton
+                    anchors.right: parent.right
+                    anchors.rightMargin: 20
+                    anchors.bottom: parent.bottom
+                    anchors.bottomMargin: 12
+                    width: 92
+                    height: 36
+                    radius: 4
+                    color: root.themeAccentColor
+                    Text {
+                        anchors.centerIn: parent
+                        text: "应用"
+                        color: "#ffffff"
+                        font.family: root.uiFontFamily
+                    }
+                    MouseArea {
+                        anchors.fill: parent
+                        cursorShape: Qt.PointingHandCursor
+                        onClicked: settingsRoot.save()
+                    }
+                }
+            }
+        }
+    }
+
+    Loader {
+        id: commandPaletteLoader
+        z: 80
+        anchors.fill: parent
+        active: false
+        sourceComponent: commandPaletteComponent
+    }
+
+    Component {
+        id: commandPaletteComponent
+
+        Item {
+            id: paletteRoot
+            opacity: 0
+            property var filteredCommands: []
+            property int selectedIndex: 0
+            property string editingCommandId: ""
+            property string paletteStatus: "↑↓ 选择，Enter 执行，F2 修改快捷键"
+
+            Behavior on opacity {
+                NumberAnimation { duration: root.transitionDuration; easing.type: Easing.OutCubic }
+            }
+
+            function rebuild() {
+                const needle = paletteQuery.text.trim().toLowerCase()
+                const source = controller.commands
+                const result = []
+                for (let index = 0; index < source.length; ++index) {
+                    const command = source[index]
+                    const haystack = (command.title + " " + command.id + " "
+                                      + command.category).toLowerCase()
+                    if (needle.length === 0 || haystack.indexOf(needle) >= 0) {
+                        result.push(command)
+                    }
+                }
+                filteredCommands = result
+                selectedIndex = Math.max(0, Math.min(selectedIndex, result.length - 1))
+                commandList.currentIndex = selectedIndex
+            }
+
+            function activate() {
+                opacity = 1
+                rebuild()
+                paletteQuery.forceActiveFocus()
+                paletteQuery.selectAll()
+            }
+
+            function runSelected() {
+                if (filteredCommands.length === 0) {
+                    return
+                }
+                const command = filteredCommands[selectedIndex]
+                root.closeCommandPalette()
+                controller.executeCommand(command.id)
+            }
+
+            function beginShortcutEdit() {
+                if (filteredCommands.length === 0) {
+                    return
+                }
+                const command = filteredCommands[selectedIndex]
+                editingCommandId = command.id
+                shortcutEditor.text = command.shortcut
+                shortcutEditorFrame.visible = true
+                shortcutEditor.forceActiveFocus()
+                shortcutEditor.selectAll()
+                paletteStatus = "输入 PortableText 快捷键（例如 Ctrl+Alt+M），留空可禁用"
+            }
+
+            function saveShortcut() {
+                if (controller.setShortcut(editingCommandId, shortcutEditor.text)) {
+                    paletteStatus = "快捷键已保存"
+                    shortcutEditorFrame.visible = false
+                    editingCommandId = ""
+                    rebuild()
+                    paletteQuery.forceActiveFocus()
+                } else {
+                    paletteStatus = "快捷键无效或已被其他命令使用"
+                }
+            }
+
+            Rectangle {
+                anchors.fill: parent
+                color: "#88000000"
+                MouseArea {
+                    anchors.fill: parent
+                    onClicked: root.closeCommandPalette()
+                }
+            }
+
+            Rectangle {
+                id: palettePanel
+                x: Math.round((parent.width - width) / 2)
+                y: Math.max(72, Math.round(parent.height * 0.14))
+                width: Math.min(680, parent.width - 64)
+                height: Math.min(500, parent.height - y - 60)
+                radius: 6
+                color: root.themePanelColor
+                border.color: root.themeBorderColor
+                border.width: 1
+
+                Behavior on color {
+                    ColorAnimation { duration: root.transitionDuration }
+                }
+
+                MouseArea {
+                    anchors.fill: parent
+                    acceptedButtons: Qt.LeftButton
+                    onClicked: function(mouse) { mouse.accepted = true }
+                }
+
+                Rectangle {
+                    id: paletteQueryFrame
+                    x: 14
+                    y: 14
+                    width: parent.width - 28
+                    height: 40
+                    radius: 4
+                    color: root.themeFieldColor
+                    border.color: paletteQuery.activeFocus
+                                  ? root.themeFocusColor : root.themeBorderColor
+
+                    TextInput {
+                        id: paletteQuery
+                        anchors.fill: parent
+                        anchors.leftMargin: 12
+                        anchors.rightMargin: 12
+                        verticalAlignment: TextInput.AlignVCenter
+                        color: root.themeTextColor
+                        selectionColor: root.themeSelectionColor
+                        selectedTextColor: root.themeSelectedTextColor
+                        font.family: root.uiFontFamily
+                        font.pointSize: 11
+                        selectByMouse: true
+                        clip: true
+                        onTextChanged: paletteRoot.rebuild()
+
+                        Keys.onPressed: function(event) {
+                            if (event.key === Qt.Key_Down) {
+                                paletteRoot.selectedIndex = Math.min(
+                                    paletteRoot.filteredCommands.length - 1,
+                                    paletteRoot.selectedIndex + 1
+                                )
+                                commandList.currentIndex = paletteRoot.selectedIndex
+                                event.accepted = true
+                            } else if (event.key === Qt.Key_Up) {
+                                paletteRoot.selectedIndex = Math.max(0, paletteRoot.selectedIndex - 1)
+                                commandList.currentIndex = paletteRoot.selectedIndex
+                                event.accepted = true
+                            } else if (event.key === Qt.Key_Return || event.key === Qt.Key_Enter) {
+                                paletteRoot.runSelected()
+                                event.accepted = true
+                            } else if (event.key === Qt.Key_F2) {
+                                paletteRoot.beginShortcutEdit()
+                                event.accepted = true
+                            } else if (event.key === Qt.Key_Escape) {
+                                root.closeCommandPalette()
+                                event.accepted = true
+                            }
+                        }
+                    }
+                }
+
+                ListView {
+                    id: commandList
+                    x: 10
+                    y: 66
+                    width: parent.width - 20
+                    height: parent.height - 118
+                    clip: true
+                    spacing: 2
+                    model: paletteRoot.filteredCommands
+                    currentIndex: paletteRoot.selectedIndex
+
+                    delegate: Rectangle {
+                        required property var modelData
+                        required property int index
+                        width: commandList.width
+                        height: 38
+                        radius: 3
+                        color: index === paletteRoot.selectedIndex
+                               ? (root.darkTheme ? "#3a5573" : "#dbeafe") : "transparent"
+
+                        Text {
+                            anchors.left: parent.left
+                            anchors.leftMargin: 10
+                            anchors.verticalCenter: parent.verticalCenter
+                            text: modelData.title
+                            color: root.themeTextColor
+                            font.family: root.uiFontFamily
+                            font.pointSize: 10
+                        }
+
+                        Text {
+                            anchors.right: parent.right
+                            anchors.rightMargin: 10
+                            anchors.verticalCenter: parent.verticalCenter
+                            text: modelData.shortcut
+                            color: root.themeMutedTextColor
+                            font.family: "Cascadia Mono"
+                            font.pointSize: 9
+                        }
+
+                        MouseArea {
+                            anchors.fill: parent
+                            hoverEnabled: true
+                            onEntered: {
+                                paletteRoot.selectedIndex = index
+                                commandList.currentIndex = index
+                            }
+                            onClicked: paletteRoot.runSelected()
+                        }
+                    }
+                }
+
+                Text {
+                    x: 16
+                    y: parent.height - 38
+                    width: parent.width - 32
+                    text: paletteRoot.paletteStatus
+                    color: root.themeMutedTextColor
+                    elide: Text.ElideRight
+                    font.family: root.uiFontFamily
+                    font.pointSize: 8
+                }
+
+                Rectangle {
+                    id: shortcutEditorFrame
+                    visible: false
+                    x: 14
+                    y: parent.height - 86
+                    width: parent.width - 28
+                    height: 38
+                    radius: 4
+                    color: root.themeFieldColor
+                    border.color: root.themeFocusColor
+
+                    TextInput {
+                        id: shortcutEditor
+                        anchors.fill: parent
+                        anchors.leftMargin: 10
+                        anchors.rightMargin: 10
+                        verticalAlignment: TextInput.AlignVCenter
+                        color: root.themeTextColor
+                        selectionColor: root.themeSelectionColor
+                        selectedTextColor: root.themeSelectedTextColor
+                        font.family: "Cascadia Mono"
+                        font.pointSize: 10
+                        selectByMouse: true
+                        Keys.onReturnPressed: paletteRoot.saveShortcut()
+                        Keys.onEnterPressed: paletteRoot.saveShortcut()
+                        Keys.onEscapePressed: {
+                            shortcutEditorFrame.visible = false
+                            paletteRoot.editingCommandId = ""
+                            paletteQuery.forceActiveFocus()
+                        }
+                    }
+                }
+
+                Connections {
+                    target: controller
+                    function onCommandsChanged() { paletteRoot.rebuild() }
+                }
+            }
+        }
+    }
+
+    MouseArea {
+        z: 100
+        width: root.resizeMargin
+        anchors.left: parent.left
+        anchors.top: parent.top
+        anchors.bottom: parent.bottom
+        cursorShape: Qt.SizeHorCursor
+        onPressed: root.startSystemResize(Qt.LeftEdge)
+    }
+
+    MouseArea {
+        z: 100
+        width: root.resizeMargin
+        anchors.right: parent.right
+        anchors.top: parent.top
+        anchors.bottom: parent.bottom
+        cursorShape: Qt.SizeHorCursor
+        onPressed: root.startSystemResize(Qt.RightEdge)
+    }
+
+    MouseArea {
+        z: 101
+        height: root.resizeMargin
+        anchors.left: parent.left
+        anchors.right: parent.right
+        anchors.top: parent.top
+        cursorShape: Qt.SizeVerCursor
+        onPressed: root.startSystemResize(Qt.TopEdge)
+    }
+
+    MouseArea {
+        z: 101
+        height: root.resizeMargin
+        anchors.left: parent.left
+        anchors.right: parent.right
+        anchors.bottom: parent.bottom
+        cursorShape: Qt.SizeVerCursor
+        onPressed: root.startSystemResize(Qt.BottomEdge)
+    }
+}

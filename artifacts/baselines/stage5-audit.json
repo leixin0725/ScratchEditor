@@ -1,0 +1,55 @@
+{
+    "timestamp":  "2026-08-02T13:23:13.1204570+08:00",
+    "projectRoot":  "D:\\_Dev\\ScratchEditor",
+    "originalAhk":  {
+                        "path":  "D:\\Documents\\AutoHotkey\\KeysRedirect.ahk",
+                        "expectedHash":  "8BB8FFEFEBD9A6C90C102F66583D517C6C5CF83D36200A3D4E77D413C77B41C9",
+                        "actualHash":  "8BB8FFEFEBD9A6C90C102F66583D517C6C5CF83D36200A3D4E77D413C77B41C9"
+                    },
+    "details":  {
+                    "missingFiles":  [
+
+                                     ],
+                    "missingBaselines":  [
+
+                                         ],
+                    "baselineFailures":  [
+
+                                         ],
+                    "unexpectedRootFiles":  [
+
+                                            ],
+                    "looseArtifacts":  [
+
+                                       ],
+                    "scriptParseFailures":  [
+
+                                            ],
+                    "trackedExcluded":  [
+
+                                        ],
+                    "gitInitialized":  true,
+                    "gitStatus":  ""
+                },
+    "checks":  {
+                   "requiredProjectFiles":  true,
+                   "requiredBaselines":  true,
+                   "baselineJsonPasses":  true,
+                   "rootDirectoryClean":  true,
+                   "artifactsCentralized":  true,
+                   "testsCentralized":  true,
+                   "documentationIndexed":  true,
+                   "powershellScriptsParse":  true,
+                   "centralizedSettingsImplementation":  true,
+                   "browserEngineExcluded":  true,
+                   "deferredFeaturesExcluded":  true,
+                   "ahkMigrationBoundaryPreserved":  true,
+                   "originalAhkUnchanged":  true,
+                   "gitRequirement":  true,
+                   "gitExclusions":  true,
+                   "gitWhitespace":  true,
+                   "noUnstagedChanges":  true,
+                   "cleanRequirement":  true
+               },
+    "allPassed":  true
+}

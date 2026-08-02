@@ -1,0 +1,53 @@
+{
+  "version": 6,
+  "cmakeMinimumRequired": {
+    "major": 3,
+    "minor": 25,
+    "patch": 0
+  },
+  "configurePresets": [
+    {
+      "name": "release",
+      "displayName": "Qt 6.10.2 / MinGW 13.1 Release",
+      "generator": "Ninja",
+      "binaryDir": "${sourceDir}/build/release",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Release",
+        "CMAKE_PREFIX_PATH": "${sourceDir}/.tools/Qt/6.10.2/mingw_64",
+        "CMAKE_C_COMPILER": "${sourceDir}/.tools/Qt/Tools/mingw1310_64/bin/gcc.exe",
+        "CMAKE_CXX_COMPILER": "${sourceDir}/.tools/Qt/Tools/mingw1310_64/bin/g++.exe",
+        "CMAKE_MAKE_PROGRAM": "${sourceDir}/.tools/Qt/Tools/Ninja/ninja.exe",
+        "CMAKE_EXPORT_COMPILE_COMMANDS": "ON"
+      }
+    },
+    {
+      "name": "stage3",
+      "displayName": "Qt 6.10.2 / MinGW 13.1 Stage 3 isolated Release",
+      "inherits": "release",
+      "binaryDir": "${sourceDir}/build/stage3"
+    },
+    {
+      "name": "stage4",
+      "displayName": "Qt 6.10.2 / MinGW 13.1 Stage 4 isolated Release",
+      "inherits": "release",
+      "binaryDir": "${sourceDir}/build/stage4"
+    }
+  ],
+  "buildPresets": [
+    {
+      "name": "release",
+      "configurePreset": "release",
+      "jobs": 8
+    },
+    {
+      "name": "stage3",
+      "configurePreset": "stage3",
+      "jobs": 8
+    },
+    {
+      "name": "stage4",
+      "configurePreset": "stage4",
+      "jobs": 8
+    }
+  ]
+}

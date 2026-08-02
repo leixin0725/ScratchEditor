@@ -1,0 +1,313 @@
+[CmdletBinding()]
+param(
+    [string]$BuildSubdirectory = "build\stage4",
+    [string]$ServerName = "ScratchEditor.Stage4.Validation",
+    [string]$OriginalAhkPath = "",
+    [string]$ArtifactPrefix = "stage4-results"
+)
+
+$ErrorActionPreference = "Stop"
+$projectRoot = Split-Path -Parent $PSScriptRoot
+$buildDir = Join-Path $projectRoot $BuildSubdirectory
+$editorExe = Join-Path $buildDir "ScratchEditor.exe"
+$stage2Exe = Join-Path $buildDir "ScratchEditorStage2Tests.exe"
+$stage3Exe = Join-Path $buildDir "ScratchEditorStage3Tests.exe"
+$stage4Exe = Join-Path $buildDir "ScratchEditorStage4Tests.exe"
+if ([string]::IsNullOrWhiteSpace($OriginalAhkPath)) {
+    $OriginalAhkPath = $env:SCRATCHEDITOR_ORIGINAL_AHK
+}
+if ([string]::IsNullOrWhiteSpace($OriginalAhkPath)) {
+    $OriginalAhkPath = Join-Path $projectRoot "dev-links\AutoHotkey\KeysRedirect.ahk"
+}
+$originalAhk = $OriginalAhkPath
+$artifactDir = Join-Path $projectRoot "artifacts"
+$qtBin = Join-Path $projectRoot ".tools\Qt\6.10.2\mingw_64\bin"
+$mingwBin = Join-Path $projectRoot ".tools\Qt\Tools\mingw1310_64\bin"
+$settingsDirectory = Join-Path ([System.IO.Path]::GetTempPath()) "ScratchEditor\tests"
+$settingsStem = $ServerName -replace '[^A-Za-z0-9_.-]', '_'
+$settingsFile = Join-Path $settingsDirectory "$settingsStem.ini"
+$env:PATH = "$qtBin;$mingwBin;$env:PATH"
+$env:SCRATCHEDITOR_SERVER_NAME = $ServerName
+$env:SCRATCHEDITOR_SETTINGS_FILE = $settingsFile
+
+function Send-IpcRequest {
+    param([Parameter(Mandatory)] [hashtable]$Request, [int]$TimeoutMs = 3000)
+    $pipe = [System.IO.Pipes.NamedPipeClientStream]::new(
+        ".", $ServerName, [System.IO.Pipes.PipeDirection]::InOut
+    )
+    try {
+        $pipe.Connect($TimeoutMs)
+        $encoding = [System.Text.UTF8Encoding]::new($false)
+        $writer = [System.IO.StreamWriter]::new($pipe, $encoding, 4096, $true)
+        $reader = [System.IO.StreamReader]::new($pipe, $encoding, $false, 4096, $true)
+        try {
+            $writer.WriteLine(($Request | ConvertTo-Json -Compress))
+            $writer.Flush()
+            $line = $reader.ReadLine()
+            if ([string]::IsNullOrWhiteSpace($line)) {
+                throw "IPC returned an empty response."
+            }
+            return $line | ConvertFrom-Json
+        }
+        finally {
+            $reader.Dispose()
+            $writer.Dispose()
+        }
+    }
+    finally {
+        $pipe.Dispose()
+    }
+}
+
+function Send-IpcCommand {
+    param([Parameter(Mandatory)] [string]$Command, [int]$TimeoutMs = 3000)
+    Send-IpcRequest -Request @{ command = $Command } -TimeoutMs $TimeoutMs
+}
+
+function Invoke-Utf8Process {
+    param([Parameter(Mandatory)] [string]$FileName)
+    $encoding = [System.Text.UTF8Encoding]::new($false)
+    $info = [System.Diagnostics.ProcessStartInfo]::new()
+    $info.FileName = $FileName
+    $info.UseShellExecute = $false
+    $info.CreateNoWindow = $true
+    $info.RedirectStandardOutput = $true
+    $info.RedirectStandardError = $true
+    $info.StandardOutputEncoding = $encoding
+    $info.StandardErrorEncoding = $encoding
+    $process = [System.Diagnostics.Process]::Start($info)
+    $outputTask = $process.StandardOutput.ReadToEndAsync()
+    $errorTask = $process.StandardError.ReadToEndAsync()
+    $process.WaitForExit()
+    [pscustomobject]@{
+        ExitCode = $process.ExitCode
+        Output = $outputTask.Result
+        Error = $errorTask.Result
+    }
+}
+
+function Stop-IsolatedInstance {
+    try {
+        $status = Send-IpcCommand -Command "status" -TimeoutMs 100
+        if (-not $status.testMode -or $status.serverName -ne $ServerName) {
+            throw "Refusing to stop a non-isolated ScratchEditor instance."
+        }
+        $null = Send-IpcCommand -Command "quit" -TimeoutMs 500
+        Start-Sleep -Milliseconds 100
+    }
+    catch [System.TimeoutException] {
+    }
+    catch [System.IO.IOException] {
+    }
+}
+
+function Start-IsolatedInstance {
+    $startInfo = [System.Diagnostics.ProcessStartInfo]::new()
+    $startInfo.FileName = $editorExe
+    $startInfo.Arguments = "--background --test-mode"
+    $startInfo.UseShellExecute = $false
+    $process = [System.Diagnostics.Process]::Start($startInfo)
+    $status = $null
+    for ($attempt = 0; $attempt -lt 300; $attempt++) {
+        try {
+            $candidate = Send-IpcCommand -Command "status" -TimeoutMs 20
+            if ($candidate.ready -and [int]$candidate.pid -eq $process.Id) {
+                $status = $candidate
+                break
+            }
+        }
+        catch {
+        }
+        Start-Sleep -Milliseconds 5
+    }
+    if ($null -eq $status) {
+        if (-not $process.HasExited) {
+            Stop-Process -Id $process.Id
+        }
+        throw "The isolated stage 4 instance did not become ready."
+    }
+    [pscustomobject]@{ Process = $process; Status = $status }
+}
+
+function Stop-StartedInstance {
+    param([Parameter(Mandatory)] $Started)
+    try {
+        $null = Send-IpcCommand -Command "quit" -TimeoutMs 500
+    }
+    catch {
+        if (-not $Started.Process.HasExited) {
+            Stop-Process -Id $Started.Process.Id
+        }
+    }
+    if (-not $Started.Process.WaitForExit(2000)) {
+        throw "Isolated process $($Started.Process.Id) did not exit."
+    }
+}
+
+function Get-ProtectedProcessIds {
+    @(
+        Get-Process ScratchEditor -ErrorAction SilentlyContinue |
+            Where-Object { $_.Path -ne $editorExe } |
+            ForEach-Object { $_.Id }
+    )
+}
+
+foreach ($required in @($editorExe, $stage2Exe, $stage3Exe, $stage4Exe, $originalAhk)) {
+    if (-not (Test-Path -LiteralPath $required)) {
+        throw "Required stage 4 test input is missing: $required"
+    }
+}
+
+New-Item -ItemType Directory -Path $artifactDir -Force | Out-Null
+New-Item -ItemType Directory -Path $settingsDirectory -Force | Out-Null
+$timestamp = Get-Date -Format "yyyyMMdd-HHmmss"
+$hashBefore = (Get-FileHash -Algorithm SHA256 -LiteralPath $originalAhk).Hash
+$repoStatusBefore = (& git -C (Split-Path -Parent $originalAhk) status --short --branch) -join "`n"
+$protectedBefore = Get-ProtectedProcessIds
+$started = $null
+$restarted = $null
+
+try {
+    Stop-IsolatedInstance
+    $started = Start-IsolatedInstance
+    $reset = Send-IpcCommand -Command "testResetSettings"
+    $initial = Send-IpcCommand -Command "status"
+    $expectedGeometry = [ordered]@{
+        x = [int]$initial.x + 24
+        y = [int]$initial.y + 18
+        width = 800
+        height = 560
+    }
+    $geometrySet = Send-IpcRequest -Request @{
+        command = "testSetGeometry"
+        x = $expectedGeometry.x
+        y = $expectedGeometry.y
+        width = $expectedGeometry.width
+        height = $expectedGeometry.height
+    }
+
+    $stage4Run = Invoke-Utf8Process -FileName $stage4Exe
+    $stage4Behavior = $stage4Run.Output | ConvertFrom-Json
+    $stage3Run = Invoke-Utf8Process -FileName $stage3Exe
+    $stage3Regression = $stage3Run.Output | ConvertFrom-Json
+    $stage2Run = Invoke-Utf8Process -FileName $stage2Exe
+    $stage2Regression = $stage2Run.Output | ConvertFrom-Json
+
+    Stop-StartedInstance -Started $started
+    $started = $null
+    $restarted = Start-IsolatedInstance
+    $persisted = Send-IpcCommand -Command "status"
+    $persistedShortcut = Send-IpcRequest -Request @{
+        command = "testShortcut"
+        commandId = "toggleBold"
+    }
+    $configText = Get-Content -LiteralPath $settingsFile -Raw -Encoding UTF8
+    $persistencePassed = (
+        $persisted.theme -eq "light" -and
+        $persisted.editorFontFamily -eq "Microsoft YaHei UI" -and
+        [int]$persisted.editorFontPointSize -eq 15 -and
+        -not [bool]$persisted.animationsEnabled -and
+        $persistedShortcut.shortcut -eq "Ctrl+Alt+B" -and
+        [int]$persisted.x -eq $expectedGeometry.x -and
+        [int]$persisted.y -eq $expectedGeometry.y -and
+        [int]$persisted.width -eq $expectedGeometry.width -and
+        [int]$persisted.height -eq $expectedGeometry.height
+    )
+    $centralFilePassed = (
+        (Test-Path -LiteralPath $settingsFile) -and
+        $persisted.settingsFile -eq $settingsFile -and
+        $configText.Contains("[appearance]") -and
+        $configText.Contains("[editor]") -and
+        $configText.Contains("[shortcuts]") -and
+        $configText.Contains("[ui]") -and
+        $configText.Contains("[window]")
+    )
+    $null = Send-IpcCommand -Command "testResetSettings"
+
+    $sourceFiles = @(
+        Get-ChildItem -LiteralPath (Join-Path $projectRoot "src"), (Join-Path $projectRoot "qml") `
+            -File -Recurse
+    )
+    $browserReferences = @(
+        $sourceFiles | Select-String -Pattern "WebEngine|WebView|Chromium" -CaseSensitive:$false
+    )
+    $hashAfter = (Get-FileHash -Algorithm SHA256 -LiteralPath $originalAhk).Hash
+    $repoStatusAfter = (& git -C (Split-Path -Parent $originalAhk) status --short --branch) -join "`n"
+    $protectedAfter = Get-ProtectedProcessIds
+    $protectedPreserved = -not (@($protectedBefore | Where-Object {
+        $protectedAfter -notcontains $_
+    }).Count)
+
+    $checks = [ordered]@{
+        stage4Behavior = ($stage4Run.ExitCode -eq 0 -and [bool]$stage4Behavior.allPassed)
+        stage3Regression = ($stage3Run.ExitCode -eq 0 -and [bool]$stage3Regression.allPassed)
+        stage2Regression = ($stage2Run.ExitCode -eq 0 -and [bool]$stage2Regression.allPassed)
+        appearanceAndGeometryPersistence = $persistencePassed
+        centralizedIniConfiguration = $centralFilePassed
+        lazySettingsPage = [bool]$stage4Behavior.checks.lazySettingsPage
+        deferredFeaturesExcluded = [bool]$stage4Behavior.checks.deferredFeaturesExcluded
+        browserEngineExcluded = ($browserReferences.Count -eq 0)
+        originalAhkUnchanged = ($hashBefore -eq $hashAfter)
+        originalAhkRepoUnchanged = ($repoStatusBefore -eq $repoStatusAfter)
+        runningUserInstancesPreserved = $protectedPreserved
+    }
+    $allPassed = -not ($checks.Values -contains $false)
+    $report = [ordered]@{
+        timestamp = (Get-Date).ToString("o")
+        isolatedBuild = $buildDir
+        isolatedServer = $ServerName
+        reset = $reset
+        expectedGeometry = $expectedGeometry
+        geometrySet = $geometrySet
+        stage4 = $stage4Behavior
+        stage4Stderr = $stage4Run.Error
+        stage3Regression = $stage3Regression
+        stage3Stderr = $stage3Run.Error
+        stage2Regression = $stage2Regression
+        stage2Stderr = $stage2Run.Error
+        persistedStatus = $persisted
+        persistedShortcut = $persistedShortcut
+        configuration = [ordered]@{
+            file = $settingsFile
+            schemaVersion = $persisted.settingsSchemaVersion
+            centralized = $centralFilePassed
+        }
+        sourceProtection = [ordered]@{
+            original = $originalAhk
+            hashBefore = $hashBefore
+            hashAfter = $hashAfter
+            repoStatusBefore = $repoStatusBefore
+            repoStatusAfter = $repoStatusAfter
+        }
+        userInstances = [ordered]@{
+            idsBefore = $protectedBefore
+            idsAfter = $protectedAfter
+            preserved = $protectedPreserved
+        }
+        checks = $checks
+        allPassed = $allPassed
+    }
+    $artifactPath = Join-Path $artifactDir "$ArtifactPrefix-$timestamp.json"
+    [System.IO.File]::WriteAllText(
+        $artifactPath,
+        ($report | ConvertTo-Json -Depth 16),
+        [System.Text.UTF8Encoding]::new($false)
+    )
+    [pscustomobject]@{
+        allPassed = $allPassed
+        checks = $checks
+        artifact = $artifactPath
+    } | ConvertTo-Json -Depth 6
+
+    if (-not $allPassed) {
+        exit 1
+    }
+}
+finally {
+    if ($null -ne $restarted) {
+        Stop-StartedInstance -Started $restarted
+    }
+    elseif ($null -ne $started) {
+        Stop-StartedInstance -Started $started
+    }
+}

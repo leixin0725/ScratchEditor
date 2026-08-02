@@ -1,0 +1,13 @@
+/.tools/
+/build/
+/dev-links/
+
+/artifacts/*
+!/artifacts/baselines/
+!/artifacts/baselines/**
+
+*.log
+*.user
+CMakeUserPresets.json
+.DS_Store
+Thumbs.db
