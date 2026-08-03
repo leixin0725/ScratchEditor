@@ -18,6 +18,7 @@ Qt 6 Quick/QML、C++20 和 CMake；AutoHotkey 继续负责全局快捷键与启�
 - 查找替换、延迟加载命令面板和可配置快捷键。
 - 延迟加载设置页、深浅主题、编辑字体/字号，以及同步透明度与居中形变的轻量唤出/关闭动画开关。
 - 窗口、外观和快捷键统一保存在一个带 schema 的 INI 配置文件中。
+- 可作为 Codex 和 pi-coding-agent 的同步外部提示词编辑器，按文件启动独立瞬态进程。
 
 按用户决定不提供 Markdown 预览。项目也不使用 Qt WebEngine、WebView 或其他浏览器
 内核；历史草稿、标签页、固定草稿、多光标、插件和 LSP 当前均不在范围内。
@@ -40,6 +41,7 @@ Qt 6 Quick/QML、C++20 和 CMake；AutoHotkey 继续负责全局快捷键与启�
 
 - 加粗、斜体和代码命令在无选区时按 Qt 词边界处理相邻词语；在同类标记内部再次触发会取消对应格式，跨边界选区则只清理同类内部标记。
 - 标题设置、推进和循环命令不会主动选中当前标题行；折叠光标会保持在正文中的相对位置。
+- 空白行执行任一级标题命令会创建对应的 `# ` 到 `###### `；任何标题再次执行同级命令都会取消标题并保留正文。光标紧跟在行首标题前缀后时，一次 Backspace 也会删除完整前缀。
 - 引用命令在空行生成 `> `，执行后不会保留自动选区。
 - `Tab` 优先跳出括号、引号或 Markdown 强调标记；未触发跳出时，无论光标位于行内何处，都在行首增加 4 个空格。`Shift+Tab` 减少一级缩进。
 - 括号、引号、行内代码与围栏代码支持自动补全，包含半角、全角及常用中文成对符号。
@@ -67,10 +69,10 @@ KeysRedirect.ahk ──命名管道──> ScratchEditor.exe
 - `integration/`：隔离的 AHK 迁移参考副本。
 - `tests/`：C++ 验收程序和 AHK 测试夹具。
 - `scripts/`：构建、功能回归和性能验收入口。
-- `docs/`：分阶段计划与验收报告。
+- `docs/`：历史归档、验收报告与功能分支文档。
 - `artifacts/baselines/`：纳入版本控制的阶段最终证据。
 
-完整架构和阶段门槛见 [ScratchEditor-Migration.md](ScratchEditor-Migration.md)，文档索引见
+完整架构和阶段门槛见 [ScratchEditor-Migration.md](docs/archive/ScratchEditor-Migration.md)，文档索引见
 [docs/README.md](docs/README.md)。
 
 ## 工具链与构建
@@ -119,7 +121,50 @@ KeysRedirect.ahk ──命名管道──> ScratchEditor.exe
 正式配置存放在 Qt `AppConfigLocation` 下的 `settings.ini`。首次创建集中配置时会迁移
 旧 Native Settings 中的窗口几何和快捷键；测试通过独立环境变量使用临时 INI。
 
+## CLI 外部编辑器
+
+文件位置参数会进入独立的外部编辑模式；`--wait` 是便于环境变量表达的兼容选项，进程本身
+始终等待到编辑完成：
+
+```powershell
+./build/release/ScratchEditor.exe --wait ./prompt.md
+```
+
+文件模式读取和写回 UTF-8，绕过剪贴板、常驻单实例转发与生产 IPC。`Ctrl+S` 保存但继续
+编辑；Escape 或关闭窗口会先保存，成功后以退出码 `0` 结束。保存失败时窗口保持打开。
+
+在当前 PowerShell 会话中配置 Codex 与 pi：
+
+```powershell
+$scratchEditor = 'D:\_Dev\ScratchEditor\build\release\ScratchEditor.exe --wait'
+$env:VISUAL = $scratchEditor
+$env:EDITOR = $scratchEditor
+```
+
+Codex 在 composer 中按 `Ctrl+G`；pi 也可在自己的 `settings.json` 中优先配置：
+
+```json
+{
+  "externalEditor": "D:\\_Dev\\ScratchEditor\\build\\release\\ScratchEditor.exe --wait"
+}
+```
+
+当前已在原生 Windows 上实测 Codex CLI 0.146.0 与 pi 0.80.10 的完整 `Ctrl+G` 等待、写回
+和返回流程。Claude Code 按本轮范围暂未实测。调查依据与后续边界见
+[`docs/001-external-editor/`](docs/001-external-editor/)。
+
 ## 验收
+
+外部文件核心、进程生命周期、并发会话与常驻实例隔离：
+
+```powershell
+./scripts/run-external-editor-tests.ps1
+node ./scripts/run-external-cli-integration.mjs
+```
+
+第二条命令是本机 CLI 级联调，使用 ConPTY，并要求存在 `node-pty`；可通过
+`SCRATCHEDITOR_NODE_PTY` 指向已安装的包目录。测试使用隔离的 Codex/pi 临时配置，写回
+`/quit` 后退出，不发送模型请求，也不修改用户的 CLI 配置。
 
 阶段 6 AHK 安装状态、备份、IPC、失败回退和进程保护验收：
 

@@ -1023,6 +1023,21 @@ bool EditorCommandRegistry::transformSelectedLines(const QString &commandId)
                                         : QRegularExpressionMatch();
     const int originalHeadingPrefixLength = originalHeadingMatch.hasMatch()
         ? originalHeadingMatch.capturedLength() : 0;
+    const auto targetHeadingLevel = [&commandId, setHeading](int currentLevel) {
+        if (setHeading) {
+            return commandId.back().digitValue();
+        }
+        if (commandId == QStringLiteral("increaseHeadingLevel")) {
+            return currentLevel == 0 ? 1 : qMin(6, currentLevel + 1);
+        }
+        if (commandId == QStringLiteral("decreaseHeadingLevel")) {
+            return currentLevel == 0 ? 6 : qMax(1, currentLevel - 1);
+        }
+        if (currentLevel == 0) {
+            return 1;
+        }
+        return currentLevel < 6 ? currentLevel + 1 : 0;
+    };
 
     const auto allNonEmptyMatch = [&lines](const QRegularExpression &expression) {
         bool sawContent = false;
@@ -1047,7 +1062,10 @@ bool EditorCommandRegistry::transformSelectedLines(const QString &commandId)
 
     for (QString &line : lines) {
         if (line.trimmed().isEmpty()) {
-            if (commandId == QStringLiteral("toggleQuote") && !removeQuote) {
+            if (headingCommand && originalStart == originalEnd && lines.size() == 1) {
+                const int targetLevel = targetHeadingLevel(0);
+                line = QString(targetLevel, QLatin1Char('#')) + QLatin1Char(' ');
+            } else if (commandId == QStringLiteral("toggleQuote") && !removeQuote) {
                 line = QStringLiteral("> ");
             }
             continue;
@@ -1055,17 +1073,11 @@ bool EditorCommandRegistry::transformSelectedLines(const QString &commandId)
         if (headingCommand) {
             const QRegularExpressionMatch match = headingPrefix.match(line);
             const int currentLevel = match.hasMatch() ? match.captured(1).size() : 0;
-            int targetLevel = 0;
-            if (setHeading) {
-                targetLevel = commandId.back().digitValue();
-            } else if (commandId == QStringLiteral("increaseHeadingLevel")) {
-                targetLevel = currentLevel == 0 ? 1 : qMin(6, currentLevel + 1);
-            } else if (commandId == QStringLiteral("decreaseHeadingLevel")) {
-                targetLevel = currentLevel == 0 ? 6 : qMax(1, currentLevel - 1);
-            } else if (currentLevel == 0) {
-                targetLevel = 1;
-            } else if (currentLevel < 6) {
-                targetLevel = currentLevel + 1;
+            int targetLevel = targetHeadingLevel(currentLevel);
+            const bool togglesMatchingHeading = setHeading && match.hasMatch()
+                && currentLevel == commandId.back().digitValue();
+            if (togglesMatchingHeading) {
+                targetLevel = 0;
             }
 
             if (match.hasMatch()) {
@@ -1366,6 +1378,24 @@ bool EditorCommandRegistry::handleSpecialBackspace()
         }
         editCursor.endEditBlock();
         m_editor->setProperty("cursorPosition", removeStart);
+        focusEditor();
+        return true;
+    }
+
+    const int headingPrefixLength = start - lineStart;
+    const int headingMarkerLength = headingPrefixLength - 1;
+    bool exactHeadingPrefix = headingMarkerLength >= 1 && headingMarkerLength <= 6
+        && start <= lineEnd && text.at(start - 1) == QLatin1Char(' ');
+    for (int position = lineStart; exactHeadingPrefix && position < start - 1;
+         ++position) {
+        exactHeadingPrefix = text.at(position) == QLatin1Char('#');
+    }
+    if (exactHeadingPrefix && !isInsideFencedCode(text, lineStart)) {
+        QTextCursor cursor(m_document);
+        cursor.setPosition(lineStart);
+        cursor.setPosition(start, QTextCursor::KeepAnchor);
+        cursor.removeSelectedText();
+        m_editor->setProperty("cursorPosition", lineStart);
         focusEditor();
         return true;
     }

@@ -1,6 +1,7 @@
 #include "editorcontroller.h"
 #include "appsettings.h"
 #include "editorcommandregistry.h"
+#include "externalfilesession.h"
 #include "markdownhighlighter.h"
 #include "markdownstyle.h"
 
@@ -8,6 +9,7 @@
 #include <QColor>
 #include <QCoreApplication>
 #include <QEvent>
+#include <QFileInfo>
 #include <QFont>
 #include <QFontMetrics>
 #include <QGuiApplication>
@@ -84,11 +86,21 @@ bool openClipboardWithRetry(HWND owner, DWORD *lastError)
 
 } // namespace
 
-EditorController::EditorController(bool testMode, QElapsedTimer *startupTimer, QObject *parent)
+EditorController::EditorController(bool testMode, QElapsedTimer *startupTimer,
+                                   const QString &externalFilePath, QObject *parent)
     : QObject(parent)
     , m_startupTimer(startupTimer)
     , m_testMode(testMode)
 {
+    if (!externalFilePath.isEmpty()) {
+        m_externalFileSession = std::make_unique<ExternalFileSession>(externalFilePath);
+        m_externalFileReady = m_externalFileSession->load(&m_externalFileText,
+                                                          &m_externalFileError);
+        m_statusMessage = m_externalFileReady
+            ? QStringLiteral("Ctrl+S 保存 · Esc 保存并返回 CLI")
+            : m_externalFileError;
+        m_statusHealthy = m_externalFileReady;
+    }
     m_settings = std::make_unique<AppSettings>(m_testMode);
     m_markdownStyle = std::make_unique<MarkdownStyle>(MarkdownStyle::load());
     reloadAppearance();
@@ -159,9 +171,45 @@ bool EditorController::testMode() const
     return m_testMode;
 }
 
+bool EditorController::externalFileMode() const
+{
+    return bool(m_externalFileSession);
+}
+
+bool EditorController::externalFileReady() const
+{
+    return !externalFileMode() || m_externalFileReady;
+}
+
+QString EditorController::externalFileName() const
+{
+    return m_externalFileSession
+        ? QFileInfo(m_externalFileSession->filePath()).fileName()
+        : QString();
+}
+
+QString EditorController::externalFileError() const
+{
+    return m_externalFileError;
+}
+
+bool EditorController::completeExternalFileTest(const QString &text)
+{
+    if (!m_testMode || !externalFileMode() || !m_editor) {
+        return false;
+    }
+    m_editor->setProperty("text", text);
+    return commitExternalFileAndExit();
+}
+
 QString EditorController::statusMessage() const
 {
     return m_statusMessage;
+}
+
+bool EditorController::statusHealthy() const
+{
+    return m_statusHealthy;
 }
 
 bool EditorController::clipboardHealthy() const
@@ -904,15 +952,28 @@ void EditorController::showEditor()
     }
 #endif
 
-    QString clipboardText;
-    QString clipboardError;
-    if (readClipboardText(&clipboardText, &clipboardError)) {
-        if (m_editor->property("text").toString() != clipboardText) {
-            m_editor->setProperty("text", clipboardText);
+    if (externalFileMode()) {
+        if (!m_externalFileReady) {
+            setExternalFileState(false, m_externalFileError);
+            return;
         }
-        setClipboardState(true);
+        if (!m_externalFileLoadedIntoEditor) {
+            m_editor->setProperty("text", m_externalFileText);
+            m_editor->setProperty("cursorPosition", m_externalFileText.size());
+            m_externalFileLoadedIntoEditor = true;
+        }
+        setExternalFileState(true, QStringLiteral("Ctrl+S 保存 · Esc 保存并返回 CLI"));
     } else {
-        setClipboardState(false, clipboardError);
+        QString clipboardText;
+        QString clipboardError;
+        if (readClipboardText(&clipboardText, &clipboardError)) {
+            if (m_editor->property("text").toString() != clipboardText) {
+                m_editor->setProperty("text", clipboardText);
+            }
+            setClipboardState(true);
+        } else {
+            setClipboardState(false, clipboardError);
+        }
     }
 
     if (!m_positioned) {
@@ -974,7 +1035,50 @@ void EditorController::toggleEditor()
 
 void EditorController::hideEditor()
 {
-    commitAndHide();
+    if (externalFileMode()) {
+        commitExternalFileAndExit();
+    } else {
+        commitAndHide();
+    }
+}
+
+bool EditorController::saveExternalFile()
+{
+    if (!externalFileMode() || !m_externalFileReady || !m_editor) {
+        return false;
+    }
+
+    QString errorMessage;
+    if (!m_externalFileSession->save(m_editor->property("text").toString(), &errorMessage)) {
+        m_externalFileError = errorMessage;
+        setExternalFileState(false, errorMessage);
+        if (m_window) {
+            m_window->raise();
+            m_window->requestActivate();
+        }
+        QMetaObject::invokeMethod(m_editor, "forceActiveFocus");
+        return false;
+    }
+
+    m_externalFileError.clear();
+    setExternalFileState(true, QStringLiteral("已保存 · Esc 保存并返回 CLI"));
+    return true;
+}
+
+bool EditorController::commitExternalFileAndExit()
+{
+    if (m_externalFileCompleted) {
+        return true;
+    }
+    if (!saveExternalFile()) {
+        return false;
+    }
+
+    m_externalFileCompleted = true;
+    saveWindowGeometry();
+    restorePreviousFocus();
+    QTimer::singleShot(0, qApp, [] { QCoreApplication::exit(0); });
+    return true;
 }
 
 bool EditorController::commitAndHide()
@@ -1124,7 +1228,7 @@ QRect EditorController::scaledWindowGeometry(const QRect &restingGeometry) const
 void EditorController::shutdown()
 {
     saveWindowGeometry();
-    if (isVisible()) {
+    if (!externalFileMode() && isVisible()) {
         commitAndHide();
     }
     m_server.close();
@@ -1258,13 +1362,25 @@ void EditorController::setClipboardState(bool healthy, const QString &message)
 {
     const QString newMessage = healthy ? QStringLiteral("Esc 关闭并复制") : message;
     const bool healthChanged = m_clipboardHealthy != healthy;
+    const bool statusHealthChanged = m_statusHealthy != healthy;
     const bool messageChanged = m_statusMessage != newMessage;
     m_clipboardHealthy = healthy;
+    m_statusHealthy = healthy;
     m_statusMessage = newMessage;
     if (healthChanged) {
         emit clipboardStateChanged();
     }
-    if (messageChanged) {
+    if (messageChanged || statusHealthChanged) {
+        emit statusMessageChanged();
+    }
+}
+
+void EditorController::setExternalFileState(bool healthy, const QString &message)
+{
+    const bool changed = m_statusHealthy != healthy || m_statusMessage != message;
+    m_statusHealthy = healthy;
+    m_statusMessage = message;
+    if (changed) {
         emit statusMessageChanged();
     }
 }

@@ -218,7 +218,7 @@ settings
 ## 8. 分阶段迁移路线
 
 当前阶段 1–6 均已完成。以下内容保留各阶段的范围定义；实际验收结果见
-[`docs/README.md`](docs/README.md)。
+[`docs/README.md`](../README.md)。
 
 ### 阶段 0：冻结 AHK UI 功能范围
 
@@ -317,4 +317,4 @@ settings
 3. Qt 文本系统足以支持当前规划的 Markdown、快捷键和快捷编辑功能。
 
 阶段 1 的垂直原型及后续全量回归已用实测数据验证启动、内存、输入和动画表现；
-最终状态与证据索引见 [`docs/README.md`](docs/README.md)。
+最终状态与证据索引见 [`docs/README.md`](../README.md)。

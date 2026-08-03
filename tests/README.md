@@ -6,6 +6,13 @@
 - `stage2_main.cpp`：滚动条、Escape、焦点和剪贴板异常回归。
 - `stage3_main.cpp`：Markdown 高亮、编辑命令、查找替换和快捷键回归。
 - `stage4_main.cpp`：设置页、主题字体、集中配置、窗口交互/配色、20 轮唤出关闭动画稳定性与明确排除项回归。
+- `externalfilesession_main.cpp`：外部 CLI 编辑模式的 UTF-8/BOM、Unicode 路径、空文件、原子保存和错误边界回归。
+- `externaleditorprocess_main.cpp`：验证外部编辑进程在编辑期间持续等待、保存写回后以成功状态退出，并覆盖错误参数退出码。
+- `../scripts/run-external-cli-integration.mjs`：通过伪终端实测 Codex 与 pi 的 `Ctrl+G`，由 ScratchEditor 写回 `/quit` 后确认 CLI 成功返回；Claude Code 暂不在此脚本中测试。
+
+CLI 级脚本需要一个已安装的 `node-pty` 包。本机默认复用全局 Gemini CLI 的依赖；其他环境可
+通过 `SCRATCHEDITOR_NODE_PTY` 指定包目录。脚本为 Codex 和 pi 创建隔离临时配置，不发送模型
+请求，也不读取或覆盖用户的认证和设置。
 
 这些程序只连接由脚本启动的 `--test-mode` 隔离实例。生产 IPC 不暴露测试命令。
 
@@ -35,9 +42,12 @@
 
 ## 推荐执行顺序
 
-1. `scripts/build.ps1 -Preset stage4`
-2. `scripts/run-stage6-tests.ps1`
-3. `scripts/run-stage4-tests.ps1`（AHK 基线参数指向阶段 6 备份）
-4. `scripts/run-stage1-tests.ps1`（完整性能门槛）
+1. `scripts/build.ps1 -Preset release`
+2. `scripts/run-external-editor-tests.ps1`
+3. `node scripts/run-external-cli-integration.mjs`
+4. `scripts/build.ps1 -Preset stage4`
+5. `scripts/run-stage6-tests.ps1`
+6. `scripts/run-stage4-tests.ps1`（AHK 基线参数指向阶段 6 备份）
+7. `scripts/run-stage1-tests.ps1`（完整性能门槛）
 
 最终结果应复制到 `artifacts/baselines/`；普通运行产生的时间戳结果默认被 Git 忽略。

@@ -358,6 +358,48 @@ int main(int argc, char *argv[])
              QJsonObject{{QStringLiteral("direct"), collapsedDirectHeading},
                          {QStringLiteral("cycle"), collapsedCycledHeading}});
 
+    bool allEmptyHeadingLevels = true;
+    QJsonObject lastEmptyHeadingToggle;
+    for (int level = 1; level <= 6; ++level) {
+        setTextAndSelection(QString(), 0, 0);
+        const QJsonObject createdHeading = execute(QStringLiteral("setHeading%1").arg(level));
+        const QString expected = QString(level, QLatin1Char('#')) + QLatin1Char(' ');
+        lastEmptyHeadingToggle = execute(QStringLiteral("setHeading%1").arg(level));
+        allEmptyHeadingLevels = allEmptyHeadingLevels
+            && createdHeading.value(QStringLiteral("text")).toString() == expected
+            && createdHeading.value(QStringLiteral("cursorPosition")).toInt()
+                == expected.size()
+            && createdHeading.value(QStringLiteral("selectionStart")).toInt()
+                == createdHeading.value(QStringLiteral("selectionEnd")).toInt()
+            && lastEmptyHeadingToggle.value(QStringLiteral("text")).toString().isEmpty()
+            && lastEmptyHeadingToggle.value(QStringLiteral("cursorPosition")).toInt() == 0;
+    }
+    setTextAndSelection(QString(), 0, 0);
+    execute(QStringLiteral("setHeading3"));
+    const QJsonObject changedEmptyHeadingLevel = execute(QStringLiteral("setHeading4"));
+    setTextAndSelection(QStringLiteral("### title"), 6, 6);
+    const QJsonObject removedNonEmptyHeading = execute(QStringLiteral("setHeading3"));
+    setTextAndSelection(QStringLiteral("### title"), 6, 6);
+    const QJsonObject changedNonEmptyHeadingLevel = execute(QStringLiteral("setHeading4"));
+    setTextAndSelection(QStringLiteral("## one\n## two"), 0, 13);
+    const QJsonObject removedSelectedHeadings = execute(QStringLiteral("setHeading2"));
+    addCheck(checks, details, QStringLiteral("headingShortcutsToggleMatchingLevel"),
+             allEmptyHeadingLevels
+                 && changedEmptyHeadingLevel.value(QStringLiteral("text")).toString()
+                    == QStringLiteral("#### ")
+                 && removedNonEmptyHeading.value(QStringLiteral("text")).toString()
+                    == QStringLiteral("title")
+                 && removedNonEmptyHeading.value(QStringLiteral("cursorPosition")).toInt() == 2
+                 && changedNonEmptyHeadingLevel.value(QStringLiteral("text")).toString()
+                    == QStringLiteral("#### title")
+                 && removedSelectedHeadings.value(QStringLiteral("text")).toString()
+                    == QStringLiteral("one\ntwo"),
+             QJsonObject{{QStringLiteral("lastToggle"), lastEmptyHeadingToggle},
+                         {QStringLiteral("changedLevel"), changedEmptyHeadingLevel},
+                         {QStringLiteral("removedContent"), removedNonEmptyHeading},
+                         {QStringLiteral("changedContent"), changedNonEmptyHeadingLevel},
+                         {QStringLiteral("selection"), removedSelectedHeadings}});
+
     setTextAndSelection(QStringLiteral("one\ntwo"), 0, 7);
     execute(QStringLiteral("toggleList"));
     const bool listOn = editorText() == QStringLiteral("- one\n- two");
@@ -497,6 +539,41 @@ int main(int argc, char *argv[])
                          {QStringLiteral("code"), deletedCodePair},
                          {QStringLiteral("fence"), deletedFencePair},
                          {QStringLiteral("bracket"), unchangedBracketBackspace}});
+
+    bool allHeadingPrefixesDeleted = true;
+    QJsonObject lastDeletedHeadingPrefix;
+    for (int level = 1; level <= 6; ++level) {
+        const QString heading = QString(level, QLatin1Char('#')) + QStringLiteral(" title");
+        setTextAndSelection(heading, level + 1, level + 1);
+        lastDeletedHeadingPrefix = keyPress({}, QStringLiteral("Backspace"));
+        allHeadingPrefixesDeleted = allHeadingPrefixesDeleted
+            && lastDeletedHeadingPrefix.value(QStringLiteral("text")).toString()
+                == QStringLiteral("title")
+            && lastDeletedHeadingPrefix.value(QStringLiteral("cursorPosition")).toInt() == 0;
+    }
+    setTextAndSelection(QStringLiteral("text ### title"), 9, 9);
+    const QJsonObject inlineHashesBackspace = keyPress({}, QStringLiteral("Backspace"));
+    setTextAndSelection(QStringLiteral("####### title"), 8, 8);
+    const QJsonObject sevenHashesBackspace = keyPress({}, QStringLiteral("Backspace"));
+    setTextAndSelection(QStringLiteral("> ### title"), 6, 6);
+    const QJsonObject quotedHeadingBackspace = keyPress({}, QStringLiteral("Backspace"));
+    setTextAndSelection(QStringLiteral("```\n### title\n```"), 8, 8);
+    const QJsonObject fencedHeadingBackspace = keyPress({}, QStringLiteral("Backspace"));
+    addCheck(checks, details, QStringLiteral("backspaceDeletesOnlyExactHeadingPrefixes"),
+             allHeadingPrefixesDeleted
+                 && inlineHashesBackspace.value(QStringLiteral("text")).toString()
+                    == QStringLiteral("text ###title")
+                 && sevenHashesBackspace.value(QStringLiteral("text")).toString()
+                    == QStringLiteral("#######title")
+                 && quotedHeadingBackspace.value(QStringLiteral("text")).toString()
+                    == QStringLiteral("> ###title")
+                 && fencedHeadingBackspace.value(QStringLiteral("text")).toString()
+                    == QStringLiteral("```\n###title\n```"),
+             QJsonObject{{QStringLiteral("heading"), lastDeletedHeadingPrefix},
+                         {QStringLiteral("inline"), inlineHashesBackspace},
+                         {QStringLiteral("sevenHashes"), sevenHashesBackspace},
+                         {QStringLiteral("quoted"), quotedHeadingBackspace},
+                         {QStringLiteral("fenced"), fencedHeadingBackspace}});
 
     setTextAndSelection(QString(), 0, 0);
     const QJsonObject autoListSpace = keyPress(QStringLiteral("-"));

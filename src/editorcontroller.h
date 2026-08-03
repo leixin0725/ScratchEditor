@@ -19,6 +19,7 @@ class QQuickWindow;
 class QVariantAnimation;
 class AppSettings;
 class EditorCommandRegistry;
+class ExternalFileSession;
 class MarkdownHighlighter;
 class MarkdownStyle;
 
@@ -27,7 +28,10 @@ class EditorController final : public QObject
     Q_OBJECT
     Q_PROPERTY(bool visible READ isVisible NOTIFY visibleChanged)
     Q_PROPERTY(bool testMode READ testMode CONSTANT)
+    Q_PROPERTY(bool externalFileMode READ externalFileMode CONSTANT)
+    Q_PROPERTY(QString externalFileName READ externalFileName CONSTANT)
     Q_PROPERTY(QString statusMessage READ statusMessage NOTIFY statusMessageChanged)
+    Q_PROPERTY(bool statusHealthy READ statusHealthy NOTIFY statusMessageChanged)
     Q_PROPERTY(bool clipboardHealthy READ clipboardHealthy NOTIFY clipboardStateChanged)
     Q_PROPERTY(QVariantList commands READ commands NOTIFY commandsChanged)
     Q_PROPERTY(bool markdownHighlighting READ markdownHighlighting NOTIFY markdownHighlightingChanged)
@@ -42,7 +46,8 @@ class EditorController final : public QObject
     Q_PROPERTY(bool markdownStyleLoaded READ markdownStyleLoaded CONSTANT)
 
 public:
-    explicit EditorController(bool testMode, QElapsedTimer *startupTimer, QObject *parent = nullptr);
+    explicit EditorController(bool testMode, QElapsedTimer *startupTimer,
+                              const QString &externalFilePath = {}, QObject *parent = nullptr);
     ~EditorController() override;
 
     static QString serverName();
@@ -52,7 +57,13 @@ public:
     bool isReady() const;
     bool isVisible() const;
     bool testMode() const;
+    bool externalFileMode() const;
+    bool externalFileReady() const;
+    QString externalFileName() const;
+    QString externalFileError() const;
+    bool completeExternalFileTest(const QString &text);
     QString statusMessage() const;
+    bool statusHealthy() const;
     bool clipboardHealthy() const;
     QVariantList commands() const;
     bool markdownHighlighting() const;
@@ -69,6 +80,7 @@ public:
     Q_INVOKABLE void registerWindow(QQuickWindow *window);
     Q_INVOKABLE void registerEditor(QObject *editor);
     Q_INVOKABLE void hideEditor();
+    Q_INVOKABLE bool saveExternalFile();
     Q_INVOKABLE void animationBenchmarkFinished();
     Q_INVOKABLE bool executeCommand(const QString &commandId);
     Q_INVOKABLE QString shortcutFor(const QString &commandId) const;
@@ -120,6 +132,8 @@ private:
     void waitForNextFrame(QLocalSocket *socket, QJsonObject response, qint64 startedNs,
                           const QString &requestId);
     bool commitAndHide();
+    bool commitExternalFileAndExit();
+    void setExternalFileState(bool healthy, const QString &message);
     void startWindowTransition(qreal targetOpacity, const QRect &targetGeometry,
                                bool hideWhenFinished);
     void finishWindowHide();
@@ -148,17 +162,24 @@ private:
     QPointer<QObject> m_editor;
     std::unique_ptr<AppSettings> m_settings;
     std::unique_ptr<EditorCommandRegistry> m_commands;
+    std::unique_ptr<ExternalFileSession> m_externalFileSession;
     std::unique_ptr<MarkdownStyle> m_markdownStyle;
     QPointer<MarkdownHighlighter> m_markdownHighlighter;
     QElapsedTimer *m_startupTimer = nullptr;
     QElapsedTimer m_monotonic;
     bool m_testMode = false;
+    bool m_externalFileReady = false;
+    bool m_externalFileLoadedIntoEditor = false;
+    bool m_externalFileCompleted = false;
+    QString m_externalFileText;
+    QString m_externalFileError;
     bool m_ready = false;
     qint64 m_readyStartupMs = -1;
     bool m_positioned = false;
     bool m_firstFrameCaptured = false;
     QString m_firstFrameColor;
     QString m_statusMessage = QStringLiteral("Esc 关闭并复制");
+    bool m_statusHealthy = true;
     bool m_clipboardHealthy = true;
     quintptr m_previousForegroundWindow = 0;
     quint64 m_focusGeneration = 0;

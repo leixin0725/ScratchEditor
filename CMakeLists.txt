@@ -17,6 +17,8 @@ qt_add_executable(ScratchEditor WIN32
     src/appsettings.h
     src/editorcontroller.cpp
     src/editorcontroller.h
+    src/externalfilesession.cpp
+    src/externalfilesession.h
     src/editorcommandregistry.cpp
     src/editorcommandregistry.h
     src/markdownhighlighter.cpp
@@ -124,8 +126,36 @@ if(WIN32)
     target_link_libraries(ScratchEditorStage2Tests PRIVATE ole32 user32)
 endif()
 
+qt_add_executable(ScratchEditorExternalFileTests
+    tests/externalfilesession_main.cpp
+    src/externalfilesession.cpp
+    src/externalfilesession.h
+)
+
+qt_add_executable(ScratchEditorExternalProcessTests
+    tests/externaleditorprocess_main.cpp
+)
+
+target_include_directories(ScratchEditorExternalFileTests PRIVATE src)
+
+target_link_libraries(ScratchEditorExternalFileTests PRIVATE
+    Qt6::Core
+)
+
+target_link_libraries(ScratchEditorExternalProcessTests PRIVATE
+    Qt6::Core
+)
+
+target_link_options(ScratchEditorExternalFileTests PRIVATE
+    $<$<AND:$<CONFIG:Release>,$<CXX_COMPILER_ID:GNU>>:-s>
+)
+
+target_link_options(ScratchEditorExternalProcessTests PRIVATE
+    $<$<AND:$<CONFIG:Release>,$<CXX_COMPILER_ID:GNU>>:-s>
+)
+
 install(TARGETS ScratchEditor ScratchEditorPerf ScratchEditorStage2Tests ScratchEditorStage3Tests
-        ScratchEditorStage4Tests
+        ScratchEditorStage4Tests ScratchEditorExternalFileTests ScratchEditorExternalProcessTests
     RUNTIME DESTINATION .
 )
 

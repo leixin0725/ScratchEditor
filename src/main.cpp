@@ -2,6 +2,7 @@
 
 #include <QCommandLineOption>
 #include <QCommandLineParser>
+#include <QDebug>
 #include <QElapsedTimer>
 #include <QGuiApplication>
 #include <QQmlApplicationEngine>
@@ -52,11 +53,39 @@ int main(int argc, char *argv[])
     parser.addOption({QStringLiteral("toggle"), QStringLiteral("Toggle an existing instance")});
     parser.addOption({QStringLiteral("show"), QStringLiteral("Show an existing instance")});
     parser.addOption({QStringLiteral("hide"), QStringLiteral("Hide an existing instance")});
+    parser.addOption({QStringLiteral("wait"),
+                      QStringLiteral("Wait until editing the provided file is complete")});
     parser.addOption({QStringLiteral("test-mode"), QStringLiteral("Enable isolated benchmark commands")});
+    parser.addPositionalArgument(QStringLiteral("file"),
+                                 QStringLiteral("UTF-8 file to edit for an external CLI"),
+                                 QStringLiteral("[file]"));
     parser.process(app);
 
+    const QStringList positionalArguments = parser.positionalArguments();
+    if (positionalArguments.size() > 1) {
+        qCritical().noquote() << QStringLiteral("ScratchEditor accepts at most one file path");
+        return 4;
+    }
+    const QString externalFilePath = positionalArguments.value(0);
+    const bool externalFileMode = !externalFilePath.isEmpty();
+    const bool residentOptionSet = parser.isSet(QStringLiteral("background"))
+        || parser.isSet(QStringLiteral("toggle"))
+        || parser.isSet(QStringLiteral("show"))
+        || parser.isSet(QStringLiteral("hide"));
+    if (externalFileMode && residentOptionSet) {
+        qCritical().noquote()
+            << QStringLiteral("File editing cannot be combined with resident window options");
+        return 4;
+    }
+    if (parser.isSet(QStringLiteral("wait")) && !externalFileMode) {
+        qCritical().noquote() << QStringLiteral("--wait requires a file path");
+        return 4;
+    }
+
     QString forwardedCommand;
-    if (parser.isSet(QStringLiteral("toggle"))) {
+    if (externalFileMode) {
+        forwardedCommand.clear();
+    } else if (parser.isSet(QStringLiteral("toggle"))) {
         forwardedCommand = QStringLiteral("toggle");
     } else if (parser.isSet(QStringLiteral("show"))) {
         forwardedCommand = QStringLiteral("show");
@@ -66,12 +95,17 @@ int main(int argc, char *argv[])
         forwardedCommand = QStringLiteral("show");
     }
 
-    if (EditorController::forwardToExistingInstance(forwardedCommand)) {
+    if (!externalFileMode && EditorController::forwardToExistingInstance(forwardedCommand)) {
         return 0;
     }
 
-    EditorController controller(parser.isSet(QStringLiteral("test-mode")), &startupTimer);
-    if (!controller.startServer()) {
+    EditorController controller(parser.isSet(QStringLiteral("test-mode")), &startupTimer,
+                                externalFilePath);
+    if (externalFileMode && !controller.externalFileReady()) {
+        qCritical().noquote() << controller.externalFileError();
+        return 4;
+    }
+    if (!externalFileMode && !controller.startServer()) {
         return 2;
     }
 
@@ -85,8 +119,16 @@ int main(int argc, char *argv[])
     QObject::connect(&app, &QCoreApplication::aboutToQuit, &controller,
                      &EditorController::shutdown);
 
-    if (!parser.isSet(QStringLiteral("background"))) {
+    if (externalFileMode || !parser.isSet(QStringLiteral("background"))) {
         QTimer::singleShot(0, &controller, &EditorController::showEditor);
+    }
+    if (externalFileMode && controller.testMode()
+        && qEnvironmentVariableIsSet("SCRATCHEDITOR_EXTERNAL_TEST_TEXT")) {
+        const QString replacementText = qEnvironmentVariable(
+            "SCRATCHEDITOR_EXTERNAL_TEST_TEXT");
+        QTimer::singleShot(500, &controller, [&controller, replacementText] {
+            controller.completeExternalFileTest(replacementText);
+        });
     }
 
     return app.exec();

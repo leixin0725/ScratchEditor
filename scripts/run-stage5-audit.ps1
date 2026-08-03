@@ -20,7 +20,7 @@ $requiredFiles = @(
     "CMakeLists.txt",
     "CMakePresets.json",
     "README.md",
-    "ScratchEditor-Migration.md",
+    "docs\archive\ScratchEditor-Migration.md",
     ".gitattributes",
     ".gitignore",
     "src\appsettings.cpp",
@@ -37,11 +37,11 @@ $requiredFiles = @(
     "integration\KeysRedirect.QtMigration.ahk",
     "integration\README.md",
     "docs\README.md",
-    "docs\STAGE1-REPORT.md",
-    "docs\STAGE2-REPORT.md",
-    "docs\STAGE3-REPORT.md",
-    "docs\STAGE4-REPORT.md",
-    "docs\STAGE5-REPORT.md"
+    "docs\archive\STAGE1-REPORT.md",
+    "docs\archive\STAGE2-REPORT.md",
+    "docs\archive\STAGE3-REPORT.md",
+    "docs\archive\STAGE4-REPORT.md",
+    "docs\archive\STAGE5-REPORT.md"
 )
 
 $requiredBaselines = @(
@@ -117,8 +117,7 @@ $migrationBoundary = (
 )
 
 $rootAllowedFiles = @(
-    ".gitattributes", ".gitignore", "CMakeLists.txt", "CMakePresets.json", "README.md",
-    "ScratchEditor-Migration.md"
+    ".gitattributes", ".gitignore", "CMakeLists.txt", "CMakePresets.json", "README.md"
 )
 $unexpectedRootFiles = @(
     Get-ChildItem -LiteralPath $projectRoot -File -Force |

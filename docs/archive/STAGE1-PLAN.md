@@ -1,7 +1,7 @@
 # 迁移执行计划与阶段 1 验收门
 
 本文保留阶段 1 启动时的验收设计；分阶段范围已同步为后来获批并完成的阶段 1–6。
-当前项目状态见 [`../README.md`](../README.md) 与 [`README.md`](README.md)。
+当前项目状态见 [`README.md`](../../README.md) 与 [`docs/README.md`](../README.md)。
 
 ## 保护边界
 

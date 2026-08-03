@@ -9,7 +9,9 @@ Window {
     minimumHeight: 320
     visible: false
     color: themeBackgroundColor
-    title: "ScratchEditor"
+    title: controller.externalFileMode && controller.externalFileName.length > 0
+           ? controller.externalFileName + " — ScratchEditor"
+           : "ScratchEditor"
     flags: Qt.Tool | Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint
 
     readonly property int dragZoneHeight: 52
@@ -164,6 +166,13 @@ Window {
     }
 
     Shortcut {
+        sequence: "Ctrl+S"
+        context: Qt.WindowShortcut
+        enabled: root.visible && controller.externalFileMode
+        onActivated: controller.saveExternalFile()
+    }
+
+    Shortcut {
         sequence: "F3"
         context: Qt.WindowShortcut
         enabled: root.visible && findPanel.visible
@@ -230,7 +239,7 @@ Window {
             anchors.left: parent.left
             anchors.leftMargin: root.marginSize - root.resizeMargin
             anchors.verticalCenter: parent.verticalCenter
-            text: "临时编辑器"
+            text: controller.externalFileMode ? "外部提示词编辑器" : "临时编辑器"
             color: root.themeStrongTextColor
             font.family: root.uiFontFamily
             font.pointSize: 11
@@ -245,7 +254,7 @@ Window {
             horizontalAlignment: Text.AlignRight
             elide: Text.ElideLeft
             text: controller.statusMessage
-            color: controller.clipboardHealthy ? root.themeMutedTextColor : root.themeDangerColor
+            color: controller.statusHealthy ? root.themeMutedTextColor : root.themeDangerColor
             font.family: root.uiFontFamily
             font.pointSize: 9
         }
