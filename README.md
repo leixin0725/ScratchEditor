@@ -145,25 +145,13 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\configure-code
 `powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\build.ps1 -Preset release`。
 配置后需要重新打开 Git Bash 并重启 Codex，因为已经运行的进程不会重新读取环境变量。
 
-### Codex 部署位置与更新
-
-| 用途 | 固定位置 |
-|---|---|
-| 构建来源 | `D:\_Dev\ScratchEditor\build\release\ScratchEditor.exe` |
-| Codex 稳定副本 | `%LOCALAPPDATA%\ScratchEditor\CodexEditor\ScratchEditor.exe` |
-| `VISUAL` / `EDITOR` | `%LOCALAPPDATA%\ScratchEditor\CodexEditor\ScratchEditor.exe --wait` |
-
-Codex 使用的是稳定副本，重新构建项目**不会自动更新**该副本。修改 ScratchEditor 后按顺序重新构建、
-部署并检查：
+脚本会生成 `docs/codex-editor-installation.local.md`，集中记录这台机器的构建来源、实际部署目录、
+环境变量命令和更新步骤。该文件包含本机路径，已加入 `.gitignore`；每次执行 `-Action Install` 都会
+自动刷新。通用检查命令为：
 
 ```powershell
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\build.ps1 -Preset release
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\configure-codex-editor.ps1 -Action Install
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\configure-codex-editor.ps1 -Action Check
 ```
-
-仅检查持久配置时可单独运行最后一条命令。`Install` 会覆盖更新稳定副本，但保持部署路径不变，
-因此无需再次手动编辑环境变量或 `.bashrc`。
 
 Codex 在 composer 中按 `Ctrl+G`；pi 也可在自己的 `settings.json` 中优先配置：
 
@@ -173,7 +161,7 @@ Codex 在 composer 中按 `Ctrl+G`；pi 也可在自己的 `settings.json` 中�
 }
 ```
 
-将 `<用户名>` 替换为实际 Windows 用户目录名；也可直接复制配置脚本输出的 `ExpectedCommand`。
+将 `<用户名>` 替换为实际 Windows 用户目录名；也可复制本机安装文档中的 `VISUAL / EDITOR` 值。
 
 当前已在原生 Windows 上实测 Codex CLI 0.146.0 与 pi 0.80.10 的完整 `Ctrl+G` 等待、写回
 和返回流程。Claude Code 按本轮范围暂未实测。调查依据与后续边界见
