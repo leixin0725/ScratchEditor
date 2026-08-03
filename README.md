@@ -133,21 +133,47 @@ KeysRedirect.ahk ──命名管道──> ScratchEditor.exe
 文件模式读取和写回 UTF-8，绕过剪贴板、常驻单实例转发与生产 IPC。`Ctrl+S` 保存但继续
 编辑；Escape 或关闭窗口会先保存，成功后以退出码 `0` 结束。保存失败时窗口保持打开。
 
-在当前 PowerShell 会话中配置 Codex 与 pi：
+为 Codex 持久配置 ScratchEditor（部署到 `%LOCALAPPDATA%\ScratchEditor\CodexEditor`，同时写入
+Windows 用户环境变量，并修正 Git Bash 的 `~/.bashrc` 覆盖项）：
 
 ```powershell
-$scratchEditor = 'D:\_Dev\ScratchEditor\build\release\ScratchEditor.exe --wait'
-$env:VISUAL = $scratchEditor
-$env:EDITOR = $scratchEditor
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\configure-codex-editor.ps1
 ```
+
+脚本从 `build/release` 复制主程序并独立部署 Qt 运行库；配置完成后可以安全清理项目的 `build/`
+和 `.tools/`，不会再破坏 Codex 的外部编辑器。首次安装或更新前若 `build/release` 不存在，先运行
+`powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\build.ps1 -Preset release`。
+配置后需要重新打开 Git Bash 并重启 Codex，因为已经运行的进程不会重新读取环境变量。
+
+### Codex 部署位置与更新
+
+| 用途 | 固定位置 |
+|---|---|
+| 构建来源 | `D:\_Dev\ScratchEditor\build\release\ScratchEditor.exe` |
+| Codex 稳定副本 | `%LOCALAPPDATA%\ScratchEditor\CodexEditor\ScratchEditor.exe` |
+| `VISUAL` / `EDITOR` | `%LOCALAPPDATA%\ScratchEditor\CodexEditor\ScratchEditor.exe --wait` |
+
+Codex 使用的是稳定副本，重新构建项目**不会自动更新**该副本。修改 ScratchEditor 后按顺序重新构建、
+部署并检查：
+
+```powershell
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\build.ps1 -Preset release
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\configure-codex-editor.ps1 -Action Install
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\configure-codex-editor.ps1 -Action Check
+```
+
+仅检查持久配置时可单独运行最后一条命令。`Install` 会覆盖更新稳定副本，但保持部署路径不变，
+因此无需再次手动编辑环境变量或 `.bashrc`。
 
 Codex 在 composer 中按 `Ctrl+G`；pi 也可在自己的 `settings.json` 中优先配置：
 
 ```json
 {
-  "externalEditor": "D:\\_Dev\\ScratchEditor\\build\\release\\ScratchEditor.exe --wait"
+  "externalEditor": "C:\\Users\\<用户名>\\AppData\\Local\\ScratchEditor\\CodexEditor\\ScratchEditor.exe --wait"
 }
 ```
+
+将 `<用户名>` 替换为实际 Windows 用户目录名；也可直接复制配置脚本输出的 `ExpectedCommand`。
 
 当前已在原生 Windows 上实测 Codex CLI 0.146.0 与 pi 0.80.10 的完整 `Ctrl+G` 等待、写回
 和返回流程。Claude Code 按本轮范围暂未实测。调查依据与后续边界见

@@ -41,6 +41,15 @@ pi 的官方设置文档以 `code --wait` 为例，说明调用方需要等待�
 `VISUAL` 和 `EDITOR` 指向同一个 ScratchEditor 等待命令；pi 也可使用自己的
 `externalEditor` 设置覆盖环境变量。
 
+仓库提供 [`scripts/configure-codex-editor.ps1`](../../scripts/configure-codex-editor.ps1)，将程序及 Qt
+运行库部署到 `%LOCALAPPDATA%\ScratchEditor\CodexEditor`，持久写入 Windows 用户级
+`VISUAL`/`EDITOR`，并在 Git Bash 的 `~/.bashrc` 末尾维护同一命令。后者很重要：shell 启动文件中的
+`export VISUAL=...` 会覆盖 Windows 用户环境变量。脚本的 `-Action Check` 会检查稳定部署、用户环境变量
+和 Git Bash 配置；项目的 `build/` 或 `.tools/` 被清理后，Codex 外部编辑器仍可继续工作。
+稳定副本的完整路径是 `%LOCALAPPDATA%\ScratchEditor\CodexEditor\ScratchEditor.exe`。源码更新后需要先
+重建 `build/release`，再重新执行脚本的 `-Action Install` 覆盖更新稳定副本；单纯重新构建不会自动
+更新 Codex 实际调用的程序。
+
 ## 实施前基线的阻塞点
 
 ### 命令行没有文件入口

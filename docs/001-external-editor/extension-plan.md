@@ -24,7 +24,9 @@ ScratchEditor.exe [--wait] <file>
 | C：自动化回归 | 部分完成 | 新增核心/进程测试；并发与常驻共存通过；Stage 4 通过，Stage 2/3 保留既有基线失败 |
 | D：真实 CLI 验收 | 部分完成 | Codex 0.146.0 与 pi 0.80.10 通过；Claude Code 按本轮决定暂不测试 |
 
-本分支的增量实现不包含安装或永久修改用户的 `VISUAL`、`EDITOR`、Codex 配置或 pi 配置。
+主程序本身不静默修改用户的 `VISUAL`、`EDITOR`、Codex 配置或 pi 配置。需要持久配置时由用户显式运行
+[`scripts/configure-codex-editor.ps1`](../../scripts/configure-codex-editor.ps1)；脚本会将 release 部署到
+用户级稳定目录，写入 Windows 用户级 `VISUAL`/`EDITOR`，并维护 Git Bash `~/.bashrc` 中的同名变量。
 CLI 级自动化使用临时配置目录，并在 `/quit` 返回后清理。
 
 ## 不变约束
