@@ -2,11 +2,15 @@
 #include "appsettings.h"
 
 #include <QEvent>
+#include <QGuiApplication>
 #include <QInputMethodEvent>
 #include <QKeySequence>
 #include <QKeyEvent>
 #include <QMetaObject>
+#include <QMouseEvent>
+#include <QQuickItem>
 #include <QRegularExpression>
+#include <QStyleHints>
 #include <QTextCursor>
 #include <QTextDocument>
 #include <QTimer>
@@ -591,10 +595,16 @@ EditorCommandRegistry::EditorCommandRegistry(AppSettings *settings, QObject *par
         item.shortcut = m_settings ? m_settings->shortcut(item.id, item.defaultShortcut)
                                    : item.defaultShortcut;
     }
+
+    m_selectionDragScrollTimer.setInterval(30);
+    connect(&m_selectionDragScrollTimer, &QTimer::timeout, this, [this] {
+        updateSelectionDrag(m_selectionDragScenePosition, true);
+    });
 }
 
 void EditorCommandRegistry::setEditor(QObject *editor, QTextDocument *document)
 {
+    resetSelectionDrag(true);
     m_editor = editor;
     m_document = document;
 }
@@ -714,6 +724,10 @@ bool EditorCommandRegistry::handleEditorEvent(QEvent *event)
         return false;
     }
 
+    if (handleSelectionDragEvent(event)) {
+        return true;
+    }
+
     if (event->type() == QEvent::KeyPress) {
         const auto *keyEvent = static_cast<QKeyEvent *>(event);
         const Qt::KeyboardModifiers modifiers = keyEvent->modifiers();
@@ -791,6 +805,271 @@ bool EditorCommandRegistry::handleEditorEvent(QEvent *event)
         });
     }
     return false;
+}
+
+bool EditorCommandRegistry::moveSelection(int selectionStart, int selectionEnd,
+                                          int dropPosition)
+{
+    if (!m_editor || !m_document) {
+        return false;
+    }
+
+    const int documentLength = m_document->toPlainText().size();
+    if (selectionStart < 0 || selectionEnd < 0 || dropPosition < 0
+        || selectionStart > documentLength || selectionEnd > documentLength
+        || dropPosition > documentLength) {
+        return false;
+    }
+    if (selectionStart >= selectionEnd
+        || (dropPosition >= selectionStart && dropPosition <= selectionEnd)) {
+        return false;
+    }
+
+    QTextCursor cursor(m_document);
+    cursor.setPosition(selectionStart);
+    cursor.setPosition(selectionEnd, QTextCursor::KeepAnchor);
+    const QString movedText = normalizeSelectedText(cursor.selectedText());
+    const int adjustedDrop = dropPosition > selectionEnd
+        ? dropPosition - (selectionEnd - selectionStart)
+        : dropPosition;
+
+    cursor.beginEditBlock();
+    cursor.removeSelectedText();
+    cursor.setPosition(adjustedDrop);
+    cursor.insertText(movedText);
+    cursor.endEditBlock();
+
+    selectRange(adjustedDrop, adjustedDrop + movedText.size());
+    focusEditor();
+    return true;
+}
+
+bool EditorCommandRegistry::handleSelectionDragEvent(QEvent *event)
+{
+    if (event->type() == QEvent::MouseButtonPress) {
+        const auto *mouseEvent = static_cast<QMouseEvent *>(event);
+        const Qt::KeyboardModifiers selectionModifiers = Qt::ShiftModifier
+            | Qt::ControlModifier | Qt::AltModifier | Qt::MetaModifier;
+        if (mouseEvent->button() != Qt::LeftButton
+            || mouseEvent->modifiers().testAnyFlags(selectionModifiers)
+            || m_editor->property("readOnly").toBool()
+            || m_editor->property("inputMethodComposing").toBool()) {
+            return false;
+        }
+
+        const int selectionStart = m_editor->property("selectionStart").toInt();
+        const int selectionEnd = m_editor->property("selectionEnd").toInt();
+        const int pressPosition = editorPositionAt(mouseEvent->position());
+        if (selectionStart >= selectionEnd || pressPosition < selectionStart
+            || pressPosition > selectionEnd) {
+            return false;
+        }
+
+        beginSelectionDrag(selectionStart, selectionEnd, mouseEvent->scenePosition());
+        event->accept();
+        return true;
+    }
+
+    const bool dragPending = m_selectionDragStart >= 0;
+    if (!dragPending) {
+        return false;
+    }
+
+    if (event->type() == QEvent::MouseMove) {
+        const auto *mouseEvent = static_cast<QMouseEvent *>(event);
+        if (!mouseEvent->buttons().testFlag(Qt::LeftButton)) {
+            resetSelectionDrag(true);
+            return false;
+        }
+
+        m_selectionDragScenePosition = mouseEvent->scenePosition();
+        if (!m_selectionDragActive) {
+            const qreal distance = (m_selectionDragScenePosition
+                                    - m_selectionDragPressScenePosition).manhattanLength();
+            const int threshold = QGuiApplication::styleHints()->startDragDistance();
+            if (distance < threshold) {
+                event->accept();
+                return true;
+            }
+            m_selectionDragActive = true;
+            if (QQuickItem *item = editorItem()) {
+                m_selectionDragOriginalCursor = item->cursor();
+            }
+            m_selectionDragScrollTimer.start();
+        }
+
+        updateSelectionDrag(m_selectionDragScenePosition, true);
+        event->accept();
+        return true;
+    }
+
+    if (event->type() == QEvent::MouseButtonRelease) {
+        const auto *mouseEvent = static_cast<QMouseEvent *>(event);
+        if (mouseEvent->button() != Qt::LeftButton) {
+            return false;
+        }
+
+        const bool movedFarEnough = m_selectionDragActive;
+        const int selectionStart = m_selectionDragStart;
+        const int selectionEnd = m_selectionDragEnd;
+        const int clickPosition = editorPositionAt(mouseEvent->position());
+        if (movedFarEnough) {
+            updateSelectionDrag(mouseEvent->scenePosition(), false);
+        }
+        const int dropPosition = m_selectionDropPosition;
+        resetSelectionDrag(false);
+
+        if (movedFarEnough) {
+            if (dropPosition >= 0) {
+                moveSelection(selectionStart, selectionEnd, dropPosition);
+            } else {
+                selectRange(selectionStart, selectionEnd);
+                focusEditor();
+            }
+        } else {
+            m_editor->setProperty("cursorPosition", clickPosition);
+            focusEditor();
+        }
+        event->accept();
+        return true;
+    }
+
+    if (event->type() == QEvent::KeyPress) {
+        const auto *keyEvent = static_cast<QKeyEvent *>(event);
+        if (keyEvent->key() == Qt::Key_Escape) {
+            resetSelectionDrag(true);
+            return true;
+        }
+    }
+
+    if (event->type() == QEvent::UngrabMouse || event->type() == QEvent::FocusOut) {
+        resetSelectionDrag(false);
+    }
+    return false;
+}
+
+int EditorCommandRegistry::editorPositionAt(const QPointF &localPosition) const
+{
+    if (!m_editor || !m_document) {
+        return -1;
+    }
+
+    int position = -1;
+    const bool invoked = QMetaObject::invokeMethod(
+        m_editor, "positionAt", Qt::DirectConnection, Q_RETURN_ARG(int, position),
+        Q_ARG(double, localPosition.x()), Q_ARG(double, localPosition.y()));
+    return invoked ? qBound(0, position, m_document->toPlainText().size()) : -1;
+}
+
+QQuickItem *EditorCommandRegistry::editorItem() const
+{
+    return qobject_cast<QQuickItem *>(m_editor.data());
+}
+
+QQuickItem *EditorCommandRegistry::editorViewport() const
+{
+    QQuickItem *item = editorItem();
+    for (QQuickItem *candidate = item ? item->parentItem() : nullptr;
+         candidate; candidate = candidate->parentItem()) {
+        if (candidate->property("contentY").isValid()
+            && candidate->property("contentHeight").isValid()) {
+            return candidate;
+        }
+    }
+    return nullptr;
+}
+
+void EditorCommandRegistry::beginSelectionDrag(int selectionStart, int selectionEnd,
+                                                const QPointF &scenePosition)
+{
+    m_selectionDragStart = selectionStart;
+    m_selectionDragEnd = selectionEnd;
+    m_selectionDropPosition = -1;
+    m_selectionDragPressScenePosition = scenePosition;
+    m_selectionDragScenePosition = scenePosition;
+    m_selectionDragActive = false;
+
+    focusEditor();
+    if (QQuickItem *item = editorItem()) {
+        m_selectionDragPreviousKeepMouseGrab = item->keepMouseGrab();
+        item->setKeepMouseGrab(true);
+        item->grabMouse();
+    }
+}
+
+void EditorCommandRegistry::updateSelectionDrag(const QPointF &scenePosition,
+                                                bool scrollViewport)
+{
+    if (!m_selectionDragActive || !m_editor) {
+        return;
+    }
+
+    m_selectionDragScenePosition = scenePosition;
+    if (scrollViewport) {
+        if (QQuickItem *viewport = editorViewport()) {
+            const QPointF viewportPosition = viewport->mapFromScene(scenePosition);
+            const qreal viewportHeight = viewport->height();
+            const qreal edge = qMin<qreal>(32.0, viewportHeight / 4.0);
+            const qreal currentY = viewport->property("contentY").toReal();
+            const qreal maximumY = qMax<qreal>(
+                0.0, viewport->property("contentHeight").toReal() - viewportHeight);
+            qreal scrollDelta = 0.0;
+            if (viewportPosition.x() >= -edge
+                && viewportPosition.x() <= viewport->width() + edge) {
+                if (viewportPosition.y() < edge) {
+                    scrollDelta = -qBound<qreal>(2.0,
+                                                 (edge - viewportPosition.y()) * 0.5,
+                                                 24.0);
+                } else if (viewportPosition.y() > viewportHeight - edge) {
+                    scrollDelta = qBound<qreal>(
+                        2.0, (viewportPosition.y() - viewportHeight + edge) * 0.5, 24.0);
+                }
+            }
+            const qreal requestedY = qBound<qreal>(0.0, currentY + scrollDelta, maximumY);
+            if (!qFuzzyCompare(requestedY + 1.0, currentY + 1.0)) {
+                viewport->setProperty("contentY", requestedY);
+            }
+        }
+    }
+
+    QQuickItem *item = editorItem();
+    if (!item) {
+        return;
+    }
+    const int position = editorPositionAt(item->mapFromScene(scenePosition));
+    const bool validDrop = position >= 0
+        && (position < m_selectionDragStart || position > m_selectionDragEnd);
+    m_selectionDropPosition = validDrop ? position : -1;
+    m_editor->setProperty("selectionDragPosition", m_selectionDropPosition);
+    item->setCursor(QCursor(validDrop ? Qt::DragMoveCursor : Qt::ForbiddenCursor));
+}
+
+void EditorCommandRegistry::resetSelectionDrag(bool releaseMouseGrab)
+{
+    m_selectionDragScrollTimer.stop();
+    QQuickItem *item = editorItem();
+    const bool wasActive = m_selectionDragActive;
+    const bool previousKeepMouseGrab = m_selectionDragPreviousKeepMouseGrab;
+    const QCursor originalCursor = m_selectionDragOriginalCursor;
+
+    m_selectionDragStart = -1;
+    m_selectionDragEnd = -1;
+    m_selectionDropPosition = -1;
+    m_selectionDragActive = false;
+    m_selectionDragPreviousKeepMouseGrab = false;
+
+    if (m_editor) {
+        m_editor->setProperty("selectionDragPosition", -1);
+    }
+    if (item) {
+        if (wasActive) {
+            item->setCursor(originalCursor);
+        }
+        item->setKeepMouseGrab(previousKeepMouseGrab);
+        if (releaseMouseGrab) {
+            item->ungrabMouse();
+        }
+    }
 }
 
 bool EditorCommandRegistry::findNext(const QString &query, bool caseSensitive, bool backwards)

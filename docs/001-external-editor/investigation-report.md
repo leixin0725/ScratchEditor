@@ -43,11 +43,13 @@ pi 的官方设置文档以 `code --wait` 为例，说明调用方需要等待�
 
 仓库提供 [`scripts/configure-codex-editor.ps1`](../../scripts/configure-codex-editor.ps1)，将程序及 Qt
 运行库部署到 `%LOCALAPPDATA%\ScratchEditor\CodexEditor`，持久写入 Windows 用户级
-`VISUAL`/`EDITOR`，并在 Git Bash 的 `~/.bashrc` 末尾维护同一命令。后者很重要：shell 启动文件中的
-`export VISUAL=...` 会覆盖 Windows 用户环境变量。脚本的 `-Action Check` 会检查稳定部署、用户环境变量
-和 Git Bash 配置；项目的 `build/` 或 `.tools/` 被清理后，Codex 外部编辑器仍可继续工作。脚本还会
-生成被 Git 忽略的 `docs/codex-editor-installation.local.md`，集中记录本机实际路径和更新命令；源码
-更新后需要重新执行 `-Action Install` 覆盖稳定副本，单纯重新构建不会自动更新 Codex 实际调用的程序。
+`VISUAL`/`EDITOR`，并在 Git Bash 的 `~/.bashrc` 末尾维护同一命令。pi 的 `externalEditor` 也指向这个
+共享副本。后者很重要：shell 启动文件中的 `export VISUAL=...` 会覆盖 Windows 用户环境变量。脚本的
+`-Action Check` 会检查两个稳定部署、用户环境变量、pi、AHK 和 Git Bash 配置；项目的 `build/` 或
+`.tools/` 被清理后，外部编辑器仍可继续工作。脚本还会生成被 Git 忽略的
+`docs/codex-editor-installation.local.md`，集中记录本机实际路径和更新命令。标准
+`scripts/build.ps1` 在每次成功构建后自动用刚构建的程序同步 Codex/pi 与 AHK 两个稳定副本；仅在显式
+指定 `-SkipLocalInstall` 或直接运行 CMake 时跳过。
 受管 Git Bash 配置还会检查 `TERM_PROGRAM=vscode`：VS Code 集成终端使用 `code --wait`，普通终端
 使用稳定部署的 ScratchEditor。该选择只影响 `Ctrl+G`；可点击文件引用仍由 Codex 的 `file_opener`
 独立控制。

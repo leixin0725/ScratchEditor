@@ -498,6 +498,11 @@ Window {
         TextEdit {
             id: editor
             objectName: "scratchText"
+            property int selectionDragPosition: -1
+            readonly property rect selectionDragRectangle:
+                selectionDragPosition >= 0
+                    ? positionToRectangle(selectionDragPosition)
+                    : Qt.rect(0, 0, 0, 0)
             x: 12
             y: 8
             width: editorViewport.width - 24
@@ -525,6 +530,16 @@ Window {
                         bottom - editorViewport.height
                     )
                 }
+            }
+
+            Rectangle {
+                z: 2
+                x: Math.round(editor.selectionDragRectangle.x)
+                y: Math.round(editor.selectionDragRectangle.y)
+                width: 2
+                height: Math.max(1, editor.selectionDragRectangle.height)
+                visible: editor.selectionDragPosition >= 0
+                color: root.themeSelectionColor
             }
         }
     }

@@ -6,7 +6,8 @@ param(
     [Parameter(Mandatory)]
     [string]$OutputPath,
 
-    [string]$ScratchEditorExecutable = "D:\_Dev\ScratchEditor\build\stage4\ScratchEditor.exe",
+    [string]$ScratchEditorExecutable =
+        (Join-Path $env:LOCALAPPDATA "ScratchEditor\AhkEditor\ScratchEditor.exe"),
 
     [string]$ExpectedSourceSha256 =
         "8BB8FFEFEBD9A6C90C102F66583D517C6C5CF83D36200A3D4E77D413C77B41C9"

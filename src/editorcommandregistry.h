@@ -1,14 +1,18 @@
 #pragma once
 
+#include <QCursor>
 #include <QObject>
 #include <QPointer>
+#include <QPointF>
 #include <QString>
+#include <QTimer>
 #include <QVariantList>
 #include <QVector>
 
 class QTextDocument;
 class AppSettings;
 class QEvent;
+class QQuickItem;
 
 class EditorCommandRegistry final : public QObject
 {
@@ -63,9 +67,27 @@ private:
     void selectRange(int start, int end);
     void focusEditor();
     QString selectedText() const;
+    bool handleSelectionDragEvent(QEvent *event);
+    bool moveSelection(int selectionStart, int selectionEnd, int dropPosition);
+    int editorPositionAt(const QPointF &localPosition) const;
+    QQuickItem *editorItem() const;
+    QQuickItem *editorViewport() const;
+    void beginSelectionDrag(int selectionStart, int selectionEnd,
+                            const QPointF &scenePosition);
+    void updateSelectionDrag(const QPointF &scenePosition, bool scrollViewport);
+    void resetSelectionDrag(bool releaseMouseGrab);
 
     AppSettings *m_settings = nullptr;
     QPointer<QObject> m_editor;
     QPointer<QTextDocument> m_document;
     QVector<Definition> m_definitions;
+    QTimer m_selectionDragScrollTimer;
+    QPointF m_selectionDragPressScenePosition;
+    QPointF m_selectionDragScenePosition;
+    int m_selectionDragStart = -1;
+    int m_selectionDragEnd = -1;
+    int m_selectionDropPosition = -1;
+    bool m_selectionDragActive = false;
+    bool m_selectionDragPreviousKeepMouseGrab = false;
+    QCursor m_selectionDragOriginalCursor;
 };

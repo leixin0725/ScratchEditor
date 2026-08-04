@@ -21,8 +21,10 @@
 #include <QKeyEvent>
 #include <QLocalSocket>
 #include <QMetaObject>
+#include <QMouseEvent>
 #include <QMutexLocker>
 #include <QParallelAnimationGroup>
+#include <QQuickItem>
 #include <QQuickWindow>
 #include <QQuickTextDocument>
 #include <QScreen>
@@ -276,8 +278,12 @@ bool EditorController::markdownStyleLoaded() const
 
 void EditorController::registerWindow(QQuickWindow *window)
 {
+    if (m_window) {
+        m_window->removeEventFilter(this);
+    }
     m_window = window;
     if (m_window) {
+        m_window->installEventFilter(this);
         m_windowTransitionGroup = new QParallelAnimationGroup(this);
         m_windowOpacityAnimation = new QVariantAnimation;
         m_windowGeometryAnimation = new QVariantAnimation;
@@ -566,6 +572,15 @@ void EditorController::dispatchCommand(QLocalSocket *socket, const QJsonObject &
         return;
     }
 
+    if (command == QStringLiteral("shutdownForUpdate")) {
+        commitAndHide();
+        QJsonObject response;
+        response.insert(QStringLiteral("command"), command);
+        sendResponse(socket, response, startedNs, requestId);
+        QTimer::singleShot(25, qApp, [] { QCoreApplication::exit(0); });
+        return;
+    }
+
     if (!m_testMode) {
         sendError(socket, command, QStringLiteral("unsupported command"), startedNs, requestId);
         return;
@@ -620,6 +635,68 @@ void EditorController::dispatchCommand(QLocalSocket *socket, const QJsonObject &
         QJsonObject response = statusObject();
         response.insert(QStringLiteral("command"), command);
         response.insert(QStringLiteral("invoked"), invoked);
+        sendResponse(socket, response, startedNs, requestId);
+    } else if (command == QStringLiteral("testDragSelection")) {
+        const int start = request.value(QStringLiteral("start")).toInt();
+        const int end = request.value(QStringLiteral("end")).toInt();
+        const int dropPosition = request.value(QStringLiteral("dropPosition")).toInt();
+        const QString before = m_editor->property("text").toString();
+        QRectF pressRectangle;
+        QRectF dropRectangle;
+        const int pressPosition = start + (end - start) / 2;
+        const bool pressLocated = QMetaObject::invokeMethod(
+            m_editor, "positionToRectangle", Qt::DirectConnection,
+            Q_RETURN_ARG(QRectF, pressRectangle), Q_ARG(int, pressPosition));
+        const bool dropLocated = QMetaObject::invokeMethod(
+            m_editor, "positionToRectangle", Qt::DirectConnection,
+            Q_RETURN_ARG(QRectF, dropRectangle), Q_ARG(int, dropPosition));
+        bool eventsAccepted = false;
+        if (pressLocated && dropLocated) {
+            if (auto *item = qobject_cast<QQuickItem *>(m_editor.data())) {
+                const QPointF pressLocal = pressRectangle.center();
+                const QPointF dropLocal = dropRectangle.center();
+                const QPointF activationLocal = pressLocal + QPointF(100.0, 100.0);
+                const QPointF pressScene = item->mapToScene(pressLocal);
+                const QPointF dropScene = item->mapToScene(dropLocal);
+                const QPointF activationScene = item->mapToScene(activationLocal);
+                const QPointF pressGlobal = item->mapToGlobal(pressLocal);
+                const QPointF dropGlobal = item->mapToGlobal(dropLocal);
+                const QPointF activationGlobal = item->mapToGlobal(activationLocal);
+                QMouseEvent pressEvent(QEvent::MouseButtonPress, pressScene, pressScene,
+                                       pressGlobal, Qt::LeftButton, Qt::LeftButton,
+                                       Qt::NoModifier);
+                QMouseEvent activationEvent(QEvent::MouseMove, activationScene,
+                                            activationScene, activationGlobal, Qt::NoButton,
+                                            Qt::LeftButton, Qt::NoModifier);
+                QMouseEvent moveEvent(QEvent::MouseMove, dropScene, dropScene, dropGlobal,
+                                      Qt::NoButton, Qt::LeftButton, Qt::NoModifier);
+                QMouseEvent releaseEvent(QEvent::MouseButtonRelease, dropScene, dropScene,
+                                         dropGlobal, Qt::LeftButton, Qt::NoButton,
+                                         Qt::NoModifier);
+                const bool pressAccepted = QCoreApplication::sendEvent(m_window, &pressEvent);
+                const bool activationAccepted = QCoreApplication::sendEvent(
+                    m_window, &activationEvent);
+                const bool moveAccepted = QCoreApplication::sendEvent(m_window, &moveEvent);
+                const bool releaseAccepted = QCoreApplication::sendEvent(
+                    m_window, &releaseEvent);
+                eventsAccepted = pressAccepted && activationAccepted
+                    && moveAccepted && releaseAccepted;
+                item->ungrabMouse();
+            }
+        }
+        QJsonObject response = statusObject();
+        response.insert(QStringLiteral("command"), command);
+        response.insert(QStringLiteral("eventsAccepted"), eventsAccepted);
+        response.insert(QStringLiteral("moved"),
+                        m_editor->property("text").toString() != before);
+        response.insert(QStringLiteral("text"), m_editor->property("text").toString());
+        sendResponse(socket, response, startedNs, requestId);
+    } else if (command == QStringLiteral("testUndo")) {
+        const bool invoked = QMetaObject::invokeMethod(m_editor, "undo");
+        QJsonObject response = statusObject();
+        response.insert(QStringLiteral("command"), command);
+        response.insert(QStringLiteral("invoked"), invoked);
+        response.insert(QStringLiteral("text"), m_editor->property("text").toString());
         sendResponse(socket, response, startedNs, requestId);
     } else if (command == QStringLiteral("testKeyPress")) {
         const QString text = request.value(QStringLiteral("text")).toString();
@@ -1478,6 +1555,7 @@ QJsonObject EditorController::statusObject() const
     status.insert(QStringLiteral("visible"), isVisible());
     status.insert(QStringLiteral("testMode"), m_testMode);
     status.insert(QStringLiteral("pid"), static_cast<qint64>(QCoreApplication::applicationPid()));
+    status.insert(QStringLiteral("executableFile"), QCoreApplication::applicationFilePath());
     status.insert(QStringLiteral("startupMs"), m_readyStartupMs);
     status.insert(QStringLiteral("firstFrameColor"), m_firstFrameColor);
     status.insert(QStringLiteral("serverName"), serverName());
@@ -1755,6 +1833,43 @@ void EditorController::animationBenchmarkFinished()
 
 bool EditorController::eventFilter(QObject *watched, QEvent *event)
 {
+    if (watched == m_window && m_commands && m_editor
+        && (event->type() == QEvent::MouseButtonPress
+            || event->type() == QEvent::MouseMove
+            || event->type() == QEvent::MouseButtonRelease)) {
+        const auto *mouseEvent = static_cast<QMouseEvent *>(event);
+        if (auto *item = qobject_cast<QQuickItem *>(m_editor.data())) {
+            const QPointF scenePosition = mouseEvent->position();
+            const QPointF editorPosition = item->mapFromScene(scenePosition);
+            bool insideViewport = item->contains(editorPosition);
+            for (QQuickItem *candidate = item->parentItem(); insideViewport && candidate;
+                 candidate = candidate->parentItem()) {
+                if (candidate->property("contentY").isValid()
+                    && candidate->property("contentHeight").isValid()) {
+                    insideViewport = candidate->contains(
+                        candidate->mapFromScene(scenePosition));
+                    break;
+                }
+            }
+            if (event->type() != QEvent::MouseButtonPress || insideViewport) {
+                QMouseEvent editorEvent(
+                    event->type(), editorPosition, scenePosition,
+                    mouseEvent->globalPosition(), mouseEvent->button(),
+                    mouseEvent->buttons(), mouseEvent->modifiers(), mouseEvent->source(),
+                    mouseEvent->pointingDevice());
+                if (m_commands->handleEditorEvent(&editorEvent)) {
+                    if (event->type() == QEvent::MouseButtonRelease) {
+                        item->ungrabMouse();
+                    }
+                    event->accept();
+                    return true;
+                }
+            }
+        }
+    }
+    if (watched == m_window && m_commands && event->type() == QEvent::FocusOut) {
+        m_commands->handleEditorEvent(event);
+    }
     if (watched == m_editor && event->type() == QEvent::KeyPress && m_pendingInput.socket) {
         const auto *keyEvent = static_cast<QKeyEvent *>(event);
         if (!keyEvent->isAutoRepeat()) {

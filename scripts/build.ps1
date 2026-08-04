@@ -2,7 +2,8 @@
 param(
     [ValidateSet("release", "stage3", "stage4")]
     [string]$Preset = "release",
-    [switch]$SkipDeployment
+    [switch]$SkipDeployment,
+    [switch]$SkipLocalInstall
 )
 
 $ErrorActionPreference = "Stop"
@@ -26,28 +27,35 @@ try {
         throw "CMake build failed with exit code $LASTEXITCODE"
     }
 
-    if ($SkipDeployment) {
-        return
+    if (-not $SkipDeployment) {
+        $deployOptions = @(
+            "--release",
+            "--no-translations",
+            "--no-system-d3d-compiler",
+            "--no-system-dxc-compiler",
+            "--no-opengl-sw",
+            "--compiler-runtime",
+            "--skip-plugin-types", "qmltooling,generic",
+            "--qmldir", (Join-Path $projectRoot "qml")
+        )
+        & $deployQt @deployOptions (Join-Path $buildDir "ScratchEditor.exe")
+        if ($LASTEXITCODE -ne 0) {
+            throw "Qt deployment failed for ScratchEditor with exit code $LASTEXITCODE"
+        }
+        & $deployQt --release --no-translations --compiler-runtime `
+            (Join-Path $buildDir "ScratchEditorPerf.exe")
+        if ($LASTEXITCODE -ne 0) {
+            throw "Qt deployment failed for ScratchEditorPerf with exit code $LASTEXITCODE"
+        }
     }
 
-    $deployOptions = @(
-        "--release",
-        "--no-translations",
-        "--no-system-d3d-compiler",
-        "--no-system-dxc-compiler",
-        "--no-opengl-sw",
-        "--compiler-runtime",
-        "--skip-plugin-types", "qmltooling,generic",
-        "--qmldir", (Join-Path $projectRoot "qml")
-    )
-    & $deployQt @deployOptions (Join-Path $buildDir "ScratchEditor.exe")
-    if ($LASTEXITCODE -ne 0) {
-        throw "Qt deployment failed for ScratchEditor with exit code $LASTEXITCODE"
-    }
-    & $deployQt --release --no-translations --compiler-runtime `
-        (Join-Path $buildDir "ScratchEditorPerf.exe")
-    if ($LASTEXITCODE -ne 0) {
-        throw "Qt deployment failed for ScratchEditorPerf with exit code $LASTEXITCODE"
+    if (-not $SkipLocalInstall) {
+        $installScript = Join-Path $PSScriptRoot "configure-codex-editor.ps1"
+        & $installScript -Action Install `
+            -SourceEditorPath (Join-Path $buildDir "ScratchEditor.exe")
+        if ($LASTEXITCODE -ne 0) {
+            throw "Stable ScratchEditor installation failed with exit code $LASTEXITCODE"
+        }
     }
 }
 finally {

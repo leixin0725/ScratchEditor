@@ -25,8 +25,9 @@ ScratchEditor.exe [--wait] <file>
 | D：真实 CLI 验收 | 部分完成 | Codex 0.146.0 与 pi 0.80.10 通过；Claude Code 按本轮决定暂不测试 |
 
 主程序本身不静默修改用户的 `VISUAL`、`EDITOR`、Codex 配置或 pi 配置。需要持久配置时由用户显式运行
-[`scripts/configure-codex-editor.ps1`](../../scripts/configure-codex-editor.ps1)；脚本会将 release 部署到
-用户级稳定目录，写入 Windows 用户级 `VISUAL`/`EDITOR`，并维护 Git Bash `~/.bashrc` 中的同名变量。
+[`scripts/configure-codex-editor.ps1`](../../scripts/configure-codex-editor.ps1)；脚本会将产物部署到并列的
+Codex/pi 与 AHK 用户级稳定目录，写入 Windows 用户级 `VISUAL`/`EDITOR`，维护 pi 设置、AHK 回退路径
+和 Git Bash `~/.bashrc` 中的同名变量。标准 `scripts/build.ps1` 每次成功构建后都会自动执行此同步。
 CLI 级自动化使用临时配置目录，并在 `/quit` 返回后清理。
 
 ## 不变约束
@@ -151,7 +152,7 @@ CLI 级自动化使用临时配置目录，并在 `/quit` 返回后清理。
 在原生 Windows 中分别验证：
 
 ```powershell
-$env:VISUAL = 'D:\_Dev\ScratchEditor\build\release\ScratchEditor.exe --wait'
+$env:VISUAL = "$env:LOCALAPPDATA\ScratchEditor\CodexEditor\ScratchEditor.exe --wait"
 $env:EDITOR = $env:VISUAL
 ```
 
@@ -159,7 +160,7 @@ pi 可额外验证用户设置：
 
 ```json
 {
-  "externalEditor": "D:\\_Dev\\ScratchEditor\\build\\release\\ScratchEditor.exe --wait"
+  "externalEditor": "C:\\Users\\<用户名>\\AppData\\Local\\ScratchEditor\\CodexEditor\\ScratchEditor.exe --wait"
 }
 ```
 

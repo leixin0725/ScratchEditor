@@ -16,6 +16,7 @@ Qt 6 Quick/QML、C++20 和 CMake；AutoHotkey 继续负责全局快捷键与启�
 - CJK 字体、微软拼音、高 DPI 和暗色首帧保障。
 - 原生 Markdown 语法高亮与常用 Markdown 编辑命令。
 - 查找替换、延迟加载命令面板和可配置快捷键。
+- 可直接拖动已有文本选区移动内容，支持跨行落点、边缘自动滚动和单步撤销。
 - 延迟加载设置页、深浅主题、编辑字体/字号，以及同步透明度与居中形变的轻量唤出/关闭动画开关。
 - 窗口、外观和快捷键统一保存在一个带 schema 的 INI 配置文件中。
 - 可作为 Codex 和 pi-coding-agent 的同步外部提示词编辑器，按文件启动独立瞬态进程。
@@ -59,9 +60,10 @@ Markdown 颜色和字体样式集中保存在 `config/markdown-style.json`。构
 ## 架构与目录
 
 ```text
-KeysRedirect.ahk ──命名管道──> ScratchEditor.exe
-                                    ├─ C++：生命周期、IPC、剪贴板、配置、编辑命令、窗口过渡
-                                    └─ QML：编辑器、查找、命令面板、设置页与界面动效
+KeysRedirect.ahk ──命名管道──> %LOCALAPPDATA%\ScratchEditor\AhkEditor\ScratchEditor.exe
+Codex / pi ───────文件模式───> %LOCALAPPDATA%\ScratchEditor\CodexEditor\ScratchEditor.exe
+                                             ├─ C++：生命周期、IPC、剪贴板、配置、编辑命令、窗口过渡
+                                             └─ QML：编辑器、查找、命令面板、设置页与界面动效
 ```
 
 - `src/`：C++20 应用与编辑核心。
@@ -84,10 +86,10 @@ KeysRedirect.ahk ──命名管道──> ScratchEditor.exe
 ./scripts/build.ps1
 ```
 
-在不覆盖当前 `build/release` 实例的情况下验证当前源码，可使用：
+在不覆盖 `build/release` 的情况下进行隔离验证，可使用：
 
 ```powershell
-./scripts/build.ps1 -Preset stage4
+./scripts/build.ps1 -Preset stage4 -SkipLocalInstall
 ```
 
 也可以直接使用 CMake：
@@ -97,10 +99,11 @@ KeysRedirect.ahk ──命名管道──> ScratchEditor.exe
 ./.tools/Qt/Tools/CMake_64/bin/cmake.exe --build --preset release
 ```
 
-`scripts/build.ps1` 会构建 `build/release` 并运行 `windeployqt`。如果该目录中的旧版本
-正在运行，Windows 会锁定可执行文件。重建前应先发送 `--hide`，让实例回写剪贴板并
-隐藏窗口，再通过任务管理器或受控进程管理停止该确切进程；`--hide` 本身不会退出进程，
-构建脚本也不会强制终止用户实例。阶段 4 的已验证独立部署位于 `build/stage4/`。
+`scripts/build.ps1` 会构建所选 preset、运行 `windeployqt`，并自动把刚构建的主程序同步安装到
+`%LOCALAPPDATA%\ScratchEditor\CodexEditor` 与 `%LOCALAPPDATA%\ScratchEditor\AhkEditor`。前者由
+Codex 和 pi 共用，后者供 AHK 常驻实例使用。构建脚本会在更新 AHK 副本前先核对运行路径，再通过专用
+IPC 命令让稳定常驻实例自行退出，并在安装后重新启动；这也兼容 AHK 启动的高权限进程。只有明确传入
+`-SkipLocalInstall` 才会跳过这两个本机副本；直接运行 CMake 也不会执行本机同步。
 
 ## 运行与 IPC
 
@@ -133,21 +136,28 @@ KeysRedirect.ahk ──命名管道──> ScratchEditor.exe
 文件模式读取和写回 UTF-8，绕过剪贴板、常驻单实例转发与生产 IPC。`Ctrl+S` 保存但继续
 编辑；Escape 或关闭窗口会先保存，成功后以退出码 `0` 结束。保存失败时窗口保持打开。
 
-为 Codex 持久配置 ScratchEditor（部署到 `%LOCALAPPDATA%\ScratchEditor\CodexEditor`，同时写入
-Windows 用户环境变量，并修正 Git Bash 的 `~/.bashrc` 覆盖项）：
+首次安装或手动刷新所有集成，可运行：
 
 ```powershell
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\configure-codex-editor.ps1
 ```
 
-脚本从 `build/release` 复制主程序并独立部署 Qt 运行库；配置完成后可以安全清理项目的 `build/`
-和 `.tools/`，不会再破坏 Codex 的外部编辑器。首次安装或更新前若 `build/release` 不存在，先运行
-`powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\build.ps1 -Preset release`。
-配置后需要重新打开 Git Bash 并重启 Codex，因为已经运行的进程不会重新读取环境变量。
+安装脚本从 `build/release`（或 `-SourceEditorPath` 指定的刚构建产物）同步两个稳定目录并分别部署 Qt
+运行库，同时配置 Windows 用户环境变量、Git Bash、VS Code、pi 和 `KeysRedirect.ahk`。Codex 与 pi
+共享同一个 `CodexEditor` 安装副本，但每次 `--wait` 编辑仍启动独立的文件模式进程，避免并发会话互相
+覆盖；AHK 使用并列的 `AhkEditor` 常驻副本。配置后需要重新打开 Git Bash 并重启已运行的 Codex/pi，
+因为已有进程不会重新读取环境变量或设置。
+
+日常更新只需运行 `scripts/build.ps1`：每次成功构建都会自动同步两个稳定副本并刷新全部集成。首次部署
+同样只需运行以下命令，无需随后再单独执行安装脚本：
+
+```powershell
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\build.ps1 -Preset release
+```
 
 脚本会生成 `docs/codex-editor-installation.local.md`，集中记录这台机器的构建来源、实际部署目录、
-环境变量命令和更新步骤。该文件包含本机路径，已加入 `.gitignore`；每次执行 `-Action Install` 都会
-自动刷新。通用检查命令为：
+环境变量命令和更新步骤。该文件包含本机路径，已加入 `.gitignore`；每次通过构建脚本同步或手动执行
+`-Action Install` 都会自动刷新。通用检查命令为：
 
 ```powershell
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\configure-codex-editor.ps1 -Action Check
@@ -158,7 +168,7 @@ ScratchEditor。Git Bash 通过 `TERM_PROGRAM=vscode` 判断；VS Code 用户设
 `terminal.integrated.env.windows` 为 PowerShell、CMD 等其他集成终端注入相同变量。Codex 文件引用的
 点击行为不受此切换影响，仍由全局 `file_opener = "vscode"` 统一交给 VS Code。
 
-Codex 在 composer 中按 `Ctrl+G`；pi 也可在自己的 `settings.json` 中优先配置：
+Codex 在 composer 中按 `Ctrl+G`；安装脚本会自动把已检测到的 pi `settings.json` 指向同一个稳定副本：
 
 ```json
 {
@@ -226,9 +236,9 @@ Qt/旧 GUI 回退开关，不会被构建或测试脚本自动安装。阶段 6 
 
 - 原文件备份：`D:\Documents\AutoHotkey\KeysRedirect.ahk.stage6-backup-20260802-132834`。
 - 备份 SHA-256：`8BB8FFEFEBD9A6C90C102F66583D517C6C5CF83D36200A3D4E77D413C77B41C9`。
-- 已安装文件 SHA-256：`EF7CCD4E2CDDB0D29F8790F116A0B319CA1F2925548F48A05A5B195ADFE7D823`。
-- 默认 Qt 路径仍为 `D:\_Dev\ScratchEditor\build\stage4\ScratchEditor.exe`，未迁移任何
-  现有文件位置。
-- 验收未重载正在运行的 AHK；磁盘上的新版本会在用户下次正常重载或登录时生效。
+- 当前 `KeysRedirect.ahk` 的 Qt 回退路径由安装脚本维护，固定指向
+  `%LOCALAPPDATA%\ScratchEditor\AhkEditor\ScratchEditor.exe`。
+- 每次 `scripts/build.ps1` 成功构建都会更新该稳定副本；若稳定常驻实例正在运行，安装脚本会先隐藏并
+  停止该确切实例，安装完成后再重新启动。
 
 Qt 部署资源目前会输出已知的 `libpng iCCP` 警告，不影响功能、像素检查或性能验收。

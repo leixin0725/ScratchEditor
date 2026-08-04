@@ -61,6 +61,14 @@ QJsonObject execute(const QString &commandId)
                    {{QStringLiteral("commandId"), commandId}});
 }
 
+QJsonObject dragSelection(int start, int end, int dropPosition)
+{
+    return request(QStringLiteral("testDragSelection"),
+                   {{QStringLiteral("start"), start},
+                    {QStringLiteral("end"), end},
+                    {QStringLiteral("dropPosition"), dropPosition}});
+}
+
 QJsonObject keyPress(const QString &text = {}, const QString &key = {}, bool shift = false)
 {
     return request(QStringLiteral("testKeyPress"),
@@ -128,6 +136,44 @@ int main(int argc, char *argv[])
                     == QStringLiteral("#85c7c0")
                  && initial.value(QStringLiteral("commandPaletteMaximumWidth")).toInt() == 620,
              initial);
+
+    const QString dragText = QStringLiteral("AA<move>BB");
+    setTextAndSelection(dragText, 2, 8);
+    const QJsonObject movedForward = dragSelection(2, 8, dragText.size());
+    const QJsonObject undoneMove = request(QStringLiteral("testUndo"));
+    setTextAndSelection(dragText, 2, 8);
+    const QJsonObject movedBackward = dragSelection(2, 8, 0);
+    setTextAndSelection(dragText, 2, 8);
+    const QJsonObject droppedInside = dragSelection(2, 8, 5);
+    const QString multilineDragText = QStringLiteral("top\nmiddle\nbottom");
+    setTextAndSelection(multilineDragText, 4, 11);
+    const QJsonObject movedMultiline = dragSelection(4, 11, 0);
+    addCheck(checks, details, QStringLiteral("selectionDragMove"),
+             movedForward.value(QStringLiteral("eventsAccepted")).toBool()
+                 && movedForward.value(QStringLiteral("moved")).toBool()
+                 && movedForward.value(QStringLiteral("text")).toString()
+                    == QStringLiteral("AABB<move>")
+                 && movedForward.value(QStringLiteral("selectionStart")).toInt() == 4
+                 && movedForward.value(QStringLiteral("selectionEnd")).toInt() == 10
+                 && undoneMove.value(QStringLiteral("text")).toString() == dragText
+                 && movedBackward.value(QStringLiteral("eventsAccepted")).toBool()
+                 && movedBackward.value(QStringLiteral("moved")).toBool()
+                 && movedBackward.value(QStringLiteral("text")).toString()
+                    == QStringLiteral("<move>AABB")
+                 && movedBackward.value(QStringLiteral("selectionStart")).toInt() == 0
+                 && movedBackward.value(QStringLiteral("selectionEnd")).toInt() == 6
+                 && droppedInside.value(QStringLiteral("eventsAccepted")).toBool()
+                 && !droppedInside.value(QStringLiteral("moved")).toBool()
+                 && droppedInside.value(QStringLiteral("text")).toString() == dragText
+                 && movedMultiline.value(QStringLiteral("eventsAccepted")).toBool()
+                 && movedMultiline.value(QStringLiteral("moved")).toBool()
+                 && movedMultiline.value(QStringLiteral("text")).toString()
+                    == QStringLiteral("middle\ntop\nbottom"),
+             QJsonObject{{QStringLiteral("forward"), movedForward},
+                         {QStringLiteral("undo"), undoneMove},
+                         {QStringLiteral("backward"), movedBackward},
+                         {QStringLiteral("inside"), droppedInside},
+                         {QStringLiteral("multiline"), movedMultiline}});
 
     const QString markdown = QStringLiteral(
         "# 标题\n**粗体** 与 *斜体* 以及 `code`\n> 引用\n- 列表\n- [ ] 任务\n```cpp\nint x = 1;\n```\n[链接](https://example.invalid)");
