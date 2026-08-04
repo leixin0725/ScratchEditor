@@ -204,7 +204,8 @@ try {
         geometryPersistence = $geometryPassed
         smartScrollbar = [bool]$systemBehavior.checks.smartScrollBar
         escapeClosesAndCopies = [bool]$systemBehavior.checks.escapeClosesAndCopies
-        focusRestored = [bool]$systemBehavior.checks.focusRestored
+        ctrlSClosesAndDelivers = [bool]$systemBehavior.checks.ctrlSClosesAndDelivers
+        focusNotPulledBack = [bool]$systemBehavior.checks.focusNotPulledBack
         clipboardReadFailure = [bool]$systemBehavior.checks.clipboardReadFailureIsVisible
         clipboardWriteFailure = [bool]$systemBehavior.checks.clipboardWriteFailureKeepsEditor
         clipboardRecovery = [bool]$systemBehavior.checks.clipboardWriteRecovers

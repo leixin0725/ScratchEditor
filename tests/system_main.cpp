@@ -1,4 +1,5 @@
 #include <QCoreApplication>
+#include <QDateTime>
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QLocalSocket>
@@ -6,6 +7,7 @@
 
 #include <functional>
 #include <atomic>
+#include <string>
 #include <thread>
 
 #ifdef Q_OS_WIN
@@ -101,6 +103,44 @@ bool sendEscape(HWND window)
         && PostMessageW(window, WM_KEYUP, VK_ESCAPE, 0xC0000001) != FALSE;
 }
 
+bool sendCtrlS(HWND window)
+{
+    Q_UNUSED(window);
+    // PostMessage 不会更新全局修饰键状态，Qt 无法识别 Ctrl+S；改用真实注入，
+    // 调用前需确保 window 是前台窗口。
+    keybd_event(VK_CONTROL, 0, 0, 0);
+    keybd_event('S', 0, 0, 0);
+    keybd_event('S', 0, KEYEVENTF_KEYUP, 0);
+    keybd_event(VK_CONTROL, 0, KEYEVENTF_KEYUP, 0);
+    return true;
+}
+
+void forceForeground(HWND window)
+{
+    const DWORD currentThread = GetCurrentThreadId();
+    const DWORD foregroundThread = GetWindowThreadProcessId(GetForegroundWindow(), nullptr);
+    if (foregroundThread && foregroundThread != currentThread) {
+        AttachThreadInput(currentThread, foregroundThread, TRUE);
+    }
+    SetForegroundWindow(window);
+    if (foregroundThread && foregroundThread != currentThread) {
+        AttachThreadInput(currentThread, foregroundThread, FALSE);
+    }
+}
+
+void pumpMessages(int durationMs)
+{
+    const qint64 deadline = QDateTime::currentMSecsSinceEpoch() + durationMs;
+    MSG message{};
+    while (QDateTime::currentMSecsSinceEpoch() < deadline) {
+        while (PeekMessageW(&message, nullptr, 0, 0, PM_REMOVE)) {
+            TranslateMessage(&message);
+            DispatchMessageW(&message);
+        }
+        QThread::msleep(5);
+    }
+}
+
 class ClipboardLock final
 {
 public:
@@ -180,6 +220,15 @@ int main(int argc, char *argv[])
                                              L"ScratchEditorFocusRestoreTest",
                                              WS_OVERLAPPEDWINDOW, 80, 80, 320, 180,
                                              nullptr, nullptr, GetModuleHandleW(nullptr), nullptr);
+    const HWND recentWindow = CreateWindowExW(WS_EX_TOOLWINDOW, L"STATIC",
+                                              L"ScratchEditorRecentFocusTest",
+                                              WS_OVERLAPPEDWINDOW, 420, 80, 320, 180,
+                                              nullptr, nullptr, GetModuleHandleW(nullptr), nullptr);
+    const HWND editWindow = CreateWindowExW(WS_EX_TOOLWINDOW, L"EDIT", L"",
+                                            WS_OVERLAPPEDWINDOW | ES_MULTILINE
+                                                | ES_AUTOVSCROLL,
+                                            80, 300, 320, 180,
+                                            nullptr, nullptr, GetModuleHandleW(nullptr), nullptr);
 
     const QJsonObject shown = command(QStringLiteral("show"));
     checks.insert(QStringLiteral("showReady"), shown.value(QStringLiteral("visible")).toBool());
@@ -223,26 +272,71 @@ int main(int argc, char *argv[])
     details.insert(QStringLiteral("escapeStatus"), escapedStatus);
 
     ShowWindow(focusWindow, SW_SHOWNORMAL);
-    SetForegroundWindow(focusWindow);
+    forceForeground(focusWindow);
     QThread::msleep(75);
     const HWND focusBeforeShow = GetForegroundWindow();
     command(QStringLiteral("show"));
+    // 普通模式不应记录打开编辑器之前的窗口。
+    const QJsonObject shownFocusStatus = command(QStringLiteral("status"));
+    // 编辑器打开后把焦点切到另一个最近活跃的窗口，模拟用户在编辑期间切换窗口。
+    ShowWindow(recentWindow, SW_SHOWNORMAL);
+    forceForeground(recentWindow);
+    QThread::msleep(75);
     const QJsonObject hiddenAfterFocus = command(QStringLiteral("hide"));
-    const QJsonObject focusStatus = waitForStatus([focusBeforeShow](const QJsonObject &status) {
+    waitForStatus([](const QJsonObject &status) {
         return !status.value(QStringLiteral("visible")).toBool()
-            && reinterpret_cast<HWND>(status.value(QStringLiteral("foregroundHwnd"))
-                                           .toString().toULongLong())
-                == focusBeforeShow;
+            && !status.value(QStringLiteral("windowTransitionActive")).toBool();
     });
+    // 窗口隐藏后给系统的前台切换留出稳定时间，再读取实际前台。
+    QThread::msleep(300);
+    const QJsonObject focusStatus = command(QStringLiteral("status"));
     const HWND focusAfterHide = reinterpret_cast<HWND>(
         focusStatus.value(QStringLiteral("foregroundHwnd")).toString().toULongLong());
-    checks.insert(QStringLiteral("focusRestored"),
-                  focusBeforeShow && focusAfterHide == focusBeforeShow
+    checks.insert(QStringLiteral("focusNotPulledBack"),
+                  shownFocusStatus.value(QStringLiteral("previousForegroundHwnd")).toString()
+                          == QStringLiteral("0")
+                      && focusBeforeShow && focusAfterHide != focusBeforeShow
                       && !hiddenAfterFocus.value(QStringLiteral("visible")).toBool());
     details.insert(QStringLiteral("focusBeforeShow"),
                    QString::number(reinterpret_cast<quintptr>(focusBeforeShow)));
+    details.insert(QStringLiteral("recentWindow"),
+                   QString::number(reinterpret_cast<quintptr>(recentWindow)));
     details.insert(QStringLiteral("focusAfterHide"),
                    QString::number(reinterpret_cast<quintptr>(focusAfterHide)));
+
+    const QString deliverText = QStringLiteral("Ctrl+S 输入回归测试：中文");
+    command(QStringLiteral("show"));
+    command(QStringLiteral("testSetText"), {{QStringLiteral("text"), deliverText}});
+    ShowWindow(editWindow, SW_SHOWNORMAL);
+    forceForeground(editWindow);
+    SetFocus(editWindow);
+    QThread::msleep(75);
+    forceForeground(editorWindow);
+    QThread::msleep(50);
+    const bool ctrlSSent = sendCtrlS(editorWindow);
+    const QJsonObject deliverStatus = waitForStatus([](const QJsonObject &status) {
+        return !status.value(QStringLiteral("visible")).toBool();
+    });
+    // 等待编辑器隐藏后的前台切换和 Ctrl+V 输入落到目标窗口。
+    pumpMessages(400);
+    const int deliveredLength = GetWindowTextLengthW(editWindow);
+    std::wstring deliveredBuffer(static_cast<size_t>(deliveredLength) + 1, L'\0');
+    GetWindowTextW(editWindow, deliveredBuffer.data(),
+                   static_cast<int>(deliveredBuffer.size()));
+    const QString deliveredText = QString::fromWCharArray(deliveredBuffer.data());
+    const QString deliveredClipboard = readClipboardText();
+    checks.insert(QStringLiteral("ctrlSClosesAndDelivers"),
+                  ctrlSSent && !deliverStatus.value(QStringLiteral("visible")).toBool()
+                      && deliveredText == deliverText
+                      && deliveredClipboard == deliverText);
+    details.insert(QStringLiteral("ctrlSDeliveredText"), deliveredText);
+    details.insert(QStringLiteral("ctrlSDeliveredClipboard"), deliveredClipboard);
+    details.insert(QStringLiteral("ctrlSDeliverStatus"), deliverStatus);
+    details.insert(QStringLiteral("ctrlSEditWindow"),
+                   QString::number(reinterpret_cast<quintptr>(editWindow)));
+    const QJsonObject afterDeliverStatus = command(QStringLiteral("status"));
+    details.insert(QStringLiteral("ctrlSForegroundAfterHide"),
+                   afterDeliverStatus.value(QStringLiteral("foregroundHwnd")).toString());
 
     command(QStringLiteral("show"));
     const QString lockedWriteText = QStringLiteral("系统回归剪贴板写入异常保留内容");
@@ -281,6 +375,8 @@ int main(int argc, char *argv[])
 
     command(QStringLiteral("hide"));
     DestroyWindow(focusWindow);
+    DestroyWindow(recentWindow);
+    DestroyWindow(editWindow);
 
     if (originalClipboard) {
         if (SUCCEEDED(OleSetClipboard(originalClipboard))) {

@@ -100,7 +100,7 @@ EditorController::EditorController(bool testMode, QElapsedTimer *startupTimer,
         m_externalFileReady = m_externalFileSession->load(&m_externalFileText,
                                                           &m_externalFileError);
         m_statusMessage = m_externalFileReady
-            ? QStringLiteral("Ctrl+S 保存 · Esc 保存并返回 CLI")
+            ? QStringLiteral("Ctrl+S / Esc 保存并返回 CLI")
             : m_externalFileError;
         m_statusHealthy = m_externalFileReady;
     }
@@ -1127,10 +1127,12 @@ void EditorController::showEditor()
     ++m_focusGeneration;
 
 #ifdef Q_OS_WIN
-    const HWND editorHwnd = reinterpret_cast<HWND>(m_window->winId());
-    const HWND foreground = GetForegroundWindow();
-    if (foreground && foreground != editorHwnd && IsWindow(foreground)) {
-        m_previousForegroundWindow = reinterpret_cast<quintptr>(foreground);
+    if (externalFileMode()) {
+        const HWND editorHwnd = reinterpret_cast<HWND>(m_window->winId());
+        const HWND foreground = GetForegroundWindow();
+        if (foreground && foreground != editorHwnd && IsWindow(foreground)) {
+            m_previousForegroundWindow = reinterpret_cast<quintptr>(foreground);
+        }
     }
 #endif
 
@@ -1144,7 +1146,7 @@ void EditorController::showEditor()
             m_editor->setProperty("cursorPosition", m_externalFileText.size());
             m_externalFileLoadedIntoEditor = true;
         }
-        setExternalFileState(true, QStringLiteral("Ctrl+S 保存 · Esc 保存并返回 CLI"));
+        setExternalFileState(true, QStringLiteral("Ctrl+S / Esc 保存并返回 CLI"));
     } else {
         QString clipboardText;
         QString clipboardError;
@@ -1224,6 +1226,17 @@ void EditorController::hideEditor()
     }
 }
 
+void EditorController::deliverAndHide()
+{
+    if (externalFileMode()) {
+        // 提示词临时编辑器：Ctrl+S 与 Esc 一样，保存并关闭本次编辑。
+        commitExternalFileAndExit();
+    } else {
+        // 普通剪贴板临时编辑器：关闭并把内容输入到系统接下来交给的窗口。
+        commitAndHide(true);
+    }
+}
+
 bool EditorController::saveExternalFile()
 {
     if (!externalFileMode() || !m_externalFileReady || !m_editor) {
@@ -1243,7 +1256,7 @@ bool EditorController::saveExternalFile()
     }
 
     m_externalFileError.clear();
-    setExternalFileState(true, QStringLiteral("已保存 · Esc 保存并返回 CLI"));
+    setExternalFileState(true, QStringLiteral("已保存 · Ctrl+S / Esc 保存并返回 CLI"));
     return true;
 }
 
@@ -1263,7 +1276,7 @@ bool EditorController::commitExternalFileAndExit()
     return true;
 }
 
-bool EditorController::commitAndHide()
+bool EditorController::commitAndHide(bool deliverAfterHide)
 {
     if (!m_window || (!m_window->isVisible() && !m_hiding) || !m_editor) {
         return true;
@@ -1284,6 +1297,7 @@ bool EditorController::commitAndHide()
         }
     }
     setClipboardState(true);
+    m_deliverAfterHide = deliverAfterHide;
     const bool transitionRunning = m_windowTransitionGroup
         && m_windowTransitionGroup->state() == QAbstractAnimation::Running;
     if (!transitionRunning || !m_windowRestingGeometry.isValid()) {
@@ -1304,7 +1318,7 @@ bool EditorController::commitAndHide()
     const quint64 focusGeneration = ++m_focusGeneration;
     QTimer::singleShot(0, this, [this, focusGeneration] {
         if (focusGeneration == m_focusGeneration && !isVisible()) {
-            restorePreviousFocus();
+            finishHideFocusHandoff();
         }
     });
     return true;
@@ -1386,9 +1400,42 @@ void EditorController::finishWindowHide()
     const quint64 focusGeneration = ++m_focusGeneration;
     QTimer::singleShot(0, this, [this, focusGeneration] {
         if (focusGeneration == m_focusGeneration && !isVisible()) {
-            restorePreviousFocus();
+            finishHideFocusHandoff();
         }
     });
+}
+
+void EditorController::finishHideFocusHandoff()
+{
+    if (m_deliverAfterHide) {
+        m_deliverAfterHide = false;
+        deliverTextToNextWindow();
+    } else {
+        restorePreviousFocus();
+    }
+}
+
+void EditorController::deliverTextToNextWindow()
+{
+#ifdef Q_OS_WIN
+    // 隐藏后由系统选择下一个前台窗口；稍等片刻让焦点稳定，再把剪贴板内容
+    // 以 Ctrl+V 输入到该窗口。若前台无效或仍是编辑器自身则放弃本次输入。
+    QTimer::singleShot(150, this, [this] {
+        const HWND editorHwnd = m_window
+            ? reinterpret_cast<HWND>(m_window->winId())
+            : nullptr;
+        const HWND foreground = GetForegroundWindow();
+        if (!foreground || foreground == editorHwnd || !IsWindow(foreground)) {
+            return;
+        }
+        keybd_event(VK_CONTROL, 0, 0, 0);
+        keybd_event(0x56, 0, 0, 0);
+        keybd_event(0x56, 0, KEYEVENTF_KEYUP, 0);
+        keybd_event(VK_CONTROL, 0, KEYEVENTF_KEYUP, 0);
+    });
+#else
+    m_deliverAfterHide = false;
+#endif
 }
 
 QRect EditorController::scaledWindowGeometry(const QRect &restingGeometry) const
@@ -1542,7 +1589,9 @@ bool EditorController::writeClipboardText(const QString &text, QString *errorMes
 
 void EditorController::setClipboardState(bool healthy, const QString &message)
 {
-    const QString newMessage = healthy ? QStringLiteral("Esc 关闭并复制") : message;
+    const QString newMessage = healthy
+        ? QStringLiteral("Esc 关闭并复制 · Ctrl+S 关闭并输入到下一个窗口")
+        : message;
     const bool healthChanged = m_clipboardHealthy != healthy;
     const bool statusHealthChanged = m_statusHealthy != healthy;
     const bool messageChanged = m_statusMessage != newMessage;
@@ -1628,6 +1677,13 @@ void EditorController::saveWindowGeometry()
 
 void EditorController::restorePreviousFocus()
 {
+    // 普通剪贴板模式是独立临时窗口：关闭后由系统把前台交给最近活跃的窗口，
+    // 不把焦点强拉回打开编辑器之前的窗口。仅外部 CLI（提示词临时编辑器）模式
+    // 保留该行为，把焦点还给启动它的终端窗口。
+    if (!externalFileMode()) {
+        m_previousForegroundWindow = 0;
+        return;
+    }
 #ifdef Q_OS_WIN
     const HWND previous = reinterpret_cast<HWND>(m_previousForegroundWindow);
     m_previousForegroundWindow = 0;

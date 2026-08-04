@@ -170,8 +170,9 @@ Window {
     Shortcut {
         sequence: "Ctrl+S"
         context: Qt.WindowShortcut
-        enabled: root.visible && controller.externalFileMode
-        onActivated: controller.saveExternalFile()
+        enabled: root.visible && !findPanel.visible && !commandPaletteLoader.active
+                 && !settingsLoader.active
+        onActivated: controller.deliverAndHide()
     }
 
     Shortcut {

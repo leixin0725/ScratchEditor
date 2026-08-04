@@ -8,7 +8,64 @@
 #include <QTextStream>
 #include <QThread>
 
+#ifdef Q_OS_WIN
+#  include <windows.h>
+#endif
+
 namespace {
+
+#ifdef Q_OS_WIN
+struct FindWindowContext
+{
+    DWORD pid = 0;
+    HWND hwnd = nullptr;
+};
+
+BOOL CALLBACK findWindowByPid(HWND hwnd, LPARAM lParam)
+{
+    auto *context = reinterpret_cast<FindWindowContext *>(lParam);
+    DWORD windowPid = 0;
+    GetWindowThreadProcessId(hwnd, &windowPid);
+    if (windowPid == context->pid && IsWindowVisible(hwnd)) {
+        context->hwnd = hwnd;
+        return FALSE;
+    }
+    return TRUE;
+}
+
+HWND findTopLevelWindow(DWORD pid)
+{
+    FindWindowContext context;
+    context.pid = pid;
+    EnumWindows(findWindowByPid, reinterpret_cast<LPARAM>(&context));
+    return context.hwnd;
+}
+
+void forceForeground(HWND window)
+{
+    const DWORD currentThread = GetCurrentThreadId();
+    const DWORD foregroundThread = GetWindowThreadProcessId(GetForegroundWindow(), nullptr);
+    if (foregroundThread && foregroundThread != currentThread) {
+        AttachThreadInput(currentThread, foregroundThread, TRUE);
+    }
+    SetForegroundWindow(window);
+    if (foregroundThread && foregroundThread != currentThread) {
+        AttachThreadInput(currentThread, foregroundThread, FALSE);
+    }
+}
+
+bool sendCtrlS(HWND window)
+{
+    Q_UNUSED(window);
+    // PostMessage 不会更新全局修饰键状态，Qt 无法识别 Ctrl+S；改用真实注入，
+    // 调用前需确保 window 是前台窗口。
+    keybd_event(VK_CONTROL, 0, 0, 0);
+    keybd_event('S', 0, 0, 0);
+    keybd_event('S', 0, KEYEVENTF_KEYUP, 0);
+    keybd_event(VK_CONTROL, 0, KEYEVENTF_KEYUP, 0);
+    return true;
+}
+#endif
 
 bool check(bool condition, const QString &message)
 {
@@ -143,6 +200,47 @@ int main(int argc, char *argv[])
                        QStringLiteral("两个并发文件会话发生覆盖或丢失"));
     failures += !check(residentProcess.state() != QProcess::NotRunning,
                        QStringLiteral("外部文件会话不得结束或复用既有常驻实例"));
+
+#ifdef Q_OS_WIN
+    const QString ctrlSFile = temporaryDirectory.filePath(
+        QStringLiteral("ctrl-s-save-and-exit.md"));
+    failures += !check(writeText(ctrlSFile, QStringLiteral("# ctrl-s original\n")),
+                       QStringLiteral("无法创建 Ctrl+S 生命周期夹具"));
+    QProcess ctrlSProcess;
+    ctrlSProcess.setProcessEnvironment(residentEnvironment);
+    ctrlSProcess.setProgram(editor);
+    ctrlSProcess.setArguments(
+        {QStringLiteral("--test-mode"), QStringLiteral("--wait"), ctrlSFile});
+    ctrlSProcess.start();
+    failures += !check(ctrlSProcess.waitForStarted(5000),
+                       QStringLiteral("Ctrl+S 外部编辑进程无法启动"));
+    HWND ctrlSWindow = nullptr;
+    for (int attempt = 0; attempt < 200 && !ctrlSWindow; ++attempt) {
+        ctrlSWindow = findTopLevelWindow(static_cast<DWORD>(ctrlSProcess.processId()));
+        if (!ctrlSWindow) {
+            QThread::msleep(25);
+        }
+    }
+    failures += !check(ctrlSWindow != nullptr,
+                       QStringLiteral("Ctrl+S 外部编辑窗口未在预期时间内出现"));
+    if (ctrlSWindow) {
+        forceForeground(ctrlSWindow);
+        QThread::msleep(50);
+        const bool ctrlSSent = sendCtrlS(ctrlSWindow);
+        failures += !check(ctrlSProcess.waitForFinished(10000),
+                           QStringLiteral("Ctrl+S 后外部编辑进程未保存并退出"));
+        failures += !check(
+            ctrlSSent && ctrlSProcess.exitStatus() == QProcess::NormalExit
+                && ctrlSProcess.exitCode() == 0,
+            QStringLiteral("Ctrl+S 应保存并正常退出，实际退出码为 %1")
+                .arg(ctrlSProcess.exitCode()));
+        failures += !check(readText(ctrlSFile) == QStringLiteral("# ctrl-s original\n"),
+                           QStringLiteral("Ctrl+S 未按 UTF-8 保存文件内容"));
+    } else {
+        ctrlSProcess.kill();
+        ctrlSProcess.waitForFinished(5000);
+    }
+#endif
 
     if (residentProcess.state() != QProcess::NotRunning) {
         residentProcess.kill();
