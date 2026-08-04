@@ -34,6 +34,12 @@ public:
     bool replaceCurrent(const QString &query, const QString &replacement, bool caseSensitive);
     int replaceAll(const QString &query, const QString &replacement, bool caseSensitive);
 
+    static bool isCJK(QChar ch);
+    static bool isAsciiAlnum(QChar ch);
+    static bool isSoftSeparator(QChar ch);
+    static bool isInsideBlockFormula(const QString &text, int position);
+    static QString formatLineSpacing(const QString &line);
+
 signals:
     void commandsChanged();
     void uiCommandRequested(const QString &commandId);
@@ -61,6 +67,10 @@ private:
     bool handleListEnter();
     bool jumpOutOfPair();
     bool changeIndent(bool outdent);
+    bool formatSpacing();
+    void formatSpacingInRange(int rangeStart, int rangeEnd);
+    void autoSpaceAroundCursor(int cursorPosition);
+    void autoSpaceAroundRange(int rangeStart, int rangeEnd);
     void completeInputMethodCommit(const QString &committedText, const QString &beforeText,
                                    const QString &selectedText, int selectionStart,
                                    int selectionEnd);

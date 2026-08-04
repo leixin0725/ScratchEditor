@@ -257,6 +257,61 @@ bool isInsideFencedCode(const QString &text, int lineStart)
     return inside;
 }
 
+struct InlineSpan {
+    int start; // index of opening delimiter
+    int end;   // index after closing delimiter
+};
+
+QVector<InlineSpan> getInlineSpansOnLine(const QString &line)
+{
+    QVector<InlineSpan> spans;
+    int i = 0;
+    const int len = line.size();
+    while (i < len) {
+        if (i + 1 < len && line.at(i) == u'$' && line.at(i + 1) == u'$') {
+            i += 2;
+            continue;
+        }
+        if (line.at(i) == u'`') {
+            int runStart = i;
+            while (i < len && line.at(i) == u'`') {
+                ++i;
+            }
+            int runLen = i - runStart;
+            QString closing(runLen, u'`');
+            int closePos = line.indexOf(closing, i);
+            if (closePos >= 0) {
+                spans.append({runStart, closePos + runLen});
+                i = closePos + runLen;
+            }
+            continue;
+        }
+        if (line.at(i) == u'$') {
+            int openPos = i;
+            ++i;
+            int closePos = -1;
+            while (i < len) {
+                if (line.at(i) == u'$') {
+                    if (i + 1 < len && line.at(i + 1) == u'$') {
+                        i += 2;
+                        continue;
+                    }
+                    closePos = i;
+                    break;
+                }
+                ++i;
+            }
+            if (closePos > openPos) {
+                spans.append({openPos, closePos + 1});
+                i = closePos + 1;
+            }
+            continue;
+        }
+        ++i;
+    }
+    return spans;
+}
+
 struct TextReplacement {
     int start = 0;
     int length = 0;
@@ -542,6 +597,148 @@ TextRange inferredWordRange(QTextDocument *document, const QString &text, int po
 
 } // namespace
 
+bool EditorCommandRegistry::isInsideBlockFormula(const QString &text, int position)
+{
+    static const QRegularExpression formulaPattern(
+        QStringLiteral(R"(^[\t ]*\$\$[^\n]*$)"));
+    bool inside = false;
+    int scanStart = 0;
+    while (scanStart < position) {
+        int scanEnd = text.indexOf(QLatin1Char('\n'), scanStart);
+        if (scanEnd < 0) {
+            scanEnd = text.size();
+        }
+        if (scanEnd >= position) {
+            break;
+        }
+        const QString line = text.mid(scanStart, scanEnd - scanStart);
+        if (formulaPattern.match(line).hasMatch()) {
+            inside = !inside;
+        }
+        scanStart = scanEnd + 1;
+    }
+    return inside;
+}
+
+bool EditorCommandRegistry::isCJK(QChar ch)
+{
+    const char16_t u = ch.unicode();
+    // CJK Unified Ideographs
+    if (u >= 0x4E00 && u <= 0x9FFF) return true;
+    // CJK Extension A
+    if (u >= 0x3400 && u <= 0x4DBF) return true;
+    // Hiragana
+    if (u >= 0x3040 && u <= 0x309F) return true;
+    // Katakana + Katakana Phonetic Extensions
+    if (u >= 0x30A0 && u <= 0x30FF) return true;
+    if (u >= 0x31F0 && u <= 0x31FF) return true;
+    // Hangul Jamo
+    if (u >= 0x1100 && u <= 0x11FF) return true;
+    // Hangul Compatibility Jamo
+    if (u >= 0x3130 && u <= 0x318F) return true;
+    // Hangul Syllables
+    if (u >= 0xAC00 && u <= 0xD7AF) return true;
+    return false;
+}
+
+bool EditorCommandRegistry::isAsciiAlnum(QChar ch)
+{
+    return (ch >= u'A' && ch <= u'Z')
+        || (ch >= u'a' && ch <= u'z')
+        || (ch >= u'0' && ch <= u'9');
+}
+
+bool EditorCommandRegistry::isSoftSeparator(QChar ch)
+{
+    static const QSet<char16_t> fullwidthSeps = {
+        0xFF0C, 0x3002, 0x3001, 0xFF1F, 0xFF01, 0xFF1A, 0xFF1B,  // ，。、？！：；
+        0x201C, 0x201D, 0x2018, 0x2019,                            // “”‘’
+        0xFF08, 0xFF09, 0x3010, 0x3011, 0x300A, 0x300B,            // （）【】《》
+        0x300C, 0x300D, 0x300E, 0x300F,                            // 「」『』
+    };
+    if (fullwidthSeps.contains(ch.unicode())) return true;
+
+    static const QSet<char16_t> halfwidthSeps = {
+        u',', u'.', u'?', u'!', u':', u';', u'"', u'\'',
+        u'-', u'(', u')', u'[', u']', u'{', u'}',
+    };
+    return halfwidthSeps.contains(ch.unicode());
+}
+
+QString EditorCommandRegistry::formatLineSpacing(const QString &line)
+{
+    if (line.isEmpty()) {
+        return line;
+    }
+
+    const QVector<InlineSpan> spans = getInlineSpansOnLine(line);
+    QSet<int> insertPositions;
+
+    for (int pos = 1; pos < line.size(); ++pos) {
+        bool insideSpan = false;
+        bool isSpanStart = false;
+        bool isSpanEnd = false;
+
+        for (const auto &span : spans) {
+            if (span.start < pos && pos < span.end) {
+                insideSpan = true;
+                break;
+            }
+            if (pos == span.start) {
+                isSpanStart = true;
+            }
+            if (pos == span.end) {
+                isSpanEnd = true;
+            }
+        }
+
+        if (insideSpan) {
+            continue;
+        }
+
+        const QChar left = line.at(pos - 1);
+        const QChar right = line.at(pos);
+
+        if (left == u' ' || right == u' ' || left == u'\n' || right == u'\n') {
+            continue;
+        }
+
+        if (isSpanStart) {
+            if (!isSoftSeparator(left)
+                && (isCJK(left) || isAsciiAlnum(left))) {
+                insertPositions.insert(pos);
+            }
+        } else if (isSpanEnd) {
+            if (!isSoftSeparator(right)
+                && (isCJK(right) || isAsciiAlnum(right))) {
+                insertPositions.insert(pos);
+            }
+        } else {
+            if (!isSoftSeparator(left)
+                && !isSoftSeparator(right)) {
+                if ((isCJK(left) && isAsciiAlnum(right))
+                    || (isAsciiAlnum(left) && isCJK(right))) {
+                    insertPositions.insert(pos);
+                }
+            }
+        }
+    }
+
+    if (insertPositions.isEmpty()) {
+        return line;
+    }
+
+    QString result;
+    result.reserve(line.size() + insertPositions.size());
+    for (int i = 0; i < line.size(); ++i) {
+        if (insertPositions.contains(i)) {
+            result.append(u' ');
+        }
+        result.append(line.at(i));
+    }
+    return result;
+}
+
 EditorCommandRegistry::EditorCommandRegistry(AppSettings *settings, QObject *parent)
     : QObject(parent)
     , m_settings(settings)
@@ -589,6 +786,8 @@ EditorCommandRegistry::EditorCommandRegistry(AppSettings *settings, QObject *par
          QStringLiteral("界面"), QStringLiteral("Ctrl+Shift+P"), {}, true},
         {QStringLiteral("settings"), QStringLiteral("打开设置"),
          QStringLiteral("界面"), QStringLiteral("Ctrl+,"), {}, true},
+        {QStringLiteral("formatSpacing"), QStringLiteral("整理选区或当前行格式"),
+         QStringLiteral("编辑"), QStringLiteral("Alt+F"), {}, false},
     };
 
     for (Definition &item : m_definitions) {
@@ -696,6 +895,9 @@ bool EditorCommandRegistry::execute(const QString &commandId)
         return false;
     }
 
+    if (commandId == QStringLiteral("formatSpacing")) {
+        return formatSpacing();
+    }
     if (commandId == QStringLiteral("toggleBold")) {
         return wrapSelection(QStringLiteral("**"), QStringLiteral("**"));
     }
@@ -776,7 +978,12 @@ bool EditorCommandRegistry::handleEditorEvent(QEvent *event)
 
         if (!(modifiers & (Qt::ControlModifier | Qt::AltModifier | Qt::MetaModifier))
             && !keyEvent->text().isEmpty()) {
-            return handleTypedText(keyEvent->text());
+            const bool handled = handleTypedText(keyEvent->text());
+            QTimer::singleShot(0, this, [this] {
+                const int pos = m_editor->property("cursorPosition").toInt();
+                autoSpaceAroundRange(qMax(0, pos - 1), pos + 1);
+            });
+            return handled;
         }
         return false;
     }
@@ -792,6 +999,11 @@ bool EditorCommandRegistry::handleEditorEvent(QEvent *event)
             || pairForOpening(committedText)
             || isClosingDelimiter(committedText);
         if (!relevant) {
+            const int start = m_editor->property("selectionStart").toInt();
+            const int commitLen = committedText.size();
+            QTimer::singleShot(0, this, [this, start, commitLen] {
+                autoSpaceAroundRange(qMax(0, start - 1), start + commitLen + 1);
+            });
             return false;
         }
 
@@ -802,6 +1014,9 @@ bool EditorCommandRegistry::handleEditorEvent(QEvent *event)
         QTimer::singleShot(0, this,
                            [this, committedText, beforeText, selection, start, end] {
             completeInputMethodCommit(committedText, beforeText, selection, start, end);
+            const int pos = m_editor->property("cursorPosition").toInt();
+            const int commitLen = committedText.size();
+            autoSpaceAroundRange(qMax(0, pos - commitLen - 1), pos + 1);
         });
     }
     return false;
@@ -1547,12 +1762,127 @@ bool EditorCommandRegistry::handleTypedText(const QString &text)
         }
     }
 
+    // --- CJK Punctuation, Ellipsis & Em-dash Conversions ---
+    if (!hasSelection) {
+        const QChar ch = text.at(0);
+
+        // 1. Ellipsis: ..., 。。。, 。。., .。. → ……
+        if (ch == u'.' || ch == u'\u3002') {
+            if (start >= 2) {
+                const QString prev2 = documentText.mid(start - 2, 2);
+                const bool isEllipsis =
+                    prev2 == QStringLiteral("..")
+                    || prev2 == QStringLiteral("\u3002\u3002")
+                    || prev2 == QStringLiteral("\u3002.")
+                    || prev2 == QStringLiteral(".\u3002");
+                if (isEllipsis) {
+                    QTextCursor cursor(m_document);
+                    cursor.setPosition(start - 2);
+                    cursor.setPosition(start, QTextCursor::KeepAnchor);
+                    cursor.beginEditBlock();
+                    cursor.insertText(QStringLiteral("\u2026\u2026"));
+                    cursor.endEditBlock();
+                    m_editor->setProperty("cursorPosition", start);
+                    focusEditor();
+                    return true;
+                }
+            }
+        }
+
+        // 2. Em-dash: CJK-- → CJK——
+        if (ch == u'-' && start >= 2) {
+            if (documentText.at(start - 1) == u'-') {
+                const QChar beforeDash = documentText.at(start - 2);
+                if (isCJK(beforeDash)) {
+                    QTextCursor cursor(m_document);
+                    cursor.setPosition(start - 1);
+                    cursor.setPosition(start, QTextCursor::KeepAnchor);
+                    cursor.beginEditBlock();
+                    cursor.insertText(QStringLiteral("\u2014\u2014"));
+                    cursor.endEditBlock();
+                    m_editor->setProperty("cursorPosition", start + 1);
+                    focusEditor();
+                    return true;
+                }
+            }
+        }
+
+        // 3. ASCII Punctuation after CJK → Fullwidth
+        if (start > 0 && isCJK(documentText.at(start - 1))) {
+            if (ch == u'(') {
+                return insertPair(QStringLiteral("（"), QStringLiteral("）"));
+            }
+            static const QHash<char16_t, QString> asciiToFull = {
+                {u',', QStringLiteral("，")},
+                {u'.', QStringLiteral("。")},
+                {u':', QStringLiteral("：")},
+                {u'?', QStringLiteral("？")},
+                {u'!', QStringLiteral("！")},
+                {u';', QStringLiteral("；")},
+                {u')', QStringLiteral("）")},
+            };
+            auto it = asciiToFull.find(ch.unicode());
+            if (it != asciiToFull.end()) {
+                if (ch == u')' && (documentText.mid(start, 1) == QStringLiteral("）")
+                                  || documentText.mid(start, 1) == QStringLiteral(")"))) {
+                    m_editor->setProperty("cursorPosition", start + 1);
+                    return true;
+                }
+                QTextCursor cursor(m_document);
+                cursor.setPosition(start);
+                cursor.insertText(it.value());
+                m_editor->setProperty("cursorPosition", start + 1);
+                focusEditor();
+                return true;
+            }
+        }
+
+        // 4. Chained Fullwidth: ，, → ，，   。. → 。。
+        if (start > 0) {
+            const QChar prev = documentText.at(start - 1);
+            if ((prev == u'\uFF0C' && ch == u',')
+                || (prev == u'\u3002' && ch == u'.')) {
+                const QString full = (ch == u',') ? QStringLiteral("，") : QStringLiteral("。");
+                QTextCursor cursor(m_document);
+                cursor.setPosition(start);
+                cursor.insertText(full);
+                m_editor->setProperty("cursorPosition", start + 1);
+                focusEditor();
+                return true;
+            }
+        }
+    }
+
     if (const DelimiterPair *pair = pairForOpening(text)) {
         if (!hasSelection && pair->opening == pair->closing
             && documentText.mid(start, pair->closing.size()) == pair->closing) {
             m_editor->setProperty("cursorPosition", start + pair->closing.size());
             return true;
         }
+
+        if (hasSelection) {
+            const QString selection = documentText.mid(start, end - start);
+            bool selectionHasCJK = false;
+            for (const QChar &c : selection) {
+                if (isCJK(c)) {
+                    selectionHasCJK = true;
+                    break;
+                }
+            }
+            if (selectionHasCJK) {
+                static const QHash<QString, std::pair<QString, QString>> halfToFull = {
+                    {QStringLiteral("("),  {QStringLiteral("\uFF08"), QStringLiteral("\uFF09")}},
+                    {QStringLiteral("["),  {QStringLiteral("\u3010"), QStringLiteral("\u3011")}},
+                    {QStringLiteral("\""), {QStringLiteral("\u201C"), QStringLiteral("\u201D")}},
+                    {QStringLiteral("'"),  {QStringLiteral("\u2018"), QStringLiteral("\u2019")}},
+                };
+                auto it = halfToFull.find(pair->opening);
+                if (it != halfToFull.end()) {
+                    return insertPair(it.value().first, it.value().second);
+                }
+            }
+        }
+
         return insertPair(pair->opening, pair->closing);
     }
 
@@ -1561,6 +1891,26 @@ bool EditorCommandRegistry::handleTypedText(const QString &text)
         m_editor->setProperty("cursorPosition", start + text.size());
         return true;
     }
+
+    if (!hasSelection && text.size() == 1 && start > 0) {
+        const QChar prev = documentText.at(start - 1);
+        const QChar ch = text.at(0);
+        if (prev != u' ' && prev != u'\n' && ch != u' ' && ch != u'\n'
+            && !isSoftSeparator(prev) && !isSoftSeparator(ch)) {
+            const int lineStart = documentText.lastIndexOf(QLatin1Char('\n'), qMax(0, start - 1)) + 1;
+            if (!isInsideFencedCode(documentText, lineStart) && !isInsideBlockFormula(documentText, lineStart)) {
+                if ((isCJK(prev) && isAsciiAlnum(ch)) || (isAsciiAlnum(prev) && isCJK(ch))) {
+                    QTextCursor cursor(m_document);
+                    cursor.setPosition(start);
+                    cursor.insertText(QStringLiteral(" ") + text);
+                    m_editor->setProperty("cursorPosition", start + 2);
+                    focusEditor();
+                    return true;
+                }
+            }
+        }
+    }
+
     return false;
 }
 
@@ -1705,6 +2055,22 @@ bool EditorCommandRegistry::handleSpecialBackspace()
                 && text.mid(start, marker.size()) == marker) {
                 removeStart = start - marker.size();
                 removeEnd = start + marker.size();
+                break;
+            }
+        }
+    }
+
+    if (removeStart < 0) {
+        const auto &pairs = delimiterPairs();
+        for (const auto &pair : pairs) {
+            const int openLen = pair.opening.size();
+            const int closeLen = pair.closing.size();
+            if (start >= openLen
+                && start + closeLen <= text.size()
+                && text.mid(start - openLen, openLen) == pair.opening
+                && text.mid(start, closeLen) == pair.closing) {
+                removeStart = start - openLen;
+                removeEnd = start + closeLen;
                 break;
             }
         }
@@ -2001,4 +2367,200 @@ QString EditorCommandRegistry::selectedText() const
     cursor.setPosition(m_editor->property("selectionStart").toInt());
     cursor.setPosition(m_editor->property("selectionEnd").toInt(), QTextCursor::KeepAnchor);
     return normalizeSelectedText(cursor.selectedText());
+}
+
+bool EditorCommandRegistry::formatSpacing()
+{
+    if (!m_editor || !m_document) {
+        return false;
+    }
+    const int start = m_editor->property("selectionStart").toInt();
+    const int end = m_editor->property("selectionEnd").toInt();
+
+    if (start != end) {
+        formatSpacingInRange(start, end);
+    } else {
+        const QString text = m_document->toPlainText();
+        const int lineStart = text.lastIndexOf(QLatin1Char('\n'), qMax(0, start - 1)) + 1;
+        int lineEnd = text.indexOf(QLatin1Char('\n'), start);
+        if (lineEnd < 0) {
+            lineEnd = text.size();
+        }
+        formatSpacingInRange(lineStart, lineEnd);
+    }
+    return true;
+}
+
+void EditorCommandRegistry::formatSpacingInRange(int rangeStart, int rangeEnd)
+{
+    if (!m_document) {
+        return;
+    }
+
+    const QString fullText = m_document->toPlainText();
+    if (rangeStart < 0 || rangeEnd > fullText.size() || rangeStart >= rangeEnd) {
+        return;
+    }
+
+    struct LineReplacement {
+        int start;
+        int end;
+        QString replacement;
+    };
+    QVector<LineReplacement> replacements;
+
+    static const QRegularExpression fenceRegex(QStringLiteral(R"(^[\t ]*(`{3,}|~{3,})[^\n]*$)"));
+    static const QRegularExpression blockFormulaRegex(QStringLiteral(R"(^[\t ]*\$\$[^\n]*$)"));
+
+    bool insideFencedCode = false;
+    QChar activeFenceChar;
+    int activeFenceLen = 0;
+    bool insideBlockFormula = false;
+
+    int scanPos = 0;
+    const int docSize = fullText.size();
+
+    while (scanPos <= docSize) {
+        int lineEnd = fullText.indexOf(QLatin1Char('\n'), scanPos);
+        if (lineEnd < 0) {
+            lineEnd = docSize;
+        }
+
+        const int lineStart = scanPos;
+        const QString lineText = fullText.mid(lineStart, lineEnd - lineStart);
+
+        bool isLineProtected = false;
+
+        if (insideFencedCode) {
+            isLineProtected = true;
+            const QRegularExpressionMatch match = fenceRegex.match(lineText);
+            if (match.hasMatch()) {
+                const QString run = match.captured(1);
+                if (run.front() == activeFenceChar && run.size() >= activeFenceLen) {
+                    insideFencedCode = false;
+                }
+            }
+        } else if (insideBlockFormula) {
+            isLineProtected = true;
+            if (blockFormulaRegex.match(lineText).hasMatch()) {
+                insideBlockFormula = false;
+            }
+        } else {
+            const QRegularExpressionMatch fenceMatch = fenceRegex.match(lineText);
+            if (fenceMatch.hasMatch()) {
+                insideFencedCode = true;
+                const QString run = fenceMatch.captured(1);
+                activeFenceChar = run.front();
+                activeFenceLen = run.size();
+                isLineProtected = true;
+            } else if (blockFormulaRegex.match(lineText).hasMatch()) {
+                insideBlockFormula = true;
+                isLineProtected = true;
+            }
+        }
+
+        const int effectiveStart = qMax(lineStart, rangeStart);
+        const int effectiveEnd = qMin(lineEnd, rangeEnd);
+
+        if (!isLineProtected && effectiveStart < effectiveEnd) {
+            const QString targetSegment = fullText.mid(effectiveStart, effectiveEnd - effectiveStart);
+            const QString formattedSegment = formatLineSpacing(targetSegment);
+            if (formattedSegment != targetSegment) {
+                replacements.append({effectiveStart, effectiveEnd, formattedSegment});
+            }
+        }
+
+        if (lineEnd == docSize) {
+            break;
+        }
+        scanPos = lineEnd + 1;
+    }
+
+    if (replacements.isEmpty()) {
+        return;
+    }
+
+    QTextCursor editCursor(m_document);
+    editCursor.beginEditBlock();
+
+    for (int i = replacements.size() - 1; i >= 0; --i) {
+        const auto &rep = replacements.at(i);
+        editCursor.setPosition(rep.start);
+        editCursor.setPosition(rep.end, QTextCursor::KeepAnchor);
+        editCursor.insertText(rep.replacement);
+    }
+
+    editCursor.endEditBlock();
+    focusEditor();
+}
+
+void EditorCommandRegistry::autoSpaceAroundCursor(int cursorPosition)
+{
+    autoSpaceAroundRange(qMax(0, cursorPosition - 1), cursorPosition + 1);
+}
+
+void EditorCommandRegistry::autoSpaceAroundRange(int rangeStart, int rangeEnd)
+{
+    if (!m_document || !m_editor) {
+        return;
+    }
+    const QString text = m_document->toPlainText();
+    if (text.isEmpty() || rangeStart > rangeEnd) {
+        return;
+    }
+
+    const int docLen = text.size();
+    int cursorPosition = m_editor->property("cursorPosition").toInt();
+
+    const int checkStart = qMax(1, rangeStart);
+    const int checkEnd = qMin(docLen - 1, rangeEnd);
+
+    int shift = 0;
+    QTextCursor editCursor(m_document);
+    editCursor.beginEditBlock();
+
+    for (int pos = checkStart; pos <= checkEnd; ++pos) {
+        const int actualPos = pos + shift;
+        const QString currentText = m_document->toPlainText();
+        if (actualPos <= 0 || actualPos >= currentText.size()) {
+            continue;
+        }
+
+        const int lineStart = currentText.lastIndexOf(QLatin1Char('\n'), qMax(0, actualPos - 1)) + 1;
+        if (isInsideFencedCode(currentText, lineStart) || isInsideBlockFormula(currentText, lineStart)) {
+            continue;
+        }
+
+        const QChar left = currentText.at(actualPos - 1);
+        const QChar right = currentText.at(actualPos);
+
+        if (left == u' ' || right == u' ' || left == u'\n' || right == u'\n') {
+            continue;
+        }
+        if (isSoftSeparator(left) || isSoftSeparator(right)) {
+            continue;
+        }
+
+        bool needSpace = false;
+        if ((isCJK(left) && isAsciiAlnum(right))
+            || (isAsciiAlnum(left) && isCJK(right))) {
+            needSpace = true;
+        }
+
+        if (needSpace) {
+            QTextCursor ins(m_document);
+            ins.setPosition(actualPos);
+            ins.insertText(QStringLiteral(" "));
+            shift += 1;
+            if (actualPos <= cursorPosition) {
+                cursorPosition += 1;
+            }
+        }
+    }
+
+    editCursor.endEditBlock();
+    if (shift > 0) {
+        m_editor->setProperty("cursorPosition", cursorPosition);
+    }
+    focusEditor();
 }

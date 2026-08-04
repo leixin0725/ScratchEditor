@@ -6,6 +6,8 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
+$OutputEncoding = [System.Text.Encoding]::UTF8
+[Console]::OutputEncoding = [System.Text.Encoding]::UTF8
 $projectRoot = Split-Path -Parent $PSScriptRoot
 $buildDir = Join-Path $projectRoot $BuildSubdirectory
 $editorExe = Join-Path $buildDir "ScratchEditor.exe"
@@ -167,8 +169,15 @@ try {
         [int]$restoredGeometry.height -eq $expectedGeometry.height
     )
 
-    $editingJson = (& $editingExe | Out-String).Trim()
+    $editingRaw = & $editingExe | Out-String
     $editingExitCode = $LASTEXITCODE
+    $jsonStart = $editingRaw.IndexOf('{')
+    $jsonEnd = $editingRaw.LastIndexOf('}')
+    $editingJson = if ($jsonStart -ge 0 -and $jsonEnd -gt $jsonStart) {
+        $editingRaw.Substring($jsonStart, $jsonEnd - $jsonStart + 1)
+    } else {
+        $editingRaw
+    }
     $editingBehavior = $editingJson | ConvertFrom-Json
 
     Stop-StartedInstance -Started $secondStarted

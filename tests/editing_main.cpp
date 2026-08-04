@@ -587,7 +587,7 @@ int main(int argc, char *argv[])
                  && deletedCodePair.value(QStringLiteral("text")).toString().isEmpty()
                  && deletedFencePair.value(QStringLiteral("text")).toString().isEmpty()
                  && unchangedBracketBackspace.value(QStringLiteral("text")).toString()
-                    == QStringLiteral(")"),
+                    .isEmpty(),
              QJsonObject{{QStringLiteral("italic"), deletedItalicPair},
                          {QStringLiteral("bold"), deletedBoldPair},
                          {QStringLiteral("code"), deletedCodePair},
@@ -908,6 +908,275 @@ int main(int argc, char *argv[])
                  && conflict.value(QStringLiteral("shortcut")).toString()
                     == QStringLiteral("Ctrl+I"),
              shortcut);
+
+    // --- CJK Punctuation Auto Conversion ---
+    setTextAndSelection(QStringLiteral("中文"), 2, 2);
+    keyPress(QStringLiteral(","), QStringLiteral(","));
+    const bool commaConverted = editorText() == QStringLiteral("中文，");
+
+    setTextAndSelection(QStringLiteral("中文"), 2, 2);
+    keyPress(QStringLiteral("."), QStringLiteral("."));
+    const bool periodConverted = editorText() == QStringLiteral("中文。");
+
+    setTextAndSelection(QStringLiteral("中文"), 2, 2);
+    keyPress(QStringLiteral(":"), QStringLiteral(":"));
+    const bool colonConverted = editorText() == QStringLiteral("中文：");
+
+    setTextAndSelection(QStringLiteral("中文"), 2, 2);
+    keyPress(QStringLiteral("?"), QStringLiteral("?"));
+    const bool questionConverted = editorText() == QStringLiteral("中文？");
+
+    setTextAndSelection(QStringLiteral("中文"), 2, 2);
+    keyPress(QStringLiteral("!"), QStringLiteral("!"));
+    const bool exclaimConverted = editorText() == QStringLiteral("中文！");
+
+    setTextAndSelection(QStringLiteral("中文"), 2, 2);
+    keyPress(QStringLiteral(";"), QStringLiteral(";"));
+    const bool semiConverted = editorText() == QStringLiteral("中文；");
+
+    setTextAndSelection(QStringLiteral("中文"), 2, 2);
+    keyPress(QStringLiteral("("), QStringLiteral("("));
+    const bool parenPairConverted = editorText() == QStringLiteral("中文（）");
+
+    setTextAndSelection(QStringLiteral("中文.."), 4, 4);
+    keyPress(QStringLiteral("."), QStringLiteral("."));
+    const bool ellipsisConverted = editorText() == QStringLiteral("中文……");
+
+    setTextAndSelection(QStringLiteral("中文-"), 3, 3);
+    keyPress(QStringLiteral("-"), QStringLiteral("-"));
+    const bool emdashConverted = editorText() == QStringLiteral("中文——");
+
+    setTextAndSelection(QStringLiteral("中文，"), 3, 3);
+    keyPress(QStringLiteral(","), QStringLiteral(","));
+    const bool chainedCommaConverted = editorText() == QStringLiteral("中文，，");
+
+    addCheck(checks, details, QStringLiteral("cjkPunctuationAutoConversion"),
+             commaConverted && periodConverted && colonConverted && questionConverted
+                 && exclaimConverted && semiConverted && parenPairConverted
+                 && ellipsisConverted && emdashConverted && chainedCommaConverted,
+             {});
+
+    // --- CJK Selection Wrapping ---
+    setTextAndSelection(QStringLiteral("中文"), 0, 2);
+    keyPress(QStringLiteral("("), QStringLiteral("("));
+    const bool cjkParenWrap = editorText() == QStringLiteral("（中文）");
+
+    setTextAndSelection(QStringLiteral("中文"), 0, 2);
+    keyPress(QStringLiteral("["), QStringLiteral("["));
+    const bool cjkBracketWrap = editorText() == QStringLiteral("【中文】");
+
+    setTextAndSelection(QStringLiteral("ABC"), 0, 3);
+    keyPress(QStringLiteral("("), QStringLiteral("("));
+    const bool asciiParenWrap = editorText() == QStringLiteral("(ABC)");
+
+    addCheck(checks, details, QStringLiteral("cjkSelectionWrapping"),
+             cjkParenWrap && cjkBracketWrap && asciiParenWrap, {});
+
+    // --- CJK Pair Backspace ---
+    setTextAndSelection(QStringLiteral("（）"), 1, 1);
+    keyPress({}, QStringLiteral("Backspace"));
+    const bool fullParenDeleted = editorText().isEmpty();
+
+    setTextAndSelection(QStringLiteral("……"), 2, 2);
+    keyPress({}, QStringLiteral("Backspace"));
+    const bool ellipsisDeleted = editorText().isEmpty();
+    setTextAndSelection(QStringLiteral("——"), 2, 2);
+    keyPress({}, QStringLiteral("Backspace"));
+    const bool emdashDeleted = editorText().isEmpty();
+
+    addCheck(checks, details, QStringLiteral("cjkPairBackspace"),
+             fullParenDeleted && ellipsisDeleted && emdashDeleted, {});
+
+    // --- CJK Auto Spacing & Cursor Following ---
+    setTextAndSelection(QStringLiteral("中文"), 2, 2);
+    keyPress(QStringLiteral("A"), QStringLiteral("A"));
+    // Allow small event loop delay for async auto-space timer
+    QThread::msleep(50);
+    QCoreApplication::processEvents();
+    const bool cjkAsciiSpaced = editorText() == QStringLiteral("中文 A");
+
+    setTextAndSelection(QStringLiteral("中文"), 2, 2);
+    inputMethodCommit(QStringLiteral("测试"));
+    QThread::msleep(50);
+    const QJsonObject imeStatus = request(QStringLiteral("status"));
+    const bool cjkImeCursorPassed = (editorText() == QStringLiteral("中文测试"))
+                                 && (imeStatus.value(QStringLiteral("cursorPosition")).toInt() == 4);
+
+    setTextAndSelection(QStringLiteral("第一行"), 3, 3);
+    inputMethodCommit(QStringLiteral("ABC"));
+    QThread::msleep(50);
+    QCoreApplication::processEvents();
+    const bool cjkImeMultiCharSpaced = (editorText() == QStringLiteral("第一行 ABC"));
+
+    addCheck(checks, details, QStringLiteral("cjkAutoSpacing"),
+             cjkAsciiSpaced && cjkImeCursorPassed && cjkImeMultiCharSpaced,
+             QJsonObject{{QStringLiteral("cjkAsciiSpaced"), cjkAsciiSpaced},
+                         {QStringLiteral("cjkImeCursorPassed"), cjkImeCursorPassed},
+                         {QStringLiteral("cjkImeMultiCharSpaced"), cjkImeMultiCharSpaced},
+                         {QStringLiteral("text"), editorText()},
+                         {QStringLiteral("imeStatus"), imeStatus}});
+
+    // --- Format Spacing Command (Alt+F) ---
+    setTextAndSelection(QStringLiteral("中文ABC"), 0, 0);
+    execute(QStringLiteral("formatSpacing"));
+    const bool fmtCjkAscii = editorText() == QStringLiteral("中文 ABC");
+
+    setTextAndSelection(QStringLiteral("ABC中文"), 0, 0);
+    execute(QStringLiteral("formatSpacing"));
+    const bool fmtAsciiCjk = editorText() == QStringLiteral("ABC 中文");
+
+    setTextAndSelection(QStringLiteral("中文123"), 0, 0);
+    execute(QStringLiteral("formatSpacing"));
+    const bool fmtCjkNum = editorText() == QStringLiteral("中文 123");
+
+    setTextAndSelection(QStringLiteral("Python3"), 0, 0);
+    execute(QStringLiteral("formatSpacing"));
+    const bool fmtAlnumNoSpace = editorText() == QStringLiteral("Python3");
+
+    setTextAndSelection(QStringLiteral("中文，ABC"), 0, 0);
+    execute(QStringLiteral("formatSpacing"));
+    const bool fmtSoftSepNoSpace = editorText() == QStringLiteral("中文，ABC");
+
+    setTextAndSelection(QStringLiteral("中文`code`中文"), 0, 0);
+    execute(QStringLiteral("formatSpacing"));
+    const bool fmtInlineCodeBoundaries = editorText() == QStringLiteral("中文 `code` 中文");
+
+    setTextAndSelection(QStringLiteral("```\n中文ABC\n```"), 0, 0);
+    execute(QStringLiteral("formatSpacing"));
+    const bool fmtFencedCodeIgnored = editorText() == QStringLiteral("```\n中文ABC\n```");
+
+    setTextAndSelection(QStringLiteral("中文ABC\nDEF"), 0, 5);
+    execute(QStringLiteral("formatSpacing"));
+    const bool fmtSelectionOnly = editorText() == QStringLiteral("中文 ABC\nDEF");
+
+    setTextAndSelection(QStringLiteral("第一行ABC中文"), 3, 8);
+    execute(QStringLiteral("formatSpacing"));
+    const bool fmtPartialLineSelection = editorText() == QStringLiteral("第一行ABC 中文");
+
+    // Full User Benchmark Document Test
+    const QString userDocInput = QStringLiteral(
+"# 基础边界\n\n"
+"中文ABC\n"
+"ABC中文\n"
+"中文123\n"
+"123中文\n"
+"使用Python3编程\n"
+"Python3中文\n"
+"版本GPT4已经发布\n"
+"学习HTML5和CSS3\n"
+"中文 ABC\n"
+"ABC 中文\n\n"
+"# 标点与符号\n\n"
+"中文，ABC\n"
+"中文。ABC\n"
+"中文-ABC\n"
+"ABC/中文\n"
+"中文（ABC）\n"
+"中文[ABC]\n"
+"ABC：中文\n\n"
+"# 行内代码\n\n"
+"中文`code`文本\n"
+"使用`printf`函数\n"
+"中文，`code`\n"
+"`code`，中文\n"
+"中文(`code`)文本\n"
+"测试`中文ABC123`结束\n"
+"已有 `code` 空格\n\n"
+"# 行内公式\n\n"
+"公式$x+1$成立\n"
+"中文，$x+1$\n"
+"$x+1$，中文\n"
+"中文($x+1$)文本\n"
+"测试$中文ABC123$结束\n"
+"已有 $x+1$ 空格\n\n"
+"# 围栏代码块：内部必须保持原样\n\n"
+"```javascript\n"
+"const title=\"中文ABC123\";\n"
+"const value=\"ABC中文\";\n"
+"console.log(\"测试code123\");\n"
+"```\n\n"
+"~~~text\n"
+"中文ABC\n"
+"ABC中文\n"
+"中文123\n"
+"~~~\n\n"
+"# 块级公式：内部必须保持原样\n\n"
+"$$\n"
+"中文ABC+x1\n"
+"ABC中文+123中文\n"
+"$$\n\n"
+"# 代码块之后继续整理\n\n"
+"代码块结束后继续使用Python3编程\n"
+"最后测试ABC中文123结束"
+    );
+
+    const QString userDocExpected = QStringLiteral(
+"# 基础边界\n\n"
+"中文 ABC\n"
+"ABC 中文\n"
+"中文 123\n"
+"123 中文\n"
+"使用 Python3 编程\n"
+"Python3 中文\n"
+"版本 GPT4 已经发布\n"
+"学习 HTML5 和 CSS3\n"
+"中文 ABC\n"
+"ABC 中文\n\n"
+"# 标点与符号\n\n"
+"中文，ABC\n"
+"中文。ABC\n"
+"中文-ABC\n"
+"ABC/中文\n"
+"中文（ABC）\n"
+"中文[ABC]\n"
+"ABC：中文\n\n"
+"# 行内代码\n\n"
+"中文 `code` 文本\n"
+"使用 `printf` 函数\n"
+"中文，`code`\n"
+"`code`，中文\n"
+"中文(`code`)文本\n"
+"测试 `中文ABC123` 结束\n"
+"已有 `code` 空格\n\n"
+"# 行内公式\n\n"
+"公式 $x+1$ 成立\n"
+"中文，$x+1$\n"
+"$x+1$，中文\n"
+"中文($x+1$)文本\n"
+"测试 $中文ABC123$ 结束\n"
+"已有 $x+1$ 空格\n\n"
+"# 围栏代码块：内部必须保持原样\n\n"
+"```javascript\n"
+"const title=\"中文ABC123\";\n"
+"const value=\"ABC中文\";\n"
+"console.log(\"测试code123\");\n"
+"```\n\n"
+"~~~text\n"
+"中文ABC\n"
+"ABC中文\n"
+"中文123\n"
+"~~~\n\n"
+"# 块级公式：内部必须保持原样\n\n"
+"$$\n"
+"中文ABC+x1\n"
+"ABC中文+123中文\n"
+"$$\n\n"
+"# 代码块之后继续整理\n\n"
+"代码块结束后继续使用 Python3 编程\n"
+"最后测试 ABC 中文 123 结束"
+    );
+
+    setTextAndSelection(userDocInput, 0, userDocInput.size());
+    execute(QStringLiteral("formatSpacing"));
+    const bool fmtUserBenchmarkPassed = (editorText() == userDocExpected);
+
+    addCheck(checks, details, QStringLiteral("formatSpacingCommand"),
+             fmtCjkAscii && fmtAsciiCjk && fmtCjkNum && fmtAlnumNoSpace
+                 && fmtSoftSepNoSpace && fmtInlineCodeBoundaries
+                 && fmtFencedCodeIgnored && fmtSelectionOnly
+                 && fmtUserBenchmarkPassed,
+             QJsonObject{{QStringLiteral("benchmarkPassed"), fmtUserBenchmarkPassed},
+                         {QStringLiteral("actualOutput"), editorText()}});
 
     bool allPassed = true;
     for (auto it = checks.constBegin(); it != checks.constEnd(); ++it) {
