@@ -3,7 +3,7 @@ param(
     [string]$OriginalAhkPath = "D:\Documents\AutoHotkey\KeysRedirect.ahk",
     [string]$BackupPath =
         "D:\Documents\AutoHotkey\KeysRedirect.ahk.stage6-backup-20260802-132834",
-    [string]$BuildSubdirectory = "build\stage4",
+    [string]$BuildSubdirectory = "build\release",
     [string]$AutoHotkeyExecutable =
         "C:\Program Files\AutoHotkey\v2\AutoHotkey64.exe",
     [string]$ArtifactPrefix = "stage6-results"

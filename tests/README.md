@@ -4,8 +4,8 @@
 
 - `perf_main.cpp`：阶段 1 性能、真实 OS 输入和微软拼音验收客户端。
 - `stage2_main.cpp`：滚动条、Escape、焦点和剪贴板异常回归。
-- `stage3_main.cpp`：Markdown 高亮、编辑命令、查找替换和快捷键回归。
-- `stage4_main.cpp`：设置页、主题字体、集中配置、窗口交互/配色、20 轮唤出关闭动画稳定性与明确排除项回归。
+- `editing_main.cpp`：编辑行为验证，覆盖 Markdown 高亮、编辑命令、查找替换和快捷键回归。
+- `window_ui_main.cpp`：窗口界面验证，覆盖设置页、主题字体、集中配置、窗口交互/配色、20 轮唤出关闭动画稳定性与明确排除项回归。
 - `externalfilesession_main.cpp`：外部 CLI 编辑模式的 UTF-8/BOM、Unicode 路径、空文件、原子保存和错误边界回归。
 - `externaleditorprocess_main.cpp`：验证外部编辑进程在编辑期间持续等待、保存写回后以成功状态退出，并覆盖错误参数退出码。
 - `../scripts/run-external-cli-integration.mjs`：通过伪终端实测 Codex 与 pi 的 `Ctrl+G`，由 ScratchEditor 写回 `/quit` 后确认 CLI 成功返回；Claude Code 暂不在此脚本中测试。
@@ -43,11 +43,14 @@ CLI 级脚本需要一个已安装的 `node-pty` 包。本机默认复用全局 
 ## 推荐执行顺序
 
 1. `scripts/build.ps1 -Preset release`
-2. `scripts/run-external-editor-tests.ps1`
-3. `node scripts/run-external-cli-integration.mjs`
-4. `scripts/build.ps1 -Preset stage4`
-5. `scripts/run-stage6-tests.ps1`
-6. `scripts/run-stage4-tests.ps1`（AHK 基线参数指向阶段 6 备份）
-7. `scripts/run-stage1-tests.ps1`（完整性能门槛）
+2. `scripts/run-stage2-tests.ps1`
+3. `scripts/run-external-editor-tests.ps1`
+4. `node scripts/run-external-cli-integration.mjs`
+5. `scripts/build.ps1 -Preset editing -SkipLocalInstall`
+6. `scripts/run-editing-tests.ps1`
+7. `scripts/build.ps1 -Preset window-ui -SkipLocalInstall`
+8. `scripts/run-stage6-tests.ps1`
+9. `scripts/run-window-ui-tests.ps1`（AHK 基线参数指向阶段 6 备份）
+10. `scripts/run-stage1-tests.ps1`（完整性能门槛）
 
 最终结果应复制到 `artifacts/baselines/`；普通运行产生的时间戳结果默认被 Git 忽略。

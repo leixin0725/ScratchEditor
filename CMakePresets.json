@@ -21,16 +21,16 @@
       }
     },
     {
-      "name": "stage3",
-      "displayName": "Qt 6.10.2 / MinGW 13.1 Stage 3 isolated Release",
+      "name": "editing",
+      "displayName": "Qt 6.10.2 / MinGW 13.1 Editing validation Release",
       "inherits": "release",
-      "binaryDir": "${sourceDir}/build/stage3"
+      "binaryDir": "${sourceDir}/build/editing"
     },
     {
-      "name": "stage4",
-      "displayName": "Qt 6.10.2 / MinGW 13.1 Stage 4 isolated Release",
+      "name": "window-ui",
+      "displayName": "Qt 6.10.2 / MinGW 13.1 Window UI validation Release",
       "inherits": "release",
-      "binaryDir": "${sourceDir}/build/stage4"
+      "binaryDir": "${sourceDir}/build/window-ui"
     }
   ],
   "buildPresets": [
@@ -40,13 +40,13 @@
       "jobs": 8
     },
     {
-      "name": "stage3",
-      "configurePreset": "stage3",
+      "name": "editing",
+      "configurePreset": "editing",
       "jobs": 8
     },
     {
-      "name": "stage4",
-      "configurePreset": "stage4",
+      "name": "window-ui",
+      "configurePreset": "window-ui",
       "jobs": 8
     }
   ]

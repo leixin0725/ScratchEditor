@@ -1,6 +1,6 @@
 [CmdletBinding()]
 param(
-    [ValidateSet("release", "stage3", "stage4")]
+    [ValidateSet("release", "editing", "window-ui")]
     [string]$Preset = "release",
     [switch]$SkipDeployment,
     [switch]$SkipLocalInstall

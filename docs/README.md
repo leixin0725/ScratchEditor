@@ -12,8 +12,8 @@
 - [`archive/STAGE1-PLAN.md`](archive/STAGE1-PLAN.md)：阶段 1 原型计划与验收方法。
 - [`archive/STAGE1-REPORT.md`](archive/STAGE1-REPORT.md)：性能与输入原型报告。
 - [`archive/STAGE2-REPORT.md`](archive/STAGE2-REPORT.md)：功能对等与 AHK 回退报告。
-- [`archive/STAGE3-REPORT.md`](archive/STAGE3-REPORT.md)：Markdown 编辑增强报告（按用户决定不含预览）。
-- [`archive/STAGE4-REPORT.md`](archive/STAGE4-REPORT.md)：设置页、外观、集中配置，以及窗口交互与动画稳定性回归报告。
+- [Markdown 编辑增强历史报告](archive/STAGE3-REPORT.md)（按用户决定不含预览）。
+- [窗口界面历史报告](archive/STAGE4-REPORT.md)：设置页、外观、集中配置，以及窗口交互与动画稳定性回归。
 - [`archive/STAGE5-REPORT.md`](archive/STAGE5-REPORT.md)：项目收尾、最终回归与 Git 初始化报告。
 - [`archive/STAGE6-REPORT.md`](archive/STAGE6-REPORT.md)：原 AHK 备份、旧 GUI 移除、IPC/回退与最终验收报告。
 

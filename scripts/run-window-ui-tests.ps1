@@ -1,16 +1,16 @@
 [CmdletBinding()]
 param(
-    [string]$BuildSubdirectory = "build\stage3",
-    [string]$ServerName = "ScratchEditor.Stage3.Validation",
-    [string]$OriginalAhkPath = ""
+    [string]$BuildSubdirectory = "build\window-ui",
+    [string]$ServerName = "ScratchEditor.WindowUi.Validation",
+    [string]$OriginalAhkPath = "",
+    [string]$ArtifactPrefix = "window-ui-results"
 )
 
 $ErrorActionPreference = "Stop"
 $projectRoot = Split-Path -Parent $PSScriptRoot
 $buildDir = Join-Path $projectRoot $BuildSubdirectory
 $editorExe = Join-Path $buildDir "ScratchEditor.exe"
-$stage2Exe = Join-Path $buildDir "ScratchEditorStage2Tests.exe"
-$stage3Exe = Join-Path $buildDir "ScratchEditorStage3Tests.exe"
+$windowUiExe = Join-Path $buildDir "ScratchEditorWindowUiTests.exe"
 if ([string]::IsNullOrWhiteSpace($OriginalAhkPath)) {
     $OriginalAhkPath = $env:SCRATCHEDITOR_ORIGINAL_AHK
 }
@@ -21,9 +21,12 @@ $originalAhk = $OriginalAhkPath
 $artifactDir = Join-Path $projectRoot "artifacts"
 $qtBin = Join-Path $projectRoot ".tools\Qt\6.10.2\mingw_64\bin"
 $mingwBin = Join-Path $projectRoot ".tools\Qt\Tools\mingw1310_64\bin"
-$releaseExe = Join-Path $projectRoot "build\release\ScratchEditor.exe"
+$settingsDirectory = Join-Path ([System.IO.Path]::GetTempPath()) "ScratchEditor\tests"
+$settingsStem = $ServerName -replace '[^A-Za-z0-9_.-]', '_'
+$settingsFile = Join-Path $settingsDirectory "$settingsStem.ini"
 $env:PATH = "$qtBin;$mingwBin;$env:PATH"
 $env:SCRATCHEDITOR_SERVER_NAME = $ServerName
+$env:SCRATCHEDITOR_SETTINGS_FILE = $settingsFile
 
 function Send-IpcRequest {
     param([Parameter(Mandatory)] [hashtable]$Request, [int]$TimeoutMs = 3000)
@@ -57,6 +60,28 @@ function Send-IpcRequest {
 function Send-IpcCommand {
     param([Parameter(Mandatory)] [string]$Command, [int]$TimeoutMs = 3000)
     Send-IpcRequest -Request @{ command = $Command } -TimeoutMs $TimeoutMs
+}
+
+function Invoke-Utf8Process {
+    param([Parameter(Mandatory)] [string]$FileName)
+    $encoding = [System.Text.UTF8Encoding]::new($false)
+    $info = [System.Diagnostics.ProcessStartInfo]::new()
+    $info.FileName = $FileName
+    $info.UseShellExecute = $false
+    $info.CreateNoWindow = $true
+    $info.RedirectStandardOutput = $true
+    $info.RedirectStandardError = $true
+    $info.StandardOutputEncoding = $encoding
+    $info.StandardErrorEncoding = $encoding
+    $process = [System.Diagnostics.Process]::Start($info)
+    $outputTask = $process.StandardOutput.ReadToEndAsync()
+    $errorTask = $process.StandardError.ReadToEndAsync()
+    $process.WaitForExit()
+    [pscustomobject]@{
+        ExitCode = $process.ExitCode
+        Output = $outputTask.Result
+        Error = $errorTask.Result
+    }
 }
 
 function Stop-IsolatedInstance {
@@ -97,7 +122,7 @@ function Start-IsolatedInstance {
         if (-not $process.HasExited) {
             Stop-Process -Id $process.Id
         }
-        throw "The isolated stage 3 instance did not become ready."
+        throw "The isolated window UI validation instance did not become ready."
     }
     [pscustomobject]@{ Process = $process; Status = $status }
 }
@@ -112,42 +137,44 @@ function Stop-StartedInstance {
             Stop-Process -Id $Started.Process.Id
         }
     }
-    $Started.Process.WaitForExit(2000) | Out-Null
+    if (-not $Started.Process.WaitForExit(2000)) {
+        throw "Isolated process $($Started.Process.Id) did not exit."
+    }
 }
 
-function Get-ReleaseProcessIds {
+function Get-ProtectedProcessIds {
     @(
         Get-Process ScratchEditor -ErrorAction SilentlyContinue |
-            Where-Object { $_.Path -eq $releaseExe } |
+            Where-Object { $_.Path -ne $editorExe } |
             ForEach-Object { $_.Id }
     )
 }
 
-foreach ($required in @($editorExe, $stage2Exe, $stage3Exe, $originalAhk)) {
+foreach ($required in @($editorExe, $windowUiExe, $originalAhk)) {
     if (-not (Test-Path -LiteralPath $required)) {
-        throw "Required stage 3 test input is missing: $required"
+        throw "Required window UI validation input is missing: $required"
     }
 }
 
 New-Item -ItemType Directory -Path $artifactDir -Force | Out-Null
+New-Item -ItemType Directory -Path $settingsDirectory -Force | Out-Null
 $timestamp = Get-Date -Format "yyyyMMdd-HHmmss"
 $hashBefore = (Get-FileHash -Algorithm SHA256 -LiteralPath $originalAhk).Hash
 $repoStatusBefore = (& git -C (Split-Path -Parent $originalAhk) status --short --branch) -join "`n"
-$releaseProcessesBefore = Get-ReleaseProcessIds
+$protectedBefore = Get-ProtectedProcessIds
 $started = $null
-$secondStarted = $null
+$restarted = $null
 
 try {
     Stop-IsolatedInstance
     $started = Start-IsolatedInstance
-    $null = Send-IpcCommand -Command "testResetSettings"
-
-    $initialGeometry = Send-IpcCommand -Command "status"
+    $reset = Send-IpcCommand -Command "testResetSettings"
+    $initial = Send-IpcCommand -Command "status"
     $expectedGeometry = [ordered]@{
-        x = [int]$initialGeometry.x + 30
-        y = [int]$initialGeometry.y + 24
-        width = 780
-        height = 540
+        x = [int]$initial.x + 24
+        y = [int]$initial.y + 18
+        width = 800
+        height = 560
     }
     $geometrySet = Send-IpcRequest -Request @{
         command = "testSetGeometry"
@@ -156,69 +183,83 @@ try {
         width = $expectedGeometry.width
         height = $expectedGeometry.height
     }
+
+    $windowUiRun = Invoke-Utf8Process -FileName $windowUiExe
+    $windowUiBehavior = $windowUiRun.Output | ConvertFrom-Json
+
     Stop-StartedInstance -Started $started
     $started = $null
-
-    $secondStarted = Start-IsolatedInstance
-    $restoredGeometry = Send-IpcCommand -Command "status"
-    $geometryPassed = (
-        [int]$restoredGeometry.x -eq $expectedGeometry.x -and
-        [int]$restoredGeometry.y -eq $expectedGeometry.y -and
-        [int]$restoredGeometry.width -eq $expectedGeometry.width -and
-        [int]$restoredGeometry.height -eq $expectedGeometry.height
-    )
-
-    $stage3Json = (& $stage3Exe | Out-String).Trim()
-    $stage3ExitCode = $LASTEXITCODE
-    $stage3Behavior = $stage3Json | ConvertFrom-Json
-
-    $stage2Json = (& $stage2Exe | Out-String).Trim()
-    $stage2ExitCode = $LASTEXITCODE
-    $stage2Regression = $stage2Json | ConvertFrom-Json
-
-    Stop-StartedInstance -Started $secondStarted
-    $secondStarted = $null
-    $started = Start-IsolatedInstance
+    $restarted = Start-IsolatedInstance
+    $persisted = Send-IpcCommand -Command "status"
     $persistedShortcut = Send-IpcRequest -Request @{
         command = "testShortcut"
         commandId = "toggleBold"
     }
-    $shortcutPersistencePassed = (
+    $configText = Get-Content -LiteralPath $settingsFile -Raw -Encoding UTF8
+    $persistencePassed = (
+        $persisted.theme -eq "light" -and
+        $persisted.editorFontFamily -eq "Microsoft YaHei UI" -and
+        [int]$persisted.editorFontPointSize -eq 15 -and
+        -not [bool]$persisted.animationsEnabled -and
         $persistedShortcut.shortcut -eq "Ctrl+Alt+B" -and
-        [int]$persistedShortcut.settingsStatus -eq 0
+        [int]$persisted.x -eq $expectedGeometry.x -and
+        [int]$persisted.y -eq $expectedGeometry.y -and
+        [int]$persisted.width -eq $expectedGeometry.width -and
+        [int]$persisted.height -eq $expectedGeometry.height
+    )
+    $centralFilePassed = (
+        (Test-Path -LiteralPath $settingsFile) -and
+        $persisted.settingsFile -eq $settingsFile -and
+        $configText.Contains("[appearance]") -and
+        $configText.Contains("[editor]") -and
+        $configText.Contains("[shortcuts]") -and
+        $configText.Contains("[ui]") -and
+        $configText.Contains("[window]")
     )
     $null = Send-IpcCommand -Command "testResetSettings"
 
+    $sourceFiles = @(
+        Get-ChildItem -LiteralPath (Join-Path $projectRoot "src"), (Join-Path $projectRoot "qml") `
+            -File -Recurse
+    )
+    $browserReferences = @(
+        $sourceFiles | Select-String -Pattern "WebEngine|WebView|Chromium" -CaseSensitive:$false
+    )
     $hashAfter = (Get-FileHash -Algorithm SHA256 -LiteralPath $originalAhk).Hash
     $repoStatusAfter = (& git -C (Split-Path -Parent $originalAhk) status --short --branch) -join "`n"
-    $releaseProcessesAfter = Get-ReleaseProcessIds
-    $releaseInstancePreserved = -not (@($releaseProcessesBefore | Where-Object {
-        $releaseProcessesAfter -notcontains $_
+    $protectedAfter = Get-ProtectedProcessIds
+    $protectedPreserved = -not (@($protectedBefore | Where-Object {
+        $protectedAfter -notcontains $_
     }).Count)
 
     $checks = [ordered]@{
-        stage3Behavior = ($stage3ExitCode -eq 0 -and [bool]$stage3Behavior.allPassed)
-        stage2Regression = ($stage2ExitCode -eq 0 -and [bool]$stage2Regression.allPassed)
-        geometryPersistence = $geometryPassed
-        shortcutPersistence = $shortcutPersistencePassed
-        previewExcluded = [bool]$stage3Behavior.checks.previewExcluded
+        windowUiBehavior = ($windowUiRun.ExitCode -eq 0 -and [bool]$windowUiBehavior.allPassed)
+        appearanceAndGeometryPersistence = $persistencePassed
+        centralizedIniConfiguration = $centralFilePassed
+        lazySettingsPage = [bool]$windowUiBehavior.checks.lazySettingsPage
+        deferredFeaturesExcluded = [bool]$windowUiBehavior.checks.deferredFeaturesExcluded
+        browserEngineExcluded = ($browserReferences.Count -eq 0)
         originalAhkUnchanged = ($hashBefore -eq $hashAfter)
         originalAhkRepoUnchanged = ($repoStatusBefore -eq $repoStatusAfter)
-        runningReleaseInstancePreserved = $releaseInstancePreserved
+        runningUserInstancesPreserved = $protectedPreserved
     }
     $allPassed = -not ($checks.Values -contains $false)
     $report = [ordered]@{
         timestamp = (Get-Date).ToString("o")
         isolatedBuild = $buildDir
         isolatedServer = $ServerName
-        geometry = [ordered]@{
-            expected = $expectedGeometry
-            setResponse = $geometrySet
-            restored = $restoredGeometry
+        reset = $reset
+        expectedGeometry = $expectedGeometry
+        geometrySet = $geometrySet
+        windowUi = $windowUiBehavior
+        windowUiStderr = $windowUiRun.Error
+        persistedStatus = $persisted
+        persistedShortcut = $persistedShortcut
+        configuration = [ordered]@{
+            file = $settingsFile
+            schemaVersion = $persisted.settingsSchemaVersion
+            centralized = $centralFilePassed
         }
-        shortcutPersistence = $persistedShortcut
-        stage3 = $stage3Behavior
-        stage2Regression = $stage2Regression
         sourceProtection = [ordered]@{
             original = $originalAhk
             hashBefore = $hashBefore
@@ -226,33 +267,33 @@ try {
             repoStatusBefore = $repoStatusBefore
             repoStatusAfter = $repoStatusAfter
         }
-        releaseInstance = [ordered]@{
-            idsBefore = $releaseProcessesBefore
-            idsAfter = $releaseProcessesAfter
-            preserved = $releaseInstancePreserved
+        userInstances = [ordered]@{
+            idsBefore = $protectedBefore
+            idsAfter = $protectedAfter
+            preserved = $protectedPreserved
         }
         checks = $checks
         allPassed = $allPassed
     }
-    $artifactPath = Join-Path $artifactDir "stage3-results-$timestamp.json"
+    $artifactPath = Join-Path $artifactDir "$ArtifactPrefix-$timestamp.json"
     [System.IO.File]::WriteAllText(
         $artifactPath,
-        ($report | ConvertTo-Json -Depth 14),
+        ($report | ConvertTo-Json -Depth 16),
         [System.Text.UTF8Encoding]::new($false)
     )
     [pscustomobject]@{
         allPassed = $allPassed
         checks = $checks
         artifact = $artifactPath
-    } | ConvertTo-Json -Depth 5
+    } | ConvertTo-Json -Depth 6
 
     if (-not $allPassed) {
         exit 1
     }
 }
 finally {
-    if ($null -ne $secondStarted) {
-        Stop-StartedInstance -Started $secondStarted
+    if ($null -ne $restarted) {
+        Stop-StartedInstance -Started $restarted
     }
     elseif ($null -ne $started) {
         Stop-StartedInstance -Started $started

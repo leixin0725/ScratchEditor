@@ -97,8 +97,11 @@ Codex / pi ───────文件模式───> %LOCALAPPDATA%\ScratchEdi
 在不覆盖 `build/release` 的情况下进行隔离验证，可使用：
 
 ```powershell
-./scripts/build.ps1 -Preset stage4 -SkipLocalInstall
+./scripts/build.ps1 -Preset window-ui -SkipLocalInstall
 ```
+
+隔离验证 preset 按职责命名：`editing` 覆盖 Markdown、高频编辑命令、查找替换与快捷键；
+`window-ui` 覆盖设置、主题、窗口交互与动画。两组验证相互独立，完整回归时都应执行。
 
 也可以直接使用 CMake：
 
@@ -209,23 +212,27 @@ node ./scripts/run-external-cli-integration.mjs
 ./scripts/run-stage6-tests.ps1
 ```
 
-Qt 功能回归仍由阶段 4 入口覆盖阶段 3 和阶段 2。该历史入口的 AHK 基线参数应指向
-阶段 6 备份：
+Qt 功能回归分为独立的编辑行为验证与窗口界面验证；两者的 AHK 基线参数都应指向阶段 6
+备份：
 
 ```powershell
-./scripts/run-stage4-tests.ps1 `
-  -BuildSubdirectory build\stage4 `
+./scripts/run-editing-tests.ps1 `
+  -BuildSubdirectory build\editing `
+  -OriginalAhkPath D:\Documents\AutoHotkey\KeysRedirect.ahk.stage6-backup-20260802-132834
+
+./scripts/run-window-ui-tests.ps1 `
+  -BuildSubdirectory build\window-ui `
   -OriginalAhkPath D:\Documents\AutoHotkey\KeysRedirect.ahk.stage6-backup-20260802-132834
 ```
 
-该入口还会检查四角缩放、边框拖动和编辑区域配色分层，并连续执行 20 轮唤出/关闭，
+窗口界面入口还会检查四角缩放、边框拖动和编辑区域配色分层，并连续执行 20 轮唤出/关闭，
 确认隐藏态几何稳定、窗口不会在关闭前回弹且再次唤出后恢复到记录尺寸。
 
 完整性能回归：
 
 ```powershell
 ./scripts/run-stage1-tests.ps1 `
-  -BuildSubdirectory build\stage4 `
+  -BuildSubdirectory build\window-ui `
   -ServerName ScratchEditor.Validation.Perf `
   -ArtifactPrefix validation-performance
 ```

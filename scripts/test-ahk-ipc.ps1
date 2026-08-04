@@ -1,6 +1,6 @@
 [CmdletBinding()]
 param(
-    [string]$BuildSubdirectory = "build\stage4",
+    [string]$BuildSubdirectory = "build\release",
     [string]$ServerName = "ScratchEditor.Stage5.AhkValidation",
     [string]$OriginalAhkPath = "",
     [string]$AutoHotkeyExecutable = "C:\Program Files\AutoHotkey\v2\AutoHotkey64.exe",
