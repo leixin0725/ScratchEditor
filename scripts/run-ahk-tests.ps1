@@ -1,4 +1,4 @@
-﻿[CmdletBinding()]
+[CmdletBinding()]
 param(
     [string]$OriginalAhkPath = "D:\Documents\AutoHotkey\KeysRedirect.ahk",
     [string]$BackupPath =
@@ -6,13 +6,13 @@ param(
     [string]$BuildSubdirectory = "build\release",
     [string]$AutoHotkeyExecutable =
         "C:\Program Files\AutoHotkey\v2\AutoHotkey64.exe",
-    [string]$ArtifactPrefix = "stage6-results"
+    [string]$ArtifactPrefix = "ahk-results"
 )
 
 $ErrorActionPreference = "Stop"
 $projectRoot = Split-Path -Parent $PSScriptRoot
 $editorExe = Join-Path $projectRoot "$BuildSubdirectory\ScratchEditor.exe"
-$prepareScript = Join-Path $PSScriptRoot "prepare-stage6-ahk.ps1"
+$prepareScript = Join-Path $PSScriptRoot "prepare-ahk-test.ps1"
 $expectedBackupHash =
     "8BB8FFEFEBD9A6C90C102F66583D517C6C5CF83D36200A3D4E77D413C77B41C9"
 
@@ -20,7 +20,7 @@ foreach ($path in @(
         $OriginalAhkPath, $BackupPath, $editorExe, $AutoHotkeyExecutable, $prepareScript
     )) {
     if (-not (Test-Path -LiteralPath $path -PathType Leaf)) {
-        throw "Required stage 6 file not found: $path"
+        throw "Required AHK migration file not found: $path"
     }
 }
 
@@ -34,7 +34,7 @@ $originalContent = [System.IO.File]::ReadAllText($original, [System.Text.Encodin
 $backupContent = [System.IO.File]::ReadAllText($backup, [System.Text.Encoding]::UTF8)
 
 $tempDirectory = Join-Path $env:TEMP (
-    "ScratchEditor-Stage6\validation-" + [guid]::NewGuid().ToString("N")
+    "ScratchEditor-Ahk\validation-" + [guid]::NewGuid().ToString("N")
 )
 New-Item -ItemType Directory -Path $tempDirectory -Force | Out-Null
 $generatedCandidate = Join-Path $tempDirectory "KeysRedirect.Generated.ahk"
@@ -59,12 +59,12 @@ function Invoke-AhkTestMode {
     $startInfo = [System.Diagnostics.ProcessStartInfo]::new()
     $startInfo.FileName = $ahk
     $startInfo.Arguments = '"' + $installedTestCopy +
-        '" --scratch-editor-stage6-test ' + $Mode
+        '" --scratch-editor-ahk-test ' + $Mode
     $startInfo.UseShellExecute = $false
     $startInfo.CreateNoWindow = $true
     $startInfo.RedirectStandardOutput = $true
     $startInfo.RedirectStandardError = $true
-    $startInfo.EnvironmentVariables["SCRATCHEDITOR_STAGE6_TEST"] = "1"
+    $startInfo.EnvironmentVariables["SCRATCHEDITOR_AHK_TEST"] = "1"
     $startInfo.EnvironmentVariables["SCRATCHEDITOR_SERVER_NAME"] = $ServerName
     $startInfo.EnvironmentVariables["SCRATCHEDITOR_EXE"] = $ExecutablePath
     $startInfo.EnvironmentVariables["SCRATCHEDITOR_SETTINGS_FILE"] =
@@ -74,7 +74,7 @@ function Invoke-AhkTestMode {
     $stdoutTask = $process.StandardOutput.ReadToEndAsync()
     $stderrTask = $process.StandardError.ReadToEndAsync()
     if (-not $process.WaitForExit(10000)) {
-        throw "AHK stage 6 $Mode test did not exit; PID $($process.Id)."
+        throw "AHK $Mode test did not exit; PID $($process.Id)."
     }
     $stdout = $stdoutTask.Result.Trim()
     $stderr = $stderrTask.Result.Trim()
@@ -104,24 +104,24 @@ try {
         -ScratchEditorExecutable $editor `
         -ExpectedSourceSha256 $expectedBackupHash | Out-Null
     if ($LASTEXITCODE -ne 0) {
-        throw "Stage 6 candidate regeneration failed with exit code $LASTEXITCODE."
+        throw "AHK test candidate regeneration failed with exit code $LASTEXITCODE."
     }
     Copy-Item -LiteralPath $original -Destination $installedTestCopy
 
-    $fallbackServer = "ScratchEditor.Stage6.Fallback." +
+    $fallbackServer = "ScratchEditor.Ahk.Fallback." +
         [guid]::NewGuid().ToString("N")
     $fallbackResult = Invoke-AhkTestMode `
         -Mode "fallback" `
         -ServerName $fallbackServer `
         -ExecutablePath "C:\Path-That-Does-Not-Exist\ScratchEditor.exe" `
-        -ExpectedOutput "stage6-fallback-pass"
+        -ExpectedOutput "ahk-fallback-pass"
 
-    $ipcServer = "ScratchEditor.Stage6.Ipc." + [guid]::NewGuid().ToString("N")
+    $ipcServer = "ScratchEditor.Ahk.Ipc." + [guid]::NewGuid().ToString("N")
     $ipcResult = Invoke-AhkTestMode `
         -Mode "ipc" `
         -ServerName $ipcServer `
         -ExecutablePath $editor `
-        -ExpectedOutput "stage6-ipc-pass"
+        -ExpectedOutput "ahk-ipc-pass"
 
     for ($attempt = 0; $attempt -lt 120; $attempt++) {
         $currentEditors = Get-ProcessIds -Name "ScratchEditor"
@@ -171,7 +171,7 @@ $checks = [ordered]@{
     backupSharesOriginalDirectory = (
         (Split-Path -Parent $backup) -eq (Split-Path -Parent $original)
     )
-    backupHashMatchesStage5Baseline = ($backupHash -eq $expectedBackupHash)
+    backupHashMatchesBaseline = ($backupHash -eq $expectedBackupHash)
     installedMatchesControlledTransformation = (
         $originalHash -eq $generatedHash -and $testCopyHash -eq $originalHash
     )
@@ -259,7 +259,7 @@ $json = $report | ConvertTo-Json -Depth 8
     $artifactPath, $json, [System.Text.UTF8Encoding]::new($false)
 )
 $json
-Write-Host "Stage 6 report: $artifactPath"
+Write-Host "AHK report: $artifactPath"
 if (-not $allPassed) {
     exit 1
 }

@@ -1,4 +1,4 @@
-﻿[CmdletBinding()]
+[CmdletBinding()]
 param(
     [Parameter(Mandatory)]
     [string]$SourcePath,
@@ -17,7 +17,7 @@ $ErrorActionPreference = "Stop"
 $source = (Resolve-Path -LiteralPath $SourcePath).Path
 $output = [System.IO.Path]::GetFullPath($OutputPath)
 if ($source -eq $output) {
-    throw "The stage 6 candidate must be generated at an isolated path."
+    throw "The AHK test candidate must be generated at an isolated path."
 }
 if (-not (Test-Path -LiteralPath $ScratchEditorExecutable -PathType Leaf)) {
     throw "ScratchEditor executable not found: $ScratchEditorExecutable"
@@ -54,12 +54,12 @@ $globalReplacement = @(
     "if QtScratchEditorExe = `"`"",
     "    QtScratchEditorExe := `"$escapedExecutable`"",
     "global QtScratchEditorPipeHandle := -1",
-    "global QtScratchEditorTestMode := EnvGet(`"SCRATCHEDITOR_STAGE6_TEST`") = `"1`"",
+    "global QtScratchEditorTestMode := EnvGet(`"SCRATCHEDITOR_AHK_TEST`") = `"1`"",
     "OnExit((*) => CloseQtScratchEditorPipe())",
     "",
     "; 隔离验证入口；正常启动时不会执行，也不会替换当前运行的主脚本。",
-    "if EnvGet(`"SCRATCHEDITOR_STAGE6_TEST`") = `"1`"",
-    "        && A_Args.Length >= 2 && A_Args[1] = `"--scratch-editor-stage6-test`" {",
+    "if EnvGet(`"SCRATCHEDITOR_AHK_TEST`") = `"1`"",
+    "        && A_Args.Length >= 2 && A_Args[1] = `"--scratch-editor-ahk-test`" {",
     "    mode := A_Args[2]",
     "    if mode = `"ipc`" {",
     "        shown := EnsureQtScratchEditorAndSend(`"show`")",
@@ -67,25 +67,25 @@ $globalReplacement = @(
     "        hidden := EnsureQtScratchEditorAndSend(`"hide`")",
     "        stopped := EnsureQtScratchEditorAndSend(`"quit`")",
     "        passed := shown && hidden && stopped",
-    "        result := passed ? `"stage6-ipc-pass``n`" : Format(",
-    "            `"stage6-ipc-fail show={} hide={} quit={}``n`", shown, hidden, stopped)",
+    "        result := passed ? `"ahk-ipc-pass``n`" : Format(",
+    "            `"ahk-ipc-fail show={} hide={} quit={}``n`", shown, hidden, stopped)",
     "        FileAppend(result, `"*`")",
     "        CloseQtScratchEditorPipe()",
     "        ExitApp(passed ? 0 : 1)",
     "    }",
     "    if mode = `"fallback`" {",
     "        savedClipboard := ClipboardAll()",
-    "        token := `"ScratchEditor stage 6 clipboard fallback`"",
+    "        token := `"ScratchEditor AHK clipboard fallback`"",
     "        A_Clipboard := token",
     "        handled := ToggleScratchEditor()",
     "        preserved := A_Clipboard = token",
     "        A_Clipboard := savedClipboard",
     "        HideScratchEditorFallbackNotice()",
     "        passed := !handled && preserved",
-    "        FileAppend(passed ? `"stage6-fallback-pass``n`" : `"stage6-fallback-fail``n`", `"*`")",
+    "        FileAppend(passed ? `"ahk-fallback-pass``n`" : `"ahk-fallback-fail``n`", `"*`")",
     "        ExitApp(passed ? 0 : 1)",
     "    }",
-    "    FileAppend(`"stage6-test-mode-invalid``n`", `"*`")",
+    "    FileAppend(`"ahk-test-mode-invalid``n`", `"*`")",
     "    ExitApp(2)",
     "}"
 ) -join $newline
@@ -116,7 +116,7 @@ if ($sectionIndex -lt 0 -or $text.IndexOf(
     throw "Expected exactly one legacy scratch-editor section."
 }
 
-$stage6Section = @(
+$ahkTestSection = @(
     "; ==============================================================================" ,
     "; 6. 临时编辑器：ScrollLock -> Qt IPC",
     "; ==============================================================================" ,
@@ -289,14 +289,14 @@ $stage6Section = @(
     "}"
 ) -join $newline
 
-$candidate = $text.Substring(0, $sectionIndex) + $stage6Section + $newline
+$candidate = $text.Substring(0, $sectionIndex) + $ahkTestSection + $newline
 if ($candidate.Contains("ScratchGui") -or $candidate.Contains("Gui(")) {
     throw "Legacy AHK GUI references remain in the candidate."
 }
 if (-not $candidate.Contains("ScrollLock::ToggleScratchEditor()") -or
         -not $candidate.Contains("EnsureQtScratchEditorAndSend") -or
         -not $candidate.Contains("ScratchEditorClipboardFallback")) {
-    throw "The stage 6 IPC or clipboard fallback contract is incomplete."
+    throw "The AHK IPC or clipboard fallback contract is incomplete."
 }
 
 $outputDirectory = Split-Path -Parent $output

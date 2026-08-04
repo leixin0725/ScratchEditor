@@ -189,9 +189,19 @@ Codex 在 composer 中按 `Ctrl+G`；安装脚本会自动把已检测到的 pi 
 
 将 `<用户名>` 替换为实际 Windows 用户目录名；也可复制本机安装文档中的 `VISUAL / EDITOR` 值。
 
+三种 CLI 的调用约定：Codex 在 composer 中按 `Ctrl+G`，依次读取 `VISUAL`、`EDITOR`；pi 优先使用
+`externalEditor`，再回退到 `VISUAL`/`EDITOR`（Windows 最终回退到 Notepad），并在编辑器子进程以
+退出码 `0` 结束时读回；Claude Code 的 `Ctrl+G` 打开系统配置的默认文本编辑器。因此 `VISUAL` 与
+`EDITOR` 应统一指向同一个 `--wait` 命令；Git Bash 中的 `export VISUAL=...` 会覆盖 Windows 用户
+环境变量，安装脚本维护的 `~/.bashrc` 与 VS Code 终端注入会保证两侧一致。此集成不需要 Windows
+注册表、文件关联、插件、MCP 或智能体工具。
+
 当前已在原生 Windows 上实测 Codex CLI 0.146.0 与 pi 0.80.10 的完整 `Ctrl+G` 等待、写回
-和返回流程。Claude Code 按本轮范围暂未实测。调查依据与后续边界见
-[`docs/001-external-editor/`](docs/001-external-editor/)。
+和返回流程。Claude Code 按本轮范围暂未实测；官方约定见
+[Codex CLI Prompt editor](https://learn.chatgpt.com/docs/cli-customization#prompt-editor)、
+[pi settings](https://github.com/earendil-works/pi/blob/main/packages/coding-agent/docs/settings.md#ui--display)
+与 [Claude Code interactive mode](https://code.claude.com/docs/en/interactive-mode#general-controls)。
+历史调查与扩展计划归档在 [`docs/archive/001-external-editor/`](docs/archive/001-external-editor/)。
 
 ## 验收
 
@@ -206,13 +216,13 @@ node ./scripts/run-external-cli-integration.mjs
 `SCRATCHEDITOR_NODE_PTY` 指向已安装的包目录。测试使用隔离的 Codex/pi 临时配置，写回
 `/quit` 后退出，不发送模型请求，也不修改用户的 CLI 配置。
 
-阶段 6 AHK 安装状态、备份、IPC、失败回退和进程保护验收：
+AHK 迁移安装状态、备份、IPC、失败回退和进程保护验收：
 
 ```powershell
-./scripts/run-stage6-tests.ps1
+./scripts/run-ahk-tests.ps1
 ```
 
-Qt 功能回归分为独立的编辑行为验证与窗口界面验证；两者的 AHK 基线参数都应指向阶段 6
+Qt 功能回归分为独立的编辑行为验证与窗口界面验证；两者的 AHK 基线参数都应指向迁移
 备份：
 
 ```powershell
@@ -231,7 +241,7 @@ Qt 功能回归分为独立的编辑行为验证与窗口界面验证；两者�
 完整性能回归：
 
 ```powershell
-./scripts/run-stage1-tests.ps1 `
+./scripts/run-perf-tests.ps1 `
   -BuildSubdirectory build\window-ui `
   -ServerName ScratchEditor.Validation.Perf `
   -ArtifactPrefix validation-performance
@@ -240,14 +250,14 @@ Qt 功能回归分为独立的编辑行为验证与窗口界面验证；两者�
 所有当前测试使用独立管道和测试配置，不会停止默认管道上的用户实例。详细说明见
 [tests/README.md](tests/README.md)。
 
-阶段 6 最终实测：冷启动最大 75.18 ms、热唤醒 P95 19.54 ms、10 万字输入到帧
+AHK 迁移最终实测：冷启动最大 75.18 ms、热唤醒 P95 19.54 ms、10 万字输入到帧
 P95 16.61 ms、空闲 CPU 0%、工作集 39.61 MB、动画 59.88 FPS；微软拼音精确提交
 `你好`。完整 JSON 证据保存在 [artifacts/baselines](artifacts/baselines/README.md)。
 
 ## AHK 迁移边界
 
-`integration/KeysRedirect.QtMigration.ahk` 是阶段 2 的历史隔离参考副本，仍保留当时的
-Qt/旧 GUI 回退开关，不会被构建或测试脚本自动安装。阶段 6 当前状态：
+`integration/KeysRedirect.QtMigration.ahk` 是迁移早期的历史隔离参考副本，仍保留当时的
+Qt/旧 GUI 回退开关，不会被构建或测试脚本自动安装。AHK 迁移当前状态：
 
 - 原文件备份：`D:\Documents\AutoHotkey\KeysRedirect.ahk.stage6-backup-20260802-132834`。
 - 备份 SHA-256：`8BB8FFEFEBD9A6C90C102F66583D517C6C5CF83D36200A3D4E77D413C77B41C9`。

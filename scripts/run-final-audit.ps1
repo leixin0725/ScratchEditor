@@ -1,7 +1,7 @@
 [CmdletBinding()]
 param(
     [string]$OriginalAhkPath = "",
-    [string]$OutputPath = "artifacts\baselines\stage5-audit.json",
+    [string]$OutputPath = "artifacts\baselines\final-audit.json",
     [switch]$RequireGit,
     [switch]$RequireClean,
     [switch]$NoWrite
@@ -29,10 +29,10 @@ $requiredFiles = @(
     "src\markdownhighlighter.cpp",
     "qml\Main.qml",
     "tests\perf_main.cpp",
-    "tests\stage2_main.cpp",
+    "tests\system_main.cpp",
     "tests\editing_main.cpp",
     "tests\window_ui_main.cpp",
-    "tests\fixtures\KeysRedirect.Stage1Test.ahk",
+    "tests\fixtures\KeysRedirect.IpcTest.ahk",
     "tests\README.md",
     "integration\KeysRedirect.QtMigration.ahk",
     "integration\README.md",
@@ -69,7 +69,7 @@ $missingBaselines = @($requiredBaselines | Where-Object {
 
 $baselineFailures = @()
 Get-ChildItem -LiteralPath $baselineDir -Filter "*.json" -File | ForEach-Object {
-    if ($_.Name -eq "stage5-audit.json") {
+    if ($_.Name -eq "final-audit.json") {
         return
     }
     try {

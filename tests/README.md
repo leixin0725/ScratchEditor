@@ -2,8 +2,8 @@
 
 ## 自动验收程序
 
-- `perf_main.cpp`：阶段 1 性能、真实 OS 输入和微软拼音验收客户端。
-- `stage2_main.cpp`：滚动条、Escape、焦点和剪贴板异常回归。
+- `perf_main.cpp`：性能、真实 OS 输入和微软拼音验收客户端。
+- `system_main.cpp`：滚动条、Escape、焦点和剪贴板异常回归。
 - `editing_main.cpp`：编辑行为验证，覆盖 Markdown 高亮、编辑命令、查找替换和快捷键回归。
 - `window_ui_main.cpp`：窗口界面验证，覆盖设置页、主题字体、集中配置、窗口交互/配色、20 轮唤出关闭动画稳定性与明确排除项回归。
 - `externalfilesession_main.cpp`：外部 CLI 编辑模式的 UTF-8/BOM、Unicode 路径、空文件、原子保存和错误边界回归。
@@ -18,7 +18,7 @@ CLI 级脚本需要一个已安装的 `node-pty` 包。本机默认复用全局 
 
 ## AHK 夹具
 
-`fixtures/KeysRedirect.Stage1Test.ahk` 只验证持久命名管道，不包含其他业务热键。它从
+`fixtures/KeysRedirect.IpcTest.ahk` 只验证持久命名管道，不包含其他业务热键。它从
 以下环境变量读取隔离目标：
 
 - `SCRATCHEDITOR_SERVER_NAME`
@@ -27,10 +27,10 @@ CLI 级脚本需要一个已安装的 `node-pty` 包。本机默认复用全局 
 运行入口是 `../scripts/test-ahk-ipc.ps1`。夹具和迁移参考副本都不能覆盖用户原始
 `KeysRedirect.ahk`。
 
-阶段 6 获批后，`../scripts/run-stage6-tests.ps1` 会从已安装文件创建临时测试副本，
+AHK 迁移获批后，`../scripts/run-ahk-tests.ps1` 会从已安装文件创建临时测试副本，
 验证以下边界：
 
-- 同目录备份与阶段 5 原始哈希一致。
+- 同目录备份与迁移前原始哈希一致。
 - 已安装文件与从备份执行的受控变换逐字节一致。
 - 旧 AHK GUI 已删除，快捷键、启动预热和 IPC 保留。
 - Qt 启动失败时剪贴板内容保持不变。
@@ -43,14 +43,14 @@ CLI 级脚本需要一个已安装的 `node-pty` 包。本机默认复用全局 
 ## 推荐执行顺序
 
 1. `scripts/build.ps1 -Preset release`
-2. `scripts/run-stage2-tests.ps1`
+2. `scripts/run-system-tests.ps1`
 3. `scripts/run-external-editor-tests.ps1`
 4. `node scripts/run-external-cli-integration.mjs`
 5. `scripts/build.ps1 -Preset editing -SkipLocalInstall`
 6. `scripts/run-editing-tests.ps1`
 7. `scripts/build.ps1 -Preset window-ui -SkipLocalInstall`
-8. `scripts/run-stage6-tests.ps1`
-9. `scripts/run-window-ui-tests.ps1`（AHK 基线参数指向阶段 6 备份）
-10. `scripts/run-stage1-tests.ps1`（完整性能门槛）
+8. `scripts/run-ahk-tests.ps1`
+9. `scripts/run-window-ui-tests.ps1`（AHK 基线参数指向迁移备份）
+10. `scripts/run-perf-tests.ps1`（完整性能门槛）
 
 最终结果应复制到 `artifacts/baselines/`；普通运行产生的时间戳结果默认被 Git 忽略。

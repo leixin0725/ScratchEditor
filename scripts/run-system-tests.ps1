@@ -7,7 +7,7 @@ $ErrorActionPreference = "Stop"
 $projectRoot = Split-Path -Parent $PSScriptRoot
 $buildDir = Join-Path $projectRoot "build\release"
 $editorExe = Join-Path $buildDir "ScratchEditor.exe"
-$stage2Exe = Join-Path $buildDir "ScratchEditorStage2Tests.exe"
+$systemExe = Join-Path $buildDir "ScratchEditorSystemTests.exe"
 $ahkExe = "C:\Program Files\AutoHotkey\v2\AutoHotkey64.exe"
 $ahkCopy = Join-Path $projectRoot "integration\KeysRedirect.QtMigration.ahk"
 if ([string]::IsNullOrWhiteSpace($OriginalAhkPath)) {
@@ -97,7 +97,7 @@ function Start-TestInstance {
         if (-not $process.HasExited) {
             Stop-Process -Id $process.Id
         }
-        throw "ScratchEditor did not become ready for stage 2 tests."
+        throw "ScratchEditor did not become ready for system tests."
     }
     [pscustomobject]@{ Process = $process; Status = $ready }
 }
@@ -115,9 +115,9 @@ function Stop-StartedInstance {
     $Started.Process.WaitForExit(2000) | Out-Null
 }
 
-foreach ($required in @($editorExe, $stage2Exe, $ahkExe, $ahkCopy, $originalAhk)) {
+foreach ($required in @($editorExe, $systemExe, $ahkExe, $ahkCopy, $originalAhk)) {
     if (-not (Test-Path -LiteralPath $required)) {
-        throw "Required stage 2 test input is missing: $required"
+        throw "Required system test input is missing: $required"
     }
 }
 
@@ -161,9 +161,9 @@ try {
         [int]$restoredGeometry.settingsStatus -eq 0
     )
 
-    $stage2Json = (& $stage2Exe | Out-String).Trim()
-    $stage2ExitCode = $LASTEXITCODE
-    $stage2Behavior = $stage2Json | ConvertFrom-Json
+    $systemJson = (& $systemExe | Out-String).Trim()
+    $systemExitCode = $LASTEXITCODE
+    $systemBehavior = $systemJson | ConvertFrom-Json
 
     $ahkStart = [System.Diagnostics.ProcessStartInfo]::new()
     $ahkStart.FileName = $ahkExe
@@ -193,7 +193,7 @@ try {
     )
 
     $diffText = (& git diff --no-index -- $originalAhk $ahkCopy 2>&1) -join "`n"
-    $diffPath = Join-Path $artifactDir "stage2-ahk-copy-$timestamp.diff"
+    $diffPath = Join-Path $artifactDir "system-ahk-copy-$timestamp.diff"
     [System.IO.File]::WriteAllText($diffPath, $diffText, [System.Text.UTF8Encoding]::new($false))
 
     $null = Send-IpcCommand -Command "testResetSettings"
@@ -202,18 +202,18 @@ try {
 
     $checks = [ordered]@{
         geometryPersistence = $geometryPassed
-        smartScrollbar = [bool]$stage2Behavior.checks.smartScrollBar
-        escapeClosesAndCopies = [bool]$stage2Behavior.checks.escapeClosesAndCopies
-        focusRestored = [bool]$stage2Behavior.checks.focusRestored
-        clipboardReadFailure = [bool]$stage2Behavior.checks.clipboardReadFailureIsVisible
-        clipboardWriteFailure = [bool]$stage2Behavior.checks.clipboardWriteFailureKeepsEditor
-        clipboardRecovery = [bool]$stage2Behavior.checks.clipboardWriteRecovers
+        smartScrollbar = [bool]$systemBehavior.checks.smartScrollBar
+        escapeClosesAndCopies = [bool]$systemBehavior.checks.escapeClosesAndCopies
+        focusRestored = [bool]$systemBehavior.checks.focusRestored
+        clipboardReadFailure = [bool]$systemBehavior.checks.clipboardReadFailureIsVisible
+        clipboardWriteFailure = [bool]$systemBehavior.checks.clipboardWriteFailureKeepsEditor
+        clipboardRecovery = [bool]$systemBehavior.checks.clipboardWriteRecovers
         isolatedAhkQtIpc = $ahkPassed
         rollbackSwitch = $rollbackSwitchPresent
         originalAhkUnchanged = ($hashBefore -eq $hashAfter)
         originalAhkRepoUnchanged = ($repoStatusBefore -eq $repoStatusAfter)
     }
-    $allPassed = ($stage2ExitCode -eq 0 -and -not ($checks.Values -contains $false))
+    $allPassed = ($systemExitCode -eq 0 -and -not ($checks.Values -contains $false))
     $report = [ordered]@{
         timestamp = (Get-Date).ToString("o")
         geometry = [ordered]@{
@@ -221,7 +221,7 @@ try {
             setResponse = $geometrySet
             restored = $restoredGeometry
         }
-        behavior = $stage2Behavior
+        behavior = $systemBehavior
         ahk = [ordered]@{
             executable = $ahkExe
             isolatedCopy = $ahkCopy
@@ -242,7 +242,7 @@ try {
         allPassed = $allPassed
     }
 
-    $artifactPath = Join-Path $artifactDir "stage2-results-$timestamp.json"
+    $artifactPath = Join-Path $artifactDir "system-results-$timestamp.json"
     [System.IO.File]::WriteAllText(
         $artifactPath,
         ($report | ConvertTo-Json -Depth 12),

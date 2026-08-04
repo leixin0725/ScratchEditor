@@ -19,7 +19,7 @@ namespace {
 QString serverName()
 {
     const QByteArray overrideName = qgetenv("SCRATCHEDITOR_SERVER_NAME");
-    return overrideName.isEmpty() ? QStringLiteral("ScratchEditor.Stage1.v1")
+    return overrideName.isEmpty() ? QStringLiteral("ScratchEditor.Perf.Validation")
                                   : QString::fromUtf8(overrideName);
 }
 

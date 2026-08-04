@@ -5,8 +5,8 @@ param(
     [int]$InputSamples = 60,
     [int]$IdleSeconds = 5,
     [string]$BuildSubdirectory = "build\release",
-    [string]$ServerName = "ScratchEditor.Stage1.v1",
-    [string]$ArtifactPrefix = "stage1-results"
+    [string]$ServerName = "ScratchEditor.Perf.Validation",
+    [string]$ArtifactPrefix = "perf-results"
 )
 
 $ErrorActionPreference = "Stop"
@@ -271,7 +271,7 @@ $artifactPath = Join-Path $artifactDir (
 $reportJson = $report | ConvertTo-Json -Depth 12
 [System.IO.File]::WriteAllText($artifactPath, $reportJson, [System.Text.UTF8Encoding]::new($false))
 $reportJson
-Write-Host "Stage 1 report: $artifactPath"
+Write-Host "Perf report: $artifactPath"
 
 if (-not $allPassed) {
     exit 1

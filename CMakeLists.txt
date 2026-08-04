@@ -118,22 +118,22 @@ if(WIN32)
     target_link_libraries(ScratchEditorPerf PRIVATE user32)
 endif()
 
-qt_add_executable(ScratchEditorStage2Tests
-    tests/stage2_main.cpp
+qt_add_executable(ScratchEditorSystemTests
+    tests/system_main.cpp
 )
 
-target_link_libraries(ScratchEditorStage2Tests PRIVATE
+target_link_libraries(ScratchEditorSystemTests PRIVATE
     Qt6::Core
     Qt6::Network
 )
 
-target_link_options(ScratchEditorStage2Tests PRIVATE
+target_link_options(ScratchEditorSystemTests PRIVATE
     $<$<AND:$<CONFIG:Release>,$<CXX_COMPILER_ID:GNU>>:-s>
 )
 
 if(WIN32)
-    target_compile_definitions(ScratchEditorStage2Tests PRIVATE UNICODE _UNICODE)
-    target_link_libraries(ScratchEditorStage2Tests PRIVATE ole32 user32)
+    target_compile_definitions(ScratchEditorSystemTests PRIVATE UNICODE _UNICODE)
+    target_link_libraries(ScratchEditorSystemTests PRIVATE ole32 user32)
 endif()
 
 qt_add_executable(ScratchEditorExternalFileTests
@@ -164,7 +164,7 @@ target_link_options(ScratchEditorExternalProcessTests PRIVATE
     $<$<AND:$<CONFIG:Release>,$<CXX_COMPILER_ID:GNU>>:-s>
 )
 
-install(TARGETS ScratchEditor ScratchEditorPerf ScratchEditorStage2Tests ScratchEditorEditingTests
+install(TARGETS ScratchEditor ScratchEditorPerf ScratchEditorSystemTests ScratchEditorEditingTests
         ScratchEditorWindowUiTests ScratchEditorExternalFileTests ScratchEditorExternalProcessTests
     RUNTIME DESTINATION .
 )

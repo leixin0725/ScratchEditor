@@ -1,17 +1,17 @@
 [CmdletBinding()]
 param(
     [string]$BuildSubdirectory = "build\release",
-    [string]$ServerName = "ScratchEditor.Stage5.AhkValidation",
+    [string]$ServerName = "ScratchEditor.Ahk.Validation",
     [string]$OriginalAhkPath = "",
     [string]$AutoHotkeyExecutable = "C:\Program Files\AutoHotkey\v2\AutoHotkey64.exe",
-    [string]$ArtifactPrefix = "stage5-ahk-ipc"
+    [string]$ArtifactPrefix = "ahk-ipc"
 )
 
 $ErrorActionPreference = "Stop"
 $projectRoot = Split-Path -Parent $PSScriptRoot
 $editorExe = Join-Path $projectRoot "$BuildSubdirectory\ScratchEditor.exe"
 $ahkExe = $AutoHotkeyExecutable
-$ahkBridge = Join-Path $projectRoot "tests\fixtures\KeysRedirect.Stage1Test.ahk"
+$ahkBridge = Join-Path $projectRoot "tests\fixtures\KeysRedirect.IpcTest.ahk"
 if ([string]::IsNullOrWhiteSpace($OriginalAhkPath)) {
     $OriginalAhkPath = $env:SCRATCHEDITOR_ORIGINAL_AHK
 }
@@ -23,7 +23,7 @@ $pipeName = $ServerName
 $env:SCRATCHEDITOR_SERVER_NAME = $ServerName
 $env:SCRATCHEDITOR_EXE = $editorExe
 $env:SCRATCHEDITOR_SETTINGS_FILE = Join-Path ([System.IO.Path]::GetTempPath()) `
-    "ScratchEditor\tests\stage5-ahk-validation.ini"
+    "ScratchEditor\tests\ahk-validation.ini"
 
 function Send-IpcCommand {
     param([Parameter(Mandatory)] [string]$Command, [int]$TimeoutMs = 2000)

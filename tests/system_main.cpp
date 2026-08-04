@@ -206,7 +206,7 @@ int main(int argc, char *argv[])
     details.insert(QStringLiteral("shortDocumentStatus"), shortStatus);
     details.insert(QStringLiteral("largeDocumentStatus"), largeStatus);
 
-    const QString escapeText = QStringLiteral("阶段二 Escape 写回测试：中文");
+    const QString escapeText = QStringLiteral("系统回归 Escape 写回测试：中文");
     command(QStringLiteral("testSetText"), {{QStringLiteral("text"), escapeText}});
     const HWND editorWindow = reinterpret_cast<HWND>(
         shown.value(QStringLiteral("hwnd")).toString().toULongLong());
@@ -245,7 +245,7 @@ int main(int argc, char *argv[])
                    QString::number(reinterpret_cast<quintptr>(focusAfterHide)));
 
     command(QStringLiteral("show"));
-    const QString lockedWriteText = QStringLiteral("阶段二剪贴板写入异常保留内容");
+    const QString lockedWriteText = QStringLiteral("系统回归剪贴板写入异常保留内容");
     command(QStringLiteral("testSetText"), {{QStringLiteral("text"), lockedWriteText}});
     QJsonObject failedHide;
     bool writeLockAcquired = false;
