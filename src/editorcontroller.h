@@ -1,6 +1,7 @@
 #pragma once
 
 #include <QElapsedTimer>
+#include <QFileSystemWatcher>
 #include <QHash>
 #include <QJsonObject>
 #include <QLocalServer>
@@ -9,6 +10,7 @@
 #include <QRect>
 #include <QObject>
 #include <QString>
+#include <QTimer>
 #include <QVariantList>
 
 #include <memory>
@@ -41,9 +43,11 @@ class EditorController final : public QObject
     Q_PROPERTY(bool animationsEnabled READ animationsEnabled NOTIFY appearanceChanged)
     Q_PROPERTY(QString settingsFile READ settingsFile CONSTANT)
     Q_PROPERTY(QString settingsError READ settingsError NOTIFY settingsErrorChanged)
-    Q_PROPERTY(QString markdownTextColor READ markdownTextColor CONSTANT)
+    Q_PROPERTY(QString markdownTextColor READ markdownTextColor NOTIFY markdownStyleChanged)
+    Q_PROPERTY(QString themeAccentColor READ themeAccentColor NOTIFY markdownStyleChanged)
+    Q_PROPERTY(QString themeAccentTextColor READ themeAccentTextColor NOTIFY markdownStyleChanged)
     Q_PROPERTY(QString markdownStyleFile READ markdownStyleFile CONSTANT)
-    Q_PROPERTY(bool markdownStyleLoaded READ markdownStyleLoaded CONSTANT)
+    Q_PROPERTY(bool markdownStyleLoaded READ markdownStyleLoaded NOTIFY markdownStyleChanged)
 
 public:
     explicit EditorController(bool testMode, QElapsedTimer *startupTimer,
@@ -74,6 +78,8 @@ public:
     QString settingsFile() const;
     QString settingsError() const;
     QString markdownTextColor() const;
+    QString themeAccentColor() const;
+    QString themeAccentTextColor() const;
     QString markdownStyleFile() const;
     bool markdownStyleLoaded() const;
 
@@ -106,6 +112,7 @@ signals:
     void clipboardStateChanged();
     void commandsChanged();
     void markdownHighlightingChanged();
+    void markdownStyleChanged();
     void appearanceChanged();
     void settingsErrorChanged();
     void uiCommandRequested(const QString &commandId);
@@ -155,6 +162,8 @@ private:
                                const QString &requestId);
     void restoreTestDocument();
     void reloadAppearance();
+    void configureMarkdownStyleWatcher();
+    void reloadMarkdownStyle();
 
     QLocalServer m_server;
     QHash<QLocalSocket *, QByteArray> m_buffers;
@@ -164,6 +173,8 @@ private:
     std::unique_ptr<EditorCommandRegistry> m_commands;
     std::unique_ptr<ExternalFileSession> m_externalFileSession;
     std::unique_ptr<MarkdownStyle> m_markdownStyle;
+    QFileSystemWatcher m_markdownStyleWatcher;
+    QTimer m_markdownStyleReloadTimer;
     QPointer<MarkdownHighlighter> m_markdownHighlighter;
     QElapsedTimer *m_startupTimer = nullptr;
     QElapsedTimer m_monotonic;

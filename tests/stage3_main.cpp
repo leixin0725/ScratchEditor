@@ -132,9 +132,17 @@ int main(int argc, char *argv[])
                     == QStringLiteral("#c2c0b6")
                  && initial.value(QStringLiteral("themeHeaderColor")).toString()
                     == QStringLiteral("#252525")
-                 && initial.value(QStringLiteral("panelAccentColor")).toString()
-                    == QStringLiteral("#85c7c0")
-                 && initial.value(QStringLiteral("commandPaletteMaximumWidth")).toInt() == 620,
+                  && initial.value(QStringLiteral("panelAccentColor")).toString()
+                     == QStringLiteral("#85c7c0")
+                  && initial.value(QStringLiteral("themeAccentColor")).toString()
+                     == QStringLiteral("#85c7c0")
+                  && initial.value(QStringLiteral("themeAccentTextColor")).toString()
+                     == QStringLiteral("#183331")
+                  && initial.value(QStringLiteral("themeSelectionColor")).toString()
+                     == QStringLiteral("#85c7c0")
+                  && initial.value(QStringLiteral("selectionDragColor")).toString()
+                     == QStringLiteral("#85c7c0")
+                  && initial.value(QStringLiteral("commandPaletteMaximumWidth")).toInt() == 620,
              initial);
 
     const QString dragText = QStringLiteral("AA<move>BB");

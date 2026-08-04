@@ -21,7 +21,7 @@ public:
         bool underline = false;
     };
 
-    static MarkdownStyle load();
+    static MarkdownStyle load(bool isolatedTestMode = false);
 
     QTextCharFormat textFormat(const TokenStyle &token) const;
     QString filePath() const;
@@ -42,6 +42,8 @@ public:
     TokenStyle linkBrackets;
     TokenStyle completedTask;
     TokenStyle checkboxBrackets;
+    QColor accentColor;
+    QColor accentTextColor;
 
 private:
     static MarkdownStyle defaults();

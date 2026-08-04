@@ -33,6 +33,8 @@ $resolvedSourceEditorPath = [System.IO.Path]::GetFullPath($SourceEditorPath)
 $deployQt = Join-Path $projectRoot ".tools\Qt\6.10.2\mingw_64\bin\windeployqt.exe"
 $qmlDirectory = Join-Path $projectRoot "qml"
 $markdownStyle = Join-Path $projectRoot "config\markdown-style.json"
+$sharedStyleDirectory = Join-Path $installRoot "ScratchEditor"
+$sharedStyleFile = Join-Path $sharedStyleDirectory "markdown-style.json"
 $restartAhkResident = $false
 
 function Invoke-ProductionEditorCommand {
@@ -153,6 +155,13 @@ function Install-EditorCopy {
     }
 }
 
+function Install-SharedStyleConfiguration {
+    New-Item -ItemType Directory -Path $sharedStyleDirectory -Force | Out-Null
+    if (-not (Test-Path -LiteralPath $sharedStyleFile -PathType Leaf)) {
+        Copy-Item -LiteralPath $markdownStyle -Destination $sharedStyleFile
+    }
+}
+
 if ($Action -eq "Install") {
     foreach ($sourcePath in @(
         $resolvedSourceEditorPath,
@@ -166,6 +175,7 @@ if ($Action -eq "Install") {
     }
     $restartAhkResident = Stop-StableAhkResident
     try {
+        Install-SharedStyleConfiguration
         Install-EditorCopy -TargetDirectory $resolvedInstallDirectory `
             -TargetEditorPath $resolvedEditorPath
         Install-EditorCopy -TargetDirectory $resolvedAhkInstallDirectory `
@@ -190,7 +200,8 @@ $requiredRuntimePaths = @(
     (Join-Path $resolvedAhkInstallDirectory "Qt6Gui.dll"),
     (Join-Path $resolvedAhkInstallDirectory "Qt6Qml.dll"),
     (Join-Path $resolvedAhkInstallDirectory "Qt6Quick.dll"),
-    (Join-Path $resolvedAhkInstallDirectory "platforms\qwindows.dll")
+    (Join-Path $resolvedAhkInstallDirectory "platforms\qwindows.dll"),
+    $sharedStyleFile
 )
 
 $missingRuntimePaths = @($requiredRuntimePaths | Where-Object {
@@ -437,6 +448,7 @@ function Write-LocalInstallationDocument {
         ('| Latest build source | `' + $resolvedSourceEditorPath + '` |'),
         ('| Stable Codex / pi editor | `' + $resolvedEditorPath + '` |'),
         ('| Stable AHK editor | `' + $resolvedAhkEditorPath + '` |'),
+        ('| Shared live theme / Markdown config | `' + $sharedStyleFile + '` |'),
         ('| Regular-terminal `VISUAL` / `EDITOR` | `' + $windowsCommand + '` |'),
         '| VS Code integrated-terminal `VISUAL` / `EDITOR` | `code --wait` |',
         ('| Git Bash profile | `' + $bashProfilePath + '` |'),
@@ -447,6 +459,8 @@ function Write-LocalInstallationDocument {
         'Codex and pi share the same stable `CodexEditor` executable. Each `--wait` edit still runs as an independent file-mode process so concurrent sessions cannot overwrite one another.',
         'Ctrl+G uses VS Code inside the VS Code integrated terminal and the shared stable ScratchEditor copy in regular terminals.',
         'Scroll Lock and Win+F use the separate stable `AhkEditor` executable through the persistent `ScratchEditor.Stage1.v1` IPC instance.',
+        'Both installed editors watch the shared theme / Markdown config. Manual edits are applied while the editors are running; builds seed this file once and never overwrite later user changes.',
+        'Edit `theme.accentColor` for the shared accent used by settings, the command palette, focus borders, text selections, the drag insertion cursor, and Markdown links. `theme.accentTextColor` controls text drawn on that accent.',
         'Clickable Codex file citations continue to use VS Code in every terminal through `file_opener = "vscode"`.',
         'Every successful `scripts/build.ps1` build automatically installs the just-built ScratchEditor into both stable directories and refreshes Codex, pi, AHK, Git Bash, and VS Code configuration.',
         'Pass `-SkipLocalInstall` only for an intentionally isolated build. Direct CMake builds do not synchronize the stable installations.',
@@ -503,6 +517,7 @@ $persistentConfigurationValid = $userVisual -eq $windowsCommand `
     ExpectedCommand = $windowsCommand
     StableCodexEditor = $resolvedEditorPath
     StableAhkEditor = $resolvedAhkEditorPath
+    SharedStyleFile = $sharedStyleFile
     InstalledCopiesMatch = $installedCopiesMatch
     UserVisual = $userVisual
     UserEditor = $userEditor

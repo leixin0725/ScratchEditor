@@ -40,6 +40,7 @@
 #include <algorithm>
 #include <cstring>
 #include <numeric>
+#include <utility>
 
 #ifdef Q_OS_WIN
 #  include <dwmapi.h>
@@ -104,7 +105,16 @@ EditorController::EditorController(bool testMode, QElapsedTimer *startupTimer,
         m_statusHealthy = m_externalFileReady;
     }
     m_settings = std::make_unique<AppSettings>(m_testMode);
-    m_markdownStyle = std::make_unique<MarkdownStyle>(MarkdownStyle::load());
+    m_markdownStyle = std::make_unique<MarkdownStyle>(MarkdownStyle::load(m_testMode));
+    m_markdownStyleReloadTimer.setSingleShot(true);
+    m_markdownStyleReloadTimer.setInterval(150);
+    connect(&m_markdownStyleWatcher, &QFileSystemWatcher::fileChanged, this,
+            [this](const QString &) { m_markdownStyleReloadTimer.start(); });
+    connect(&m_markdownStyleWatcher, &QFileSystemWatcher::directoryChanged, this,
+            [this](const QString &) { m_markdownStyleReloadTimer.start(); });
+    connect(&m_markdownStyleReloadTimer, &QTimer::timeout,
+            this, &EditorController::reloadMarkdownStyle);
+    configureMarkdownStyleWatcher();
     reloadAppearance();
     m_commands = std::make_unique<EditorCommandRegistry>(m_settings.get(), this);
     connect(m_commands.get(), &EditorCommandRegistry::commandsChanged,
@@ -264,6 +274,20 @@ QString EditorController::markdownTextColor() const
     return m_markdownStyle
         ? m_markdownStyle->baseText.foreground.name(QColor::HexRgb)
         : QStringLiteral("#c2c0b6");
+}
+
+QString EditorController::themeAccentColor() const
+{
+    return m_markdownStyle
+        ? m_markdownStyle->accentColor.name(QColor::HexRgb)
+        : QString();
+}
+
+QString EditorController::themeAccentTextColor() const
+{
+    return m_markdownStyle
+        ? m_markdownStyle->accentTextColor.name(QColor::HexRgb)
+        : QString();
 }
 
 QString EditorController::markdownStyleFile() const
@@ -442,6 +466,47 @@ void EditorController::reloadAppearance()
     if (changed) {
         emit appearanceChanged();
     }
+}
+
+void EditorController::configureMarkdownStyleWatcher()
+{
+    if (!m_markdownStyle) {
+        return;
+    }
+    const QString filePath = QFileInfo(m_markdownStyle->filePath()).absoluteFilePath();
+    const QString directoryPath = QFileInfo(filePath).absolutePath();
+    for (const QString &watched : m_markdownStyleWatcher.files()) {
+        if (QFileInfo(watched).absoluteFilePath() != filePath) {
+            m_markdownStyleWatcher.removePath(watched);
+        }
+    }
+    for (const QString &watched : m_markdownStyleWatcher.directories()) {
+        if (QFileInfo(watched).absoluteFilePath() != directoryPath) {
+            m_markdownStyleWatcher.removePath(watched);
+        }
+    }
+    if (QFileInfo::exists(filePath) && !m_markdownStyleWatcher.files().contains(filePath)) {
+        m_markdownStyleWatcher.addPath(filePath);
+    }
+    if (QFileInfo::exists(directoryPath)
+        && !m_markdownStyleWatcher.directories().contains(directoryPath)) {
+        m_markdownStyleWatcher.addPath(directoryPath);
+    }
+}
+
+void EditorController::reloadMarkdownStyle()
+{
+    MarkdownStyle reloaded = MarkdownStyle::load(m_testMode);
+    if (!reloaded.loadedFromFile()) {
+        configureMarkdownStyleWatcher();
+        return;
+    }
+    m_markdownStyle = std::make_unique<MarkdownStyle>(std::move(reloaded));
+    configureMarkdownStyleWatcher();
+    if (m_markdownHighlighter) {
+        m_markdownHighlighter->setStyle(*m_markdownStyle);
+    }
+    emit markdownStyleChanged();
 }
 
 void EditorController::updateReadyState()
@@ -1579,6 +1644,8 @@ QJsonObject EditorController::statusObject() const
     status.insert(QStringLiteral("settingsError"), m_settingsError);
     status.insert(QStringLiteral("markdownHighlighting"), markdownHighlighting());
     status.insert(QStringLiteral("markdownTextColor"), markdownTextColor());
+    status.insert(QStringLiteral("themeAccentColor"), themeAccentColor());
+    status.insert(QStringLiteral("themeAccentTextColor"), themeAccentTextColor());
     status.insert(QStringLiteral("markdownStyleFile"), markdownStyleFile());
     status.insert(QStringLiteral("markdownStyleLoaded"), markdownStyleLoaded());
     status.insert(QStringLiteral("commandCount"), commands().size());
@@ -1617,6 +1684,10 @@ QJsonObject EditorController::statusObject() const
                       m_window->property("themeBorderColor").toString());
         status.insert(QStringLiteral("panelAccentColor"),
                       m_window->property("panelAccentColor").toString());
+        status.insert(QStringLiteral("themeSelectionColor"),
+                      m_window->property("themeSelectionColor").toString());
+        status.insert(QStringLiteral("selectionDragColor"),
+                      m_window->property("selectionDragColor").toString());
         status.insert(QStringLiteral("commandPaletteMaximumWidth"),
                       m_window->property("commandPaletteMaximumWidth").toInt());
         status.insert(QStringLiteral("transitionDuration"),

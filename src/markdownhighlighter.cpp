@@ -7,6 +7,11 @@
 MarkdownHighlighter::MarkdownHighlighter(QTextDocument *document, const MarkdownStyle &style)
     : QSyntaxHighlighter(document)
 {
+    setStyle(style);
+}
+
+void MarkdownHighlighter::setStyle(const MarkdownStyle &style)
+{
     for (size_t index = 0; index < m_headingFormats.size(); ++index) {
         m_headingFormats[index] = style.textFormat(style.headings[index]);
     }
@@ -23,6 +28,7 @@ MarkdownHighlighter::MarkdownHighlighter(QTextDocument *document, const Markdown
     m_linkBracketsFormat = style.textFormat(style.linkBrackets);
     m_completedTaskFormat = style.textFormat(style.completedTask);
     m_checkboxBracketsFormat = style.textFormat(style.checkboxBrackets);
+    rehighlight();
 }
 
 void MarkdownHighlighter::highlightBlock(const QString &text)

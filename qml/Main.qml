@@ -36,13 +36,15 @@ Window {
     readonly property color themeMutedTextColor: darkTheme ? "#9a9a9a" : "#57606a"
     readonly property color themeBorderColor: darkTheme ? "#505050" : "#d0d7de"
     readonly property color themeButtonColor: darkTheme ? "#393939" : "#eaeef2"
-    readonly property color themeAccentColor: darkTheme ? "#3d648f" : "#0969da"
-    readonly property color themeFocusColor: darkTheme ? "#78a9ff" : "#0969da"
-    readonly property color themeSelectionColor: darkTheme ? "#3d648f" : "#b6d7ff"
-    readonly property color themeSelectedTextColor: darkTheme ? "#ffffff" : "#111111"
+    readonly property color themeAccentColor: controller.themeAccentColor
+    readonly property color themeAccentTextColor: controller.themeAccentTextColor
+    readonly property color themeFocusColor: themeAccentColor
+    readonly property color themeSelectionColor: themeAccentColor
+    readonly property color themeSelectedTextColor: themeAccentTextColor
+    readonly property color selectionDragColor: themeAccentColor
     readonly property color themeDangerColor: darkTheme ? "#ff8a80" : "#cf222e"
-    readonly property color panelAccentColor: "#85c7c0"
-    readonly property color panelAccentTextColor: "#183331"
+    readonly property color panelAccentColor: themeAccentColor
+    readonly property color panelAccentTextColor: themeAccentTextColor
     readonly property int commandPaletteMaximumWidth: 620
     readonly property color markdownTextColor: controller.markdownTextColor
     readonly property string uiFontFamily: "Microsoft YaHei UI"
@@ -539,7 +541,7 @@ Window {
                 width: 2
                 height: Math.max(1, editor.selectionDragRectangle.height)
                 visible: editor.selectionDragPosition >= 0
-                color: root.themeSelectionColor
+                color: root.selectionDragColor
             }
         }
     }
@@ -644,7 +646,7 @@ Window {
         width: 40
         height: 2
         radius: 1
-        color: "#78a9ff"
+        color: root.themeAccentColor
     }
 
     NumberAnimation {

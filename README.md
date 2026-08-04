@@ -51,17 +51,25 @@ Qt 6 Quick/QML、C++20 和 CMake；AutoHotkey 继续负责全局快捷键与启�
 - `Ctrl+L` 切换光标所在行的 checkbox 勾选状态；非 checkbox 行会转换为未勾选任务，并保留已有列表编号、缩进和多层引用前缀。
 - 光标已经位于文档最后一个可视行时，Down 会转到行尾；位于第一个可视行时，Up 会转到行首。
 
-## Markdown 样式配置
+## 主题与 Markdown 样式配置
 
-Markdown 颜色和字体样式集中保存在 `config/markdown-style.json`。构建时该文件会复制到
-程序目录下的 `config/markdown-style.json`，程序启动时读取；修改后重启 ScratchEditor
-即可生效。行内代码和围栏代码的背景色、等宽字体以及链接下划线也由该文件管理。
+配置模板集中保存在 `config/markdown-style.json`。其中 `theme.accentColor` 是界面强调色的单一事实
+来源：设置页、命令面板、焦点边框、文本选区、拖动选区的落点光标和 Markdown 链接都使用该颜色；
+`theme.accentTextColor` 控制强调色背景上的文字。行内代码和围栏代码的背景色、等宽字体及其他
+Markdown 样式也由该文件管理。
+
+稳定安装首次构建时会把模板初始化到
+`%LOCALAPPDATA%\ScratchEditor\ScratchEditor\markdown-style.json`。Codex/pi 与 AHK 两个安装副本
+共同读取并监听这一个用户配置；可随时手工保存修改，运行中的编辑器会自动热更新，无需重启。后续构建
+不会覆盖该用户文件。测试模式继续读取对应构建目录中的模板，也可用
+`SCRATCHEDITOR_MARKDOWN_STYLE` 指定隔离配置。
 
 ## 架构与目录
 
 ```text
 KeysRedirect.ahk ──命名管道──> %LOCALAPPDATA%\ScratchEditor\AhkEditor\ScratchEditor.exe
 Codex / pi ───────文件模式───> %LOCALAPPDATA%\ScratchEditor\CodexEditor\ScratchEditor.exe
+共享主题配置 ────────────────> %LOCALAPPDATA%\ScratchEditor\ScratchEditor\markdown-style.json
                                              ├─ C++：生命周期、IPC、剪贴板、配置、编辑命令、窗口过渡
                                              └─ QML：编辑器、查找、命令面板、设置页与界面动效
 ```

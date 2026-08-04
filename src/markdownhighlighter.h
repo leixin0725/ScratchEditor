@@ -13,6 +13,7 @@ class MarkdownHighlighter final : public QSyntaxHighlighter
 
 public:
     MarkdownHighlighter(QTextDocument *document, const MarkdownStyle &style);
+    void setStyle(const MarkdownStyle &style);
 
 protected:
     void highlightBlock(const QString &text) override;

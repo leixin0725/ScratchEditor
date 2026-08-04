@@ -1,13 +1,16 @@
 #include "markdownstyle.h"
 
 #include <QCoreApplication>
+#include <QDir>
 #include <QFile>
+#include <QFileInfo>
 #include <QFont>
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QJsonParseError>
 #include <QTextCharFormat>
+#include <QStandardPaths>
 
 namespace {
 
@@ -64,6 +67,50 @@ void applyToken(const QJsonObject &root, const QString &key,
     }
 }
 
+bool applyTheme(const QJsonObject &root, MarkdownStyle *style)
+{
+    if (!style || !root.value(QStringLiteral("theme")).isObject()) {
+        return false;
+    }
+    const QJsonObject theme = root.value(QStringLiteral("theme")).toObject();
+    const QColor accent(theme.value(QStringLiteral("accentColor")).toString());
+    const QColor accentText(theme.value(QStringLiteral("accentTextColor")).toString());
+    if (accentText.isValid()) {
+        style->accentTextColor = accentText;
+    }
+    if (!accent.isValid()) {
+        return false;
+    }
+    style->accentColor = accent;
+    return true;
+}
+
+QString styleFilePath(bool isolatedTestMode)
+{
+    const QByteArray overridePath = qgetenv("SCRATCHEDITOR_MARKDOWN_STYLE");
+    if (!overridePath.isEmpty()) {
+        return QString::fromLocal8Bit(overridePath);
+    }
+
+    const QString bundledPath = QCoreApplication::applicationDirPath()
+        + QStringLiteral("/config/markdown-style.json");
+    if (isolatedTestMode) {
+        return bundledPath;
+    }
+
+    const QString sharedDirectory = QStandardPaths::writableLocation(
+        QStandardPaths::AppConfigLocation);
+    if (sharedDirectory.isEmpty()) {
+        return bundledPath;
+    }
+    const QString sharedPath = sharedDirectory + QStringLiteral("/markdown-style.json");
+    if (!QFileInfo::exists(sharedPath)) {
+        QDir().mkpath(sharedDirectory);
+        QFile::copy(bundledPath, sharedPath);
+    }
+    return QFileInfo::exists(sharedPath) ? sharedPath : bundledPath;
+}
+
 } // namespace
 
 MarkdownStyle MarkdownStyle::defaults()
@@ -71,6 +118,8 @@ MarkdownStyle MarkdownStyle::defaults()
     MarkdownStyle style;
     const QStringList codeFonts{QStringLiteral("Cascadia Mono"),
                                 QStringLiteral("Microsoft YaHei UI")};
+    style.accentColor = QColor(QStringLiteral("#85c7c0"));
+    style.accentTextColor = QColor(QStringLiteral("#183331"));
     style.baseText = token(QStringLiteral("#C2C0B6"), QStringLiteral("normal"));
     style.inlineCode = token(QStringLiteral("#ffffff"), QStringLiteral("normal"),
                              QStringLiteral("#303030"), codeFonts);
@@ -91,7 +140,8 @@ MarkdownStyle MarkdownStyle::defaults()
     style.boldItalic = token(QStringLiteral("#FFE6B7"), QStringLiteral("bold italic"));
     style.strikethrough = token(QStringLiteral("#999999"),
                                 QStringLiteral("strikethrough"));
-    style.link = token(QStringLiteral("#85c7c0"), QStringLiteral("normal"), {}, {}, true);
+    style.link = token(style.accentColor.name(QColor::HexRgb), QStringLiteral("normal"),
+                       {}, {}, true);
     style.linkBrackets = token(QStringLiteral("#999999"), QStringLiteral("normal"));
     style.completedTask = token(QStringLiteral("#999999"),
                                 QStringLiteral("strikethrough"));
@@ -99,13 +149,10 @@ MarkdownStyle MarkdownStyle::defaults()
     return style;
 }
 
-MarkdownStyle MarkdownStyle::load()
+MarkdownStyle MarkdownStyle::load(bool isolatedTestMode)
 {
     MarkdownStyle style = defaults();
-    const QByteArray overridePath = qgetenv("SCRATCHEDITOR_MARKDOWN_STYLE");
-    style.m_filePath = overridePath.isEmpty()
-        ? QCoreApplication::applicationDirPath() + QStringLiteral("/config/markdown-style.json")
-        : QString::fromLocal8Bit(overridePath);
+    style.m_filePath = styleFilePath(isolatedTestMode);
 
     QFile file(style.m_filePath);
     if (!file.open(QIODevice::ReadOnly)) {
@@ -118,6 +165,7 @@ MarkdownStyle MarkdownStyle::load()
     }
 
     const QJsonObject root = document.object();
+    const bool configuredAccent = applyTheme(root, &style);
     applyToken(root, QStringLiteral("baseText"), &style.baseText);
     applyToken(root, QStringLiteral("inlineCode"), &style.inlineCode);
     applyToken(root, QStringLiteral("codeBlock"), &style.codeBlock);
@@ -132,6 +180,12 @@ MarkdownStyle MarkdownStyle::load()
     applyToken(root, QStringLiteral("linkBrackets"), &style.linkBrackets);
     applyToken(root, QStringLiteral("completedTask"), &style.completedTask);
     applyToken(root, QStringLiteral("checkboxBrackets"), &style.checkboxBrackets);
+    if (configuredAccent) {
+        style.link.foreground = style.accentColor;
+    } else if (style.link.foreground.isValid()) {
+        // Treat the former link color as the accent when loading a pre-theme config.
+        style.accentColor = style.link.foreground;
+    }
 
     const QJsonArray headings = root.value(QStringLiteral("headings")).toArray();
     for (const QJsonValue &value : headings) {

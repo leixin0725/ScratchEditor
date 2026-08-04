@@ -99,8 +99,14 @@ int main(int argc, char *argv[])
                  && initial.value(QStringLiteral("editorFontPointSize")).toInt() == 13
                  && initial.value(QStringLiteral("animationsEnabled")).toBool()
                  && initial.value(QStringLiteral("transitionDuration")).toInt() == 120
-                 && initial.value(QStringLiteral("themeBackgroundColor")).toString()
-                    == QStringLiteral("#252525"),
+                  && initial.value(QStringLiteral("themeBackgroundColor")).toString()
+                     == QStringLiteral("#252525")
+                  && initial.value(QStringLiteral("themeAccentColor")).toString()
+                     == QStringLiteral("#85c7c0")
+                  && initial.value(QStringLiteral("themeSelectionColor")).toString()
+                     == QStringLiteral("#85c7c0")
+                  && initial.value(QStringLiteral("selectionDragColor")).toString()
+                     == QStringLiteral("#85c7c0"),
              initial);
     addCheck(checks, details, QStringLiteral("windowInteractionLayout"),
              initial.value(QStringLiteral("cornerResizeEnabled")).toBool()
@@ -197,9 +203,11 @@ int main(int argc, char *argv[])
                  && light.value(QStringLiteral("editorFontPointSize")).toInt() == 15
                  && !light.value(QStringLiteral("animationsEnabled")).toBool()
                  && light.value(QStringLiteral("transitionDuration")).toInt() == 0
-                 && light.value(QStringLiteral("themeBackgroundColor")).toString()
-                    == QStringLiteral("#f7f8fa")
-                 && light.value(QStringLiteral("markdownHighlighting")).toBool(),
+                  && light.value(QStringLiteral("themeBackgroundColor")).toString()
+                     == QStringLiteral("#f7f8fa")
+                  && light.value(QStringLiteral("themeAccentColor")).toString()
+                     == QStringLiteral("#85c7c0")
+                  && light.value(QStringLiteral("markdownHighlighting")).toBool(),
              light);
 
     const QJsonObject invalidTheme = request(

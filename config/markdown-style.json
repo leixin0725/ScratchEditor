@@ -1,4 +1,8 @@
 {
+  "theme": {
+    "accentColor": "#85c7c0",
+    "accentTextColor": "#183331"
+  },
   "baseText": {
     "color": "#C2C0B6",
     "fontStyle": "normal"
@@ -54,7 +58,6 @@
     "fontStyle": "strikethrough"
   },
   "link": {
-    "color": "#85c7c0",
     "fontStyle": "normal",
     "underline": true
   },
