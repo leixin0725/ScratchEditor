@@ -1,5 +1,6 @@
 #include "editorcommandregistry.h"
 #include "appsettings.h"
+#include "cjktextprocessor.h"
 
 #include <QEvent>
 #include <QGuiApplication>
@@ -10,6 +11,7 @@
 #include <QMouseEvent>
 #include <QQuickItem>
 #include <QRegularExpression>
+#include <QSet>
 #include <QStyleHints>
 #include <QTextCursor>
 #include <QTextDocument>
@@ -224,92 +226,6 @@ MarkdownListItem parseMarkdownListItem(const QString &line)
         item.delimiter = match.captured(4).front();
     }
     return item;
-}
-
-bool isInsideFencedCode(const QString &text, int lineStart)
-{
-    static const QRegularExpression fencePattern(
-        QStringLiteral(R"(^[\t ]*(`{3,}|~{3,})[^\n]*$)"));
-    bool inside = false;
-    QChar fenceCharacter;
-    int minimumFenceLength = 0;
-    int scanStart = 0;
-    while (scanStart < lineStart) {
-        int scanEnd = text.indexOf(QLatin1Char('\n'), scanStart);
-        if (scanEnd < 0 || scanEnd >= lineStart) {
-            break;
-        }
-        const QRegularExpressionMatch match = fencePattern.match(
-            text.mid(scanStart, scanEnd - scanStart));
-        if (match.hasMatch()) {
-            const QString run = match.captured(1);
-            if (!inside) {
-                inside = true;
-                fenceCharacter = run.front();
-                minimumFenceLength = run.size();
-            } else if (run.front() == fenceCharacter
-                       && run.size() >= minimumFenceLength) {
-                inside = false;
-            }
-        }
-        scanStart = scanEnd + 1;
-    }
-    return inside;
-}
-
-struct InlineSpan {
-    int start; // index of opening delimiter
-    int end;   // index after closing delimiter
-};
-
-QVector<InlineSpan> getInlineSpansOnLine(const QString &line)
-{
-    QVector<InlineSpan> spans;
-    int i = 0;
-    const int len = line.size();
-    while (i < len) {
-        if (i + 1 < len && line.at(i) == u'$' && line.at(i + 1) == u'$') {
-            i += 2;
-            continue;
-        }
-        if (line.at(i) == u'`') {
-            int runStart = i;
-            while (i < len && line.at(i) == u'`') {
-                ++i;
-            }
-            int runLen = i - runStart;
-            QString closing(runLen, u'`');
-            int closePos = line.indexOf(closing, i);
-            if (closePos >= 0) {
-                spans.append({runStart, closePos + runLen});
-                i = closePos + runLen;
-            }
-            continue;
-        }
-        if (line.at(i) == u'$') {
-            int openPos = i;
-            ++i;
-            int closePos = -1;
-            while (i < len) {
-                if (line.at(i) == u'$') {
-                    if (i + 1 < len && line.at(i + 1) == u'$') {
-                        i += 2;
-                        continue;
-                    }
-                    closePos = i;
-                    break;
-                }
-                ++i;
-            }
-            if (closePos > openPos) {
-                spans.append({openPos, closePos + 1});
-                i = closePos + 1;
-            }
-            continue;
-        }
-        ++i;
-    }
-    return spans;
 }
 
 struct TextReplacement {
@@ -597,148 +513,6 @@ TextRange inferredWordRange(QTextDocument *document, const QString &text, int po
 
 } // namespace
 
-bool EditorCommandRegistry::isInsideBlockFormula(const QString &text, int position)
-{
-    static const QRegularExpression formulaPattern(
-        QStringLiteral(R"(^[\t ]*\$\$[^\n]*$)"));
-    bool inside = false;
-    int scanStart = 0;
-    while (scanStart < position) {
-        int scanEnd = text.indexOf(QLatin1Char('\n'), scanStart);
-        if (scanEnd < 0) {
-            scanEnd = text.size();
-        }
-        if (scanEnd >= position) {
-            break;
-        }
-        const QString line = text.mid(scanStart, scanEnd - scanStart);
-        if (formulaPattern.match(line).hasMatch()) {
-            inside = !inside;
-        }
-        scanStart = scanEnd + 1;
-    }
-    return inside;
-}
-
-bool EditorCommandRegistry::isCJK(QChar ch)
-{
-    const char16_t u = ch.unicode();
-    // CJK Unified Ideographs
-    if (u >= 0x4E00 && u <= 0x9FFF) return true;
-    // CJK Extension A
-    if (u >= 0x3400 && u <= 0x4DBF) return true;
-    // Hiragana
-    if (u >= 0x3040 && u <= 0x309F) return true;
-    // Katakana + Katakana Phonetic Extensions
-    if (u >= 0x30A0 && u <= 0x30FF) return true;
-    if (u >= 0x31F0 && u <= 0x31FF) return true;
-    // Hangul Jamo
-    if (u >= 0x1100 && u <= 0x11FF) return true;
-    // Hangul Compatibility Jamo
-    if (u >= 0x3130 && u <= 0x318F) return true;
-    // Hangul Syllables
-    if (u >= 0xAC00 && u <= 0xD7AF) return true;
-    return false;
-}
-
-bool EditorCommandRegistry::isAsciiAlnum(QChar ch)
-{
-    return (ch >= u'A' && ch <= u'Z')
-        || (ch >= u'a' && ch <= u'z')
-        || (ch >= u'0' && ch <= u'9');
-}
-
-bool EditorCommandRegistry::isSoftSeparator(QChar ch)
-{
-    static const QSet<char16_t> fullwidthSeps = {
-        0xFF0C, 0x3002, 0x3001, 0xFF1F, 0xFF01, 0xFF1A, 0xFF1B,  // ，。、？！：；
-        0x201C, 0x201D, 0x2018, 0x2019,                            // “”‘’
-        0xFF08, 0xFF09, 0x3010, 0x3011, 0x300A, 0x300B,            // （）【】《》
-        0x300C, 0x300D, 0x300E, 0x300F,                            // 「」『』
-    };
-    if (fullwidthSeps.contains(ch.unicode())) return true;
-
-    static const QSet<char16_t> halfwidthSeps = {
-        u',', u'.', u'?', u'!', u':', u';', u'"', u'\'',
-        u'-', u'(', u')', u'[', u']', u'{', u'}',
-    };
-    return halfwidthSeps.contains(ch.unicode());
-}
-
-QString EditorCommandRegistry::formatLineSpacing(const QString &line)
-{
-    if (line.isEmpty()) {
-        return line;
-    }
-
-    const QVector<InlineSpan> spans = getInlineSpansOnLine(line);
-    QSet<int> insertPositions;
-
-    for (int pos = 1; pos < line.size(); ++pos) {
-        bool insideSpan = false;
-        bool isSpanStart = false;
-        bool isSpanEnd = false;
-
-        for (const auto &span : spans) {
-            if (span.start < pos && pos < span.end) {
-                insideSpan = true;
-                break;
-            }
-            if (pos == span.start) {
-                isSpanStart = true;
-            }
-            if (pos == span.end) {
-                isSpanEnd = true;
-            }
-        }
-
-        if (insideSpan) {
-            continue;
-        }
-
-        const QChar left = line.at(pos - 1);
-        const QChar right = line.at(pos);
-
-        if (left == u' ' || right == u' ' || left == u'\n' || right == u'\n') {
-            continue;
-        }
-
-        if (isSpanStart) {
-            if (!isSoftSeparator(left)
-                && (isCJK(left) || isAsciiAlnum(left))) {
-                insertPositions.insert(pos);
-            }
-        } else if (isSpanEnd) {
-            if (!isSoftSeparator(right)
-                && (isCJK(right) || isAsciiAlnum(right))) {
-                insertPositions.insert(pos);
-            }
-        } else {
-            if (!isSoftSeparator(left)
-                && !isSoftSeparator(right)) {
-                if ((isCJK(left) && isAsciiAlnum(right))
-                    || (isAsciiAlnum(left) && isCJK(right))) {
-                    insertPositions.insert(pos);
-                }
-            }
-        }
-    }
-
-    if (insertPositions.isEmpty()) {
-        return line;
-    }
-
-    QString result;
-    result.reserve(line.size() + insertPositions.size());
-    for (int i = 0; i < line.size(); ++i) {
-        if (insertPositions.contains(i)) {
-            result.append(u' ');
-        }
-        result.append(line.at(i));
-    }
-    return result;
-}
-
 EditorCommandRegistry::EditorCommandRegistry(AppSettings *settings, QObject *parent)
     : QObject(parent)
     , m_settings(settings)
@@ -934,6 +708,30 @@ bool EditorCommandRegistry::handleEditorEvent(QEvent *event)
         const auto *keyEvent = static_cast<QKeyEvent *>(event);
         const Qt::KeyboardModifiers modifiers = keyEvent->modifiers();
         const bool shiftPressed = modifiers.testFlag(Qt::ShiftModifier);
+        const bool ctrlZ = modifiers.testFlag(Qt::ControlModifier)
+            && keyEvent->key() == Qt::Key_Z
+            && !shiftPressed
+            && !modifiers.testFlag(Qt::AltModifier)
+            && !modifiers.testFlag(Qt::MetaModifier);
+        if (ctrlZ && m_formatUndoSnapshot) {
+            const QString currentText = m_document->toPlainText();
+            if (currentText == m_formatUndoSnapshot->formattedText) {
+                QMetaObject::invokeMethod(m_editor, "undo");
+                if (m_document->toPlainText() == m_formatUndoSnapshot->originalText) {
+                    const int activeEnd = m_formatUndoSnapshot->cursorPosition
+                            == m_formatUndoSnapshot->selectionEnd
+                        ? m_formatUndoSnapshot->selectionEnd
+                        : m_formatUndoSnapshot->selectionStart;
+                    selectRangeWithActiveEnd(m_formatUndoSnapshot->selectionStart,
+                                             m_formatUndoSnapshot->selectionEnd,
+                                             activeEnd);
+                }
+                m_formatUndoSnapshot.reset();
+                focusEditor();
+                return true;
+            }
+            m_formatUndoSnapshot.reset();
+        }
         const bool tabPressed = keyEvent->key() == Qt::Key_Tab
             || keyEvent->key() == Qt::Key_Backtab;
         const bool plainBackspace = keyEvent->key() == Qt::Key_Backspace
@@ -978,12 +776,30 @@ bool EditorCommandRegistry::handleEditorEvent(QEvent *event)
 
         if (!(modifiers & (Qt::ControlModifier | Qt::AltModifier | Qt::MetaModifier))
             && !keyEvent->text().isEmpty()) {
-            const bool handled = handleTypedText(keyEvent->text());
-            QTimer::singleShot(0, this, [this] {
-                const int pos = m_editor->property("cursorPosition").toInt();
-                autoSpaceAroundRange(qMax(0, pos - 1), pos + 1);
-            });
-            return handled;
+            const int start = m_editor->property("selectionStart").toInt();
+            const int end = m_editor->property("selectionEnd").toInt();
+            const QString beforeText = m_document->toPlainText();
+            const QString text = keyEvent->text();
+            const TypedEditResult result = handleTypedText(text);
+            if (!result.consumed) {
+                QTimer::singleShot(0, this,
+                                   [this, beforeText, start, end, text] {
+                    if (!m_editor || !m_document) {
+                        return;
+                    }
+                    QString expected = beforeText;
+                    expected.replace(start, end - start, text);
+                    if (m_document->toPlainText() == expected) {
+                        applyAutoSpacing({start, start + static_cast<int>(text.size())},
+                                         text.size() > 1);
+                    }
+                });
+                return false;
+            }
+            if (result.textChanged && result.runAutoSpacing) {
+                applyAutoSpacing(result.footprint);
+            }
+            return true;
         }
         return false;
     }
@@ -998,25 +814,37 @@ bool EditorCommandRegistry::handleEditorEvent(QEvent *event)
             || committedText == QStringLiteral("`")
             || pairForOpening(committedText)
             || isClosingDelimiter(committedText);
-        if (!relevant) {
-            const int start = m_editor->property("selectionStart").toInt();
-            const int commitLen = committedText.size();
-            QTimer::singleShot(0, this, [this, start, commitLen] {
-                autoSpaceAroundRange(qMax(0, start - 1), start + commitLen + 1);
-            });
-            return false;
-        }
-
         const int start = m_editor->property("selectionStart").toInt();
         const int end = m_editor->property("selectionEnd").toInt();
         const QString beforeText = m_document->toPlainText();
         const QString selection = selectedText();
+        if (!relevant) {
+            QTimer::singleShot(0, this,
+                               [this, beforeText, start, end, committedText] {
+                if (!m_editor || !m_document) {
+                    return;
+                }
+                QString expected = beforeText;
+                expected.replace(start, end - start, committedText);
+                if (m_document->toPlainText() == expected) {
+                    applyAutoSpacing(
+                        {start, start + static_cast<int>(committedText.size())},
+                        committedText.size() > 1);
+                }
+            });
+            return false;
+        }
+
         QTimer::singleShot(0, this,
                            [this, committedText, beforeText, selection, start, end] {
-            completeInputMethodCommit(committedText, beforeText, selection, start, end);
-            const int pos = m_editor->property("cursorPosition").toInt();
-            const int commitLen = committedText.size();
-            autoSpaceAroundRange(qMax(0, pos - commitLen - 1), pos + 1);
+            if (!m_editor || !m_document) {
+                return;
+            }
+            const auto footprint = completeInputMethodCommit(
+                committedText, beforeText, selection, start, end);
+            if (footprint) {
+                applyAutoSpacing(*footprint);
+            }
         });
     }
     return false;
@@ -1711,13 +1539,21 @@ bool EditorCommandRegistry::toggleCurrentCheckbox()
     return true;
 }
 
-bool EditorCommandRegistry::handleTypedText(const QString &text)
+EditorCommandRegistry::TypedEditResult EditorCommandRegistry::handleTypedText(const QString &text)
 {
+    TypedEditResult result;
     if (text == QStringLiteral("```")) {
-        return insertFenceBlock();
+        if (const auto footprint = insertFenceBlock()) {
+            result.consumed = true;
+            result.textChanged = true;
+            result.footprint = *footprint;
+        } else {
+            result.consumed = true;
+        }
+        return result;
     }
     if (text.size() != 1) {
-        return false;
+        return result;
     }
 
     const QString documentText = m_document->toPlainText();
@@ -1726,7 +1562,8 @@ bool EditorCommandRegistry::handleTypedText(const QString &text)
     const bool hasSelection = start != end;
 
     if (text == QStringLiteral("-") && !hasSelection) {
-        const int lineStart = documentText.lastIndexOf(QLatin1Char('\n'), qMax(0, start - 1)) + 1;
+        const int lineStart =
+            documentText.lastIndexOf(QLatin1Char('\n'), qMax(0, start - 1)) + 1;
         int lineEnd = documentText.indexOf(QLatin1Char('\n'), start);
         if (lineEnd < 0) {
             lineEnd = documentText.size();
@@ -1737,7 +1574,9 @@ bool EditorCommandRegistry::handleTypedText(const QString &text)
             cursor.insertText(QStringLiteral("- "));
             m_editor->setProperty("cursorPosition", start + 2);
             focusEditor();
-            return true;
+            result.consumed = true;
+            result.textChanged = true;
+            return result;
         }
     }
 
@@ -1749,7 +1588,9 @@ bool EditorCommandRegistry::handleTypedText(const QString &text)
             cursor.setPosition(start + 1, QTextCursor::KeepAnchor);
             cursor.insertText(QStringLiteral("```\n```"));
             m_editor->setProperty("cursorPosition", start + 1);
-            return true;
+            result.consumed = true;
+            result.textChanged = true;
+            return result;
         }
         if (start > 0 && start < documentText.size()
             && documentText.at(start - 1) == QLatin1Char('`')
@@ -1758,23 +1599,45 @@ bool EditorCommandRegistry::handleTypedText(const QString &text)
             cursor.setPosition(start);
             cursor.insertText(QStringLiteral("`"));
             m_editor->setProperty("cursorPosition", start + 1);
-            return true;
+            result.consumed = true;
+            result.textChanged = true;
+            return result;
         }
     }
 
+    // 保护区内短路：仅对本次 CJK 自动改写候选做全文分析。
+    const bool conversionCandidate = !hasSelection
+        && (text == QStringLiteral(",")
+            || text == QStringLiteral(".")
+            || text == QStringLiteral("。")
+            || text == QStringLiteral(":")
+            || text == QStringLiteral("?")
+            || text == QStringLiteral("!")
+            || text == QStringLiteral(";")
+            || text == QStringLiteral("(")
+            || text == QStringLiteral("[")
+            || text == QStringLiteral("\"")
+            || text == QStringLiteral("'")
+            || text == QStringLiteral(")")
+            || text == QStringLiteral("-"));
+    const CjkText::DocumentAnalysis analysis = conversionCandidate
+        ? CjkText::analyzeDocument(documentText)
+        : CjkText::DocumentAnalysis{};
+    const bool protectedPosition =
+        conversionCandidate && CjkText::isPositionProtected(analysis, start);
+
     // --- CJK Punctuation, Ellipsis & Em-dash Conversions ---
-    if (!hasSelection) {
+    if (!hasSelection && !protectedPosition) {
         const QChar ch = text.at(0);
 
-        // 1. Ellipsis: ..., 。。。, 。。., .。. → ……
+        // 1. Ellipsis: 只转换 ...、。。。、。。.；其他混合形式保持原样。
         if (ch == u'.' || ch == u'\u3002') {
             if (start >= 2) {
                 const QString prev2 = documentText.mid(start - 2, 2);
                 const bool isEllipsis =
-                    prev2 == QStringLiteral("..")
-                    || prev2 == QStringLiteral("\u3002\u3002")
-                    || prev2 == QStringLiteral("\u3002.")
-                    || prev2 == QStringLiteral(".\u3002");
+                    (ch == u'.' && prev2 == QStringLiteral(".."))
+                    || (ch == u'.' && prev2 == QStringLiteral("\u3002\u3002"))
+                    || (ch == u'\u3002' && prev2 == QStringLiteral("\u3002\u3002"));
                 if (isEllipsis) {
                     QTextCursor cursor(m_document);
                     cursor.setPosition(start - 2);
@@ -1784,7 +1647,9 @@ bool EditorCommandRegistry::handleTypedText(const QString &text)
                     cursor.endEditBlock();
                     m_editor->setProperty("cursorPosition", start);
                     focusEditor();
-                    return true;
+                    result.consumed = true;
+                    result.textChanged = true;
+                    return result;
                 }
             }
         }
@@ -1793,7 +1658,7 @@ bool EditorCommandRegistry::handleTypedText(const QString &text)
         if (ch == u'-' && start >= 2) {
             if (documentText.at(start - 1) == u'-') {
                 const QChar beforeDash = documentText.at(start - 2);
-                if (isCJK(beforeDash)) {
+                if (CjkText::isCjk(beforeDash)) {
                     QTextCursor cursor(m_document);
                     cursor.setPosition(start - 1);
                     cursor.setPosition(start, QTextCursor::KeepAnchor);
@@ -1802,15 +1667,34 @@ bool EditorCommandRegistry::handleTypedText(const QString &text)
                     cursor.endEditBlock();
                     m_editor->setProperty("cursorPosition", start + 1);
                     focusEditor();
-                    return true;
+                    result.consumed = true;
+                    result.textChanged = true;
+                    return result;
                 }
             }
         }
 
         // 3. ASCII Punctuation after CJK → Fullwidth
-        if (start > 0 && isCJK(documentText.at(start - 1))) {
-            if (ch == u'(') {
-                return insertPair(QStringLiteral("（"), QStringLiteral("）"));
+        if (start > 0 && CjkText::isCjk(documentText.at(start - 1))) {
+            if (ch == u'(' || ch == u'[' || ch == u'"' || ch == u'\'') {
+                static const QHash<char16_t, std::pair<QString, QString>> cjkPairs = {
+                    {u'(', {QStringLiteral("（"), QStringLiteral("）")}},
+                    {u'[', {QStringLiteral("【"), QStringLiteral("】")}},
+                    {u'"', {QStringLiteral("“"), QStringLiteral("”")}},
+                    {u'\'', {QStringLiteral("‘"), QStringLiteral("’")}},
+                };
+                auto pairIt = cjkPairs.find(ch.unicode());
+                if (pairIt != cjkPairs.end()) {
+                    if (const auto footprint =
+                            insertPair(pairIt->first, pairIt->second)) {
+                        result.consumed = true;
+                        result.textChanged = true;
+                        result.footprint = *footprint;
+                    } else {
+                        result.consumed = true;
+                    }
+                    return result;
+                }
             }
             static const QHash<char16_t, QString> asciiToFull = {
                 {u',', QStringLiteral("，")},
@@ -1826,14 +1710,17 @@ bool EditorCommandRegistry::handleTypedText(const QString &text)
                 if (ch == u')' && (documentText.mid(start, 1) == QStringLiteral("）")
                                   || documentText.mid(start, 1) == QStringLiteral(")"))) {
                     m_editor->setProperty("cursorPosition", start + 1);
-                    return true;
+                    result.consumed = true;
+                    return result;
                 }
                 QTextCursor cursor(m_document);
                 cursor.setPosition(start);
                 cursor.insertText(it.value());
                 m_editor->setProperty("cursorPosition", start + 1);
                 focusEditor();
-                return true;
+                result.consumed = true;
+                result.textChanged = true;
+                return result;
             }
         }
 
@@ -1841,14 +1728,18 @@ bool EditorCommandRegistry::handleTypedText(const QString &text)
         if (start > 0) {
             const QChar prev = documentText.at(start - 1);
             if ((prev == u'\uFF0C' && ch == u',')
-                || (prev == u'\u3002' && ch == u'.')) {
-                const QString full = (ch == u',') ? QStringLiteral("，") : QStringLiteral("。");
+                || (prev == u'\u3002' && ch == u'.'
+                    && (start < 2 || documentText.at(start - 2) != u'.'))) {
+                const QString full =
+                    (ch == u',') ? QStringLiteral("，") : QStringLiteral("。");
                 QTextCursor cursor(m_document);
                 cursor.setPosition(start);
                 cursor.insertText(full);
                 m_editor->setProperty("cursorPosition", start + 1);
                 focusEditor();
-                return true;
+                result.consumed = true;
+                result.textChanged = true;
+                return result;
             }
         }
     }
@@ -1857,65 +1748,47 @@ bool EditorCommandRegistry::handleTypedText(const QString &text)
         if (!hasSelection && pair->opening == pair->closing
             && documentText.mid(start, pair->closing.size()) == pair->closing) {
             m_editor->setProperty("cursorPosition", start + pair->closing.size());
-            return true;
+            result.consumed = true;
+            return result;
         }
 
-        if (hasSelection) {
-            const QString selection = documentText.mid(start, end - start);
-            bool selectionHasCJK = false;
-            for (const QChar &c : selection) {
-                if (isCJK(c)) {
-                    selectionHasCJK = true;
-                    break;
-                }
-            }
-            if (selectionHasCJK) {
-                static const QHash<QString, std::pair<QString, QString>> halfToFull = {
-                    {QStringLiteral("("),  {QStringLiteral("\uFF08"), QStringLiteral("\uFF09")}},
-                    {QStringLiteral("["),  {QStringLiteral("\u3010"), QStringLiteral("\u3011")}},
-                    {QStringLiteral("\""), {QStringLiteral("\u201C"), QStringLiteral("\u201D")}},
-                    {QStringLiteral("'"),  {QStringLiteral("\u2018"), QStringLiteral("\u2019")}},
-                };
-                auto it = halfToFull.find(pair->opening);
-                if (it != halfToFull.end()) {
-                    return insertPair(it.value().first, it.value().second);
-                }
-            }
+        const QString selection = documentText.mid(start, end - start);
+        const CjkText::DocumentAnalysis selectionAnalysis = hasSelection
+            ? CjkText::analyzeDocument(documentText)
+            : CjkText::DocumentAnalysis{};
+        const bool selectionProtected = hasSelection
+            && (CjkText::isPositionProtected(selectionAnalysis, start)
+                || CjkText::isPositionProtected(selectionAnalysis, end));
+        const auto resolvedPair = selectionProtected
+            ? std::pair<QString, QString>{pair->opening, pair->closing}
+            : CjkText::resolveSelectionPair(pair->opening, pair->closing, selection);
+        if (const auto footprint = insertPair(resolvedPair.first, resolvedPair.second)) {
+            result.consumed = true;
+            result.textChanged = true;
+            result.runAutoSpacing = true;
+            result.footprint = *footprint;
+        } else {
+            result.consumed = true;
         }
-
-        return insertPair(pair->opening, pair->closing);
+        return result;
     }
 
     if (!hasSelection && isClosingDelimiter(text)
         && documentText.mid(start, text.size()) == text) {
         m_editor->setProperty("cursorPosition", start + text.size());
-        return true;
+        result.consumed = true;
+        return result;
     }
 
-    if (!hasSelection && text.size() == 1 && start > 0) {
-        const QChar prev = documentText.at(start - 1);
-        const QChar ch = text.at(0);
-        if (prev != u' ' && prev != u'\n' && ch != u' ' && ch != u'\n'
-            && !isSoftSeparator(prev) && !isSoftSeparator(ch)) {
-            const int lineStart = documentText.lastIndexOf(QLatin1Char('\n'), qMax(0, start - 1)) + 1;
-            if (!isInsideFencedCode(documentText, lineStart) && !isInsideBlockFormula(documentText, lineStart)) {
-                if ((isCJK(prev) && isAsciiAlnum(ch)) || (isAsciiAlnum(prev) && isCJK(ch))) {
-                    QTextCursor cursor(m_document);
-                    cursor.setPosition(start);
-                    cursor.insertText(QStringLiteral(" ") + text);
-                    m_editor->setProperty("cursorPosition", start + 2);
-                    focusEditor();
-                    return true;
-                }
-            }
-        }
-    }
-
-    return false;
+    return result;
 }
 
-bool EditorCommandRegistry::insertPair(const QString &opening, const QString &closing)
+std::optional<EditorCommandRegistry::EditFootprint> EditorCommandRegistry::insertPair(
+    const QString &opening, const QString &closing)
 {
+    if (!m_editor || !m_document) {
+        return std::nullopt;
+    }
     const int start = m_editor->property("selectionStart").toInt();
     const int end = m_editor->property("selectionEnd").toInt();
     QTextCursor cursor(m_document);
@@ -1932,11 +1805,15 @@ bool EditorCommandRegistry::insertPair(const QString &opening, const QString &cl
         selectRange(start + opening.size(), start + opening.size() + selection.size());
     }
     focusEditor();
-    return true;
+    return EditFootprint{start, start + static_cast<int>(
+        opening.size() + selection.size() + closing.size())};
 }
 
-bool EditorCommandRegistry::insertFenceBlock()
+std::optional<EditorCommandRegistry::EditFootprint> EditorCommandRegistry::insertFenceBlock()
 {
+    if (!m_editor || !m_document) {
+        return std::nullopt;
+    }
     const int start = m_editor->property("selectionStart").toInt();
     const int end = m_editor->property("selectionEnd").toInt();
     QTextCursor cursor(m_document);
@@ -1955,7 +1832,8 @@ bool EditorCommandRegistry::insertFenceBlock()
         selectRange(start + opening.size(), start + opening.size() + selection.size());
     }
     focusEditor();
-    return true;
+    return EditFootprint{start, start + static_cast<int>(
+        opening.size() + selection.size() + closing.size())};
 }
 
 bool EditorCommandRegistry::handleSpecialBackspace()
@@ -2019,7 +1897,7 @@ bool EditorCommandRegistry::handleSpecialBackspace()
          ++position) {
         exactHeadingPrefix = text.at(position) == QLatin1Char('#');
     }
-    if (exactHeadingPrefix && !isInsideFencedCode(text, lineStart)) {
+    if (exactHeadingPrefix && !isInsideFencedBlock(lineStart)) {
         QTextCursor cursor(m_document);
         cursor.setPosition(lineStart);
         cursor.setPosition(start, QTextCursor::KeepAnchor);
@@ -2102,7 +1980,7 @@ bool EditorCommandRegistry::handleListEnter()
     if (lineEnd < 0) {
         lineEnd = text.size();
     }
-    if (isInsideFencedCode(text, lineStart)) {
+    if (isInsideFencedBlock(lineStart)) {
         return false;
     }
 
@@ -2290,18 +2168,19 @@ bool EditorCommandRegistry::changeIndent(bool outdent)
     return true;
 }
 
-void EditorCommandRegistry::completeInputMethodCommit(const QString &committedText,
-                                                       const QString &beforeText,
-                                                       const QString &selection,
-                                                       int selectionStart, int selectionEnd)
+std::optional<EditorCommandRegistry::EditFootprint>
+EditorCommandRegistry::completeInputMethodCommit(const QString &committedText,
+                                                const QString &beforeText,
+                                                const QString &selection,
+                                                int selectionStart, int selectionEnd)
 {
     if (!m_editor || !m_document) {
-        return;
+        return std::nullopt;
     }
     QString expectedText = beforeText;
     expectedText.replace(selectionStart, selectionEnd - selectionStart, committedText);
     if (m_document->toPlainText() != expectedText) {
-        return;
+        return std::nullopt;
     }
 
     const DelimiterPair *openingPair = pairForOpening(committedText);
@@ -2315,7 +2194,7 @@ void EditorCommandRegistry::completeInputMethodCommit(const QString &committedTe
         cursor.setPosition(selectionStart + committedText.size(), QTextCursor::KeepAnchor);
         cursor.removeSelectedText();
         m_editor->setProperty("cursorPosition", selectionStart + committedText.size());
-        return;
+        return std::nullopt;
     }
 
     QString replacement;
@@ -2324,10 +2203,20 @@ void EditorCommandRegistry::completeInputMethodCommit(const QString &committedTe
         replacement = QStringLiteral("```") + selection + QStringLiteral("\n```");
         contentOffset = 3;
     } else if (openingPair) {
-        replacement = openingPair->opening + selection + openingPair->closing;
-        contentOffset = openingPair->opening.size();
+        const CjkText::DocumentAnalysis analysis =
+            CjkText::analyzeDocument(beforeText);
+        const bool selectionProtected =
+            CjkText::isPositionProtected(analysis, selectionStart)
+            || CjkText::isPositionProtected(analysis, selectionEnd);
+        const auto resolvedPair = selectionProtected
+            ? std::pair<QString, QString>{openingPair->opening,
+                                          openingPair->closing}
+            : CjkText::resolveSelectionPair(openingPair->opening,
+                                            openingPair->closing, selection);
+        replacement = resolvedPair.first + selection + resolvedPair.second;
+        contentOffset = resolvedPair.first.size();
     } else {
-        return;
+        return std::nullopt;
     }
 
     QTextCursor cursor(m_document);
@@ -2342,12 +2231,28 @@ void EditorCommandRegistry::completeInputMethodCommit(const QString &committedTe
         selectRange(selectionStart + contentOffset,
                     selectionStart + contentOffset + selection.size());
     }
+    return EditFootprint{selectionStart,
+                         selectionStart + static_cast<int>(replacement.size())};
 }
 
 void EditorCommandRegistry::selectRange(int start, int end)
 {
     if (m_editor) {
         QMetaObject::invokeMethod(m_editor, "select", Q_ARG(int, start), Q_ARG(int, end));
+    }
+}
+
+void EditorCommandRegistry::selectRangeWithActiveEnd(int start, int end, int activeEnd)
+{
+    if (!m_editor) {
+        return;
+    }
+    if (activeEnd <= start) {
+        // 反向选区：先让光标落在 end，再把 active end 移到 start。
+        m_editor->setProperty("cursorPosition", end);
+        QMetaObject::invokeMethod(m_editor, "moveCursorSelection", Q_ARG(int, start));
+    } else {
+        selectRange(start, end);
     }
 }
 
@@ -2374,193 +2279,158 @@ bool EditorCommandRegistry::formatSpacing()
     if (!m_editor || !m_document) {
         return false;
     }
+    const QString documentText = m_document->toPlainText();
+    const CjkText::DocumentAnalysis analysis = CjkText::analyzeDocument(documentText);
     const int start = m_editor->property("selectionStart").toInt();
     const int end = m_editor->property("selectionEnd").toInt();
 
-    if (start != end) {
-        formatSpacingInRange(start, end);
-    } else {
-        const QString text = m_document->toPlainText();
-        const int lineStart = text.lastIndexOf(QLatin1Char('\n'), qMax(0, start - 1)) + 1;
-        int lineEnd = text.indexOf(QLatin1Char('\n'), start);
+    int rangeStart = start;
+    int rangeEnd = end;
+    if (start == end) {
+        rangeStart = documentText.lastIndexOf(
+            QLatin1Char('\n'), qMax(0, start - 1)) + 1;
+        int lineEnd = documentText.indexOf(QLatin1Char('\n'), start);
         if (lineEnd < 0) {
-            lineEnd = text.size();
+            lineEnd = documentText.size();
         }
-        formatSpacingInRange(lineStart, lineEnd);
+        rangeEnd = lineEnd;
     }
+    if (rangeStart < 0 || rangeEnd > documentText.size() || rangeStart >= rangeEnd) {
+        focusEditor();
+        return true;
+    }
+
+    const QVector<int> insertions = CjkText::collectSpacingInsertions(
+        documentText,
+        CjkText::BoundaryRange{rangeStart + 1, rangeEnd - 1},
+        analysis,
+        /*allowPendingDelimiterSpacing=*/false);
+    if (insertions.isEmpty()) {
+        focusEditor();
+        return true;
+    }
+
+    const int cursorPosition = m_editor->property("cursorPosition").toInt();
+    QTextCursor editCursor(m_document);
+    if (start != end) {
+        if (cursorPosition == end) {
+            editCursor.setPosition(start);
+            editCursor.setPosition(end, QTextCursor::KeepAnchor);
+        } else {
+            editCursor.setPosition(end);
+            editCursor.setPosition(start, QTextCursor::KeepAnchor);
+        }
+    } else {
+        editCursor.setPosition(cursorPosition);
+    }
+    editCursor.beginEditBlock();
+    for (auto it = insertions.crbegin(); it != insertions.crend(); ++it) {
+        QTextCursor insertionCursor(m_document);
+        insertionCursor.setPosition(*it);
+        insertionCursor.insertText(QStringLiteral(" "));
+    }
+    editCursor.endEditBlock();
+    if (start != end) {
+        m_formatUndoSnapshot = FormatUndoSnapshot{
+            documentText, m_document->toPlainText(), start, end, cursorPosition};
+    }
+
+    const int newSelectionStart =
+        CjkText::positionAfterInsertions(start, insertions, false);
+    const int newSelectionEnd =
+        CjkText::positionAfterInsertions(end, insertions, true);
+    if (start != end) {
+        selectRangeWithActiveEnd(newSelectionStart, newSelectionEnd,
+                                 cursorPosition == end ? newSelectionEnd
+                                                       : newSelectionStart);
+    } else {
+        const int newCursor =
+            CjkText::positionAfterInsertions(cursorPosition, insertions, true);
+        m_editor->setProperty("cursorPosition", newCursor);
+    }
+    focusEditor();
     return true;
 }
 
-void EditorCommandRegistry::formatSpacingInRange(int rangeStart, int rangeEnd)
+void EditorCommandRegistry::applyAutoSpacing(EditFootprint footprint,
+                                             bool includeInternalBoundaries)
 {
-    if (!m_document) {
-        return;
-    }
-
-    const QString fullText = m_document->toPlainText();
-    if (rangeStart < 0 || rangeEnd > fullText.size() || rangeStart >= rangeEnd) {
-        return;
-    }
-
-    struct LineReplacement {
-        int start;
-        int end;
-        QString replacement;
-    };
-    QVector<LineReplacement> replacements;
-
-    static const QRegularExpression fenceRegex(QStringLiteral(R"(^[\t ]*(`{3,}|~{3,})[^\n]*$)"));
-    static const QRegularExpression blockFormulaRegex(QStringLiteral(R"(^[\t ]*\$\$[^\n]*$)"));
-
-    bool insideFencedCode = false;
-    QChar activeFenceChar;
-    int activeFenceLen = 0;
-    bool insideBlockFormula = false;
-
-    int scanPos = 0;
-    const int docSize = fullText.size();
-
-    while (scanPos <= docSize) {
-        int lineEnd = fullText.indexOf(QLatin1Char('\n'), scanPos);
-        if (lineEnd < 0) {
-            lineEnd = docSize;
-        }
-
-        const int lineStart = scanPos;
-        const QString lineText = fullText.mid(lineStart, lineEnd - lineStart);
-
-        bool isLineProtected = false;
-
-        if (insideFencedCode) {
-            isLineProtected = true;
-            const QRegularExpressionMatch match = fenceRegex.match(lineText);
-            if (match.hasMatch()) {
-                const QString run = match.captured(1);
-                if (run.front() == activeFenceChar && run.size() >= activeFenceLen) {
-                    insideFencedCode = false;
-                }
-            }
-        } else if (insideBlockFormula) {
-            isLineProtected = true;
-            if (blockFormulaRegex.match(lineText).hasMatch()) {
-                insideBlockFormula = false;
-            }
-        } else {
-            const QRegularExpressionMatch fenceMatch = fenceRegex.match(lineText);
-            if (fenceMatch.hasMatch()) {
-                insideFencedCode = true;
-                const QString run = fenceMatch.captured(1);
-                activeFenceChar = run.front();
-                activeFenceLen = run.size();
-                isLineProtected = true;
-            } else if (blockFormulaRegex.match(lineText).hasMatch()) {
-                insideBlockFormula = true;
-                isLineProtected = true;
-            }
-        }
-
-        const int effectiveStart = qMax(lineStart, rangeStart);
-        const int effectiveEnd = qMin(lineEnd, rangeEnd);
-
-        if (!isLineProtected && effectiveStart < effectiveEnd) {
-            const QString targetSegment = fullText.mid(effectiveStart, effectiveEnd - effectiveStart);
-            const QString formattedSegment = formatLineSpacing(targetSegment);
-            if (formattedSegment != targetSegment) {
-                replacements.append({effectiveStart, effectiveEnd, formattedSegment});
-            }
-        }
-
-        if (lineEnd == docSize) {
-            break;
-        }
-        scanPos = lineEnd + 1;
-    }
-
-    if (replacements.isEmpty()) {
-        return;
-    }
-
-    QTextCursor editCursor(m_document);
-    editCursor.beginEditBlock();
-
-    for (int i = replacements.size() - 1; i >= 0; --i) {
-        const auto &rep = replacements.at(i);
-        editCursor.setPosition(rep.start);
-        editCursor.setPosition(rep.end, QTextCursor::KeepAnchor);
-        editCursor.insertText(rep.replacement);
-    }
-
-    editCursor.endEditBlock();
-    focusEditor();
-}
-
-void EditorCommandRegistry::autoSpaceAroundCursor(int cursorPosition)
-{
-    autoSpaceAroundRange(qMax(0, cursorPosition - 1), cursorPosition + 1);
-}
-
-void EditorCommandRegistry::autoSpaceAroundRange(int rangeStart, int rangeEnd)
-{
-    if (!m_document || !m_editor) {
+    if (!m_editor || !m_document || footprint.start > footprint.end) {
         return;
     }
     const QString text = m_document->toPlainText();
-    if (text.isEmpty() || rangeStart > rangeEnd) {
-        return;
-    }
-
-    const int docLen = text.size();
-    int cursorPosition = m_editor->property("cursorPosition").toInt();
-
-    const int checkStart = qMax(1, rangeStart);
-    const int checkEnd = qMin(docLen - 1, rangeEnd);
-
-    int shift = 0;
-    QTextCursor editCursor(m_document);
-    editCursor.beginEditBlock();
-
-    for (int pos = checkStart; pos <= checkEnd; ++pos) {
-        const int actualPos = pos + shift;
-        const QString currentText = m_document->toPlainText();
-        if (actualPos <= 0 || actualPos >= currentText.size()) {
-            continue;
-        }
-
-        const int lineStart = currentText.lastIndexOf(QLatin1Char('\n'), qMax(0, actualPos - 1)) + 1;
-        if (isInsideFencedCode(currentText, lineStart) || isInsideBlockFormula(currentText, lineStart)) {
-            continue;
-        }
-
-        const QChar left = currentText.at(actualPos - 1);
-        const QChar right = currentText.at(actualPos);
-
-        if (left == u' ' || right == u' ' || left == u'\n' || right == u'\n') {
-            continue;
-        }
-        if (isSoftSeparator(left) || isSoftSeparator(right)) {
-            continue;
-        }
-
-        bool needSpace = false;
-        if ((isCJK(left) && isAsciiAlnum(right))
-            || (isAsciiAlnum(left) && isCJK(right))) {
-            needSpace = true;
-        }
-
-        if (needSpace) {
-            QTextCursor ins(m_document);
-            ins.setPosition(actualPos);
-            ins.insertText(QStringLiteral(" "));
-            shift += 1;
-            if (actualPos <= cursorPosition) {
-                cursorPosition += 1;
+    const CjkText::DocumentAnalysis analysis = CjkText::analyzeDocument(text);
+    int rangeFirst = footprint.start;
+    int rangeLast = footprint.end;
+    QSet<int> allowedBoundaries;
+    if (!includeInternalBoundaries) {
+        allowedBoundaries.insert(footprint.start);
+        allowedBoundaries.insert(footprint.end);
+        for (const CjkText::ProtectedSpan &span : analysis.inlineSpans) {
+            if (span.outerStart <= footprint.end && span.outerEnd >= footprint.start) {
+                rangeFirst = qMin(rangeFirst, span.outerStart);
+                rangeLast = qMax(rangeLast, span.outerEnd);
+                allowedBoundaries.insert(span.outerStart);
+                allowedBoundaries.insert(span.outerEnd);
             }
         }
     }
+    QVector<int> insertions = CjkText::collectSpacingInsertions(
+        text,
+        CjkText::BoundaryRange{rangeFirst, rangeLast},
+        analysis);
+    if (!includeInternalBoundaries) {
+        insertions.erase(
+            std::remove_if(insertions.begin(), insertions.end(),
+                           [&allowedBoundaries](int position) {
+                               return !allowedBoundaries.contains(position);
+                           }),
+            insertions.end());
+    }
+    if (insertions.isEmpty()) {
+        return;
+    }
 
+    const int cursorPosition = m_editor->property("cursorPosition").toInt();
+    const int selectionStart = m_editor->property("selectionStart").toInt();
+    const int selectionEnd = m_editor->property("selectionEnd").toInt();
+    QTextCursor editCursor(m_document);
+    editCursor.beginEditBlock();
+    for (auto it = insertions.crbegin(); it != insertions.crend(); ++it) {
+        QTextCursor insertionCursor(m_document);
+        insertionCursor.setPosition(*it);
+        insertionCursor.insertText(QStringLiteral(" "));
+    }
     editCursor.endEditBlock();
-    if (shift > 0) {
-        m_editor->setProperty("cursorPosition", cursorPosition);
+
+    const int newCursor =
+        CjkText::positionAfterInsertions(cursorPosition, insertions, true);
+    const int newSelectionStart =
+        CjkText::positionAfterInsertions(selectionStart, insertions, false);
+    const int newSelectionEnd =
+        CjkText::positionAfterInsertions(selectionEnd, insertions, true);
+    if (selectionStart != selectionEnd) {
+        selectRangeWithActiveEnd(newSelectionStart, newSelectionEnd,
+                                 cursorPosition == selectionEnd ? newSelectionEnd
+                                                                : newSelectionStart);
+    } else {
+        m_editor->setProperty("cursorPosition", newCursor);
     }
     focusEditor();
+}
+
+bool EditorCommandRegistry::isInsideFencedBlock(int position) const
+{
+    if (!m_document) {
+        return false;
+    }
+    const QString text = m_document->toPlainText();
+    const CjkText::DocumentAnalysis analysis = CjkText::analyzeDocument(text);
+    for (const CjkText::ProtectedSpan &span : analysis.blockSpans) {
+        if (span.kind == CjkText::ProtectedKind::FencedCode
+            && span.outerStart < position && position < span.outerEnd) {
+            return true;
+        }
+    }
+    return false;
 }

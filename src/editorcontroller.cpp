@@ -689,14 +689,31 @@ void EditorController::dispatchCommand(QLocalSocket *socket, const QJsonObject &
         const QString text = request.value(QStringLiteral("text")).toString();
         m_editor->setProperty("text", text);
         m_editor->setProperty("cursorPosition", text.size());
+        if (auto *quickDocument = qvariant_cast<QQuickTextDocument *>(
+                m_editor->property("textDocument"))) {
+            quickDocument->textDocument()->clearUndoRedoStacks();
+        }
         QJsonObject response = statusObject();
         response.insert(QStringLiteral("command"), command);
         sendResponse(socket, response, startedNs, requestId);
     } else if (command == QStringLiteral("testSetSelection")) {
         const int start = request.value(QStringLiteral("start")).toInt();
         const int end = request.value(QStringLiteral("end")).toInt();
-        const bool invoked = QMetaObject::invokeMethod(m_editor, "select",
-                                                       Q_ARG(int, start), Q_ARG(int, end));
+        const bool hasCursor = request.contains(QStringLiteral("cursor"));
+        const int cursor = request.value(QStringLiteral("cursor")).toInt();
+        bool invoked = false;
+        if (hasCursor && cursor < end) {
+            // 反向选区：先让光标落在 end，再移动 active end 到 start。
+            m_editor->setProperty("cursorPosition", end);
+            invoked = QMetaObject::invokeMethod(m_editor, "moveCursorSelection",
+                                                Q_ARG(int, start));
+        } else {
+            invoked = QMetaObject::invokeMethod(m_editor, "select",
+                                                Q_ARG(int, start), Q_ARG(int, end));
+            if (hasCursor && cursor != end) {
+                m_editor->setProperty("cursorPosition", cursor);
+            }
+        }
         QJsonObject response = statusObject();
         response.insert(QStringLiteral("command"), command);
         response.insert(QStringLiteral("invoked"), invoked);
@@ -763,10 +780,18 @@ void EditorController::dispatchCommand(QLocalSocket *socket, const QJsonObject &
         response.insert(QStringLiteral("invoked"), invoked);
         response.insert(QStringLiteral("text"), m_editor->property("text").toString());
         sendResponse(socket, response, startedNs, requestId);
+    } else if (command == QStringLiteral("testRedo")) {
+        const bool invoked = QMetaObject::invokeMethod(m_editor, "redo");
+        QJsonObject response = statusObject();
+        response.insert(QStringLiteral("command"), command);
+        response.insert(QStringLiteral("invoked"), invoked);
+        response.insert(QStringLiteral("text"), m_editor->property("text").toString());
+        sendResponse(socket, response, startedNs, requestId);
     } else if (command == QStringLiteral("testKeyPress")) {
         const QString text = request.value(QStringLiteral("text")).toString();
         const QString keyName = request.value(QStringLiteral("key")).toString();
         const bool shift = request.value(QStringLiteral("shift")).toBool();
+        const QString modifierText = request.value(QStringLiteral("modifiers")).toString();
         int key = Qt::Key_unknown;
         if (keyName == QStringLiteral("Tab")) {
             key = shift ? Qt::Key_Backtab : Qt::Key_Tab;
@@ -778,11 +803,26 @@ void EditorController::dispatchCommand(QLocalSocket *socket, const QJsonObject &
             key = Qt::Key_Backspace;
         } else if (keyName == QStringLiteral("Enter")) {
             key = Qt::Key_Return;
+        } else if (keyName.size() == 1) {
+            key = keyName.front().unicode();
         } else if (!text.isEmpty()) {
             key = text.front().unicode();
         }
-        const Qt::KeyboardModifiers modifiers = shift ? Qt::ShiftModifier
-                                                       : Qt::NoModifier;
+        Qt::KeyboardModifiers modifiers = shift ? Qt::ShiftModifier
+                                                : Qt::NoModifier;
+        const QStringList modifierParts = modifierText.split(
+            QLatin1Char('+'), Qt::SkipEmptyParts);
+        for (const QString &part : modifierParts) {
+            if (part == QStringLiteral("ctrl")) {
+                modifiers |= Qt::ControlModifier;
+            } else if (part == QStringLiteral("shift")) {
+                modifiers |= Qt::ShiftModifier;
+            } else if (part == QStringLiteral("alt")) {
+                modifiers |= Qt::AltModifier;
+            } else if (part == QStringLiteral("meta")) {
+                modifiers |= Qt::MetaModifier;
+            }
+        }
         QKeyEvent keyEvent(QEvent::KeyPress, key, modifiers, text);
         const bool accepted = QCoreApplication::sendEvent(m_editor, &keyEvent);
         QJsonObject response = statusObject();

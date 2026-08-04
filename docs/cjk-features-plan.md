@@ -1,5 +1,9 @@
 # CJK 输入优化与自动空格 — 实施计划
 
+> [!NOTE]
+> 本文件是原始实施计划，保留为历史记录。`f02b22f` 之后的缺陷修复、保护区规则、单行块公式语法以及 `<`
+> 选区包裹行为以 [`cjk-features-fix-plan.md`](cjk-features-fix-plan.md) 为权威；两者冲突时以修复计划为准。
+
 ## 目标
 
 在 ScratchEditor 中实现两组功能：
@@ -618,7 +622,7 @@ void EditorCommandRegistry::formatSpacingInRange(int rangeStart, int rangeEnd)
 === CJK Selection Wrapping ===
 - 选区含 CJK 时 ( → （选区）
 - 选区含 CJK 时 [ → 【选区】
-- 选区含 CJK 时 < → 《选区》
+- 选区含 CJK 时 < → `<选区>`（保持 ASCII，修复计划 2.3 已锁定）
 - 选区含 CJK 时 " → "选区"
 - 选区含 CJK 时 ' → '选区'
 - 选区无 CJK 时 ( → (选区)

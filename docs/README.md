@@ -24,3 +24,5 @@
 
 - [`001-external-editor/investigation-report.md`](001-external-editor/investigation-report.md)：Codex、pi-coding-agent 和 Claude Code 外部编辑器兼容性调查。
 - [`001-external-editor/extension-plan.md`](001-external-editor/extension-plan.md)：外部编辑器瞬态文件模式的扩展计划与验收标准。
+- [`cjk-features-plan.md`](cjk-features-plan.md)：CJK 输入优化与自动空格的原始实施计划。
+- [`cjk-features-fix-plan.md`](cjk-features-fix-plan.md)：基于 `f02b22f` 缺陷调查形成的详细修复、测试与验收计划。

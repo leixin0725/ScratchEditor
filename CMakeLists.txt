@@ -11,6 +11,14 @@ find_package(Qt6 6.8 REQUIRED COMPONENTS Core Gui Network Qml Quick)
 
 qt_standard_project_setup(REQUIRES 6.8)
 
+add_library(ScratchEditorCjkText STATIC
+    src/cjktextprocessor.cpp
+    src/cjktextprocessor.h
+)
+
+target_include_directories(ScratchEditorCjkText PUBLIC src)
+target_link_libraries(ScratchEditorCjkText PUBLIC Qt6::Core)
+
 qt_add_executable(ScratchEditor WIN32
     src/main.cpp
     src/appsettings.cpp
@@ -47,6 +55,7 @@ qt_add_qml_module(ScratchEditor
 )
 
 target_link_libraries(ScratchEditor PRIVATE
+    ScratchEditorCjkText
     Qt6::Core
     Qt6::Gui
     Qt6::Network
@@ -81,6 +90,7 @@ target_link_options(ScratchEditorWindowUiTests PRIVATE
 )
 
 target_link_libraries(ScratchEditorEditingTests PRIVATE
+    ScratchEditorCjkText
     Qt6::Core
     Qt6::Network
 )

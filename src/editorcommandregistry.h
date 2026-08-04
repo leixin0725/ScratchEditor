@@ -9,6 +9,8 @@
 #include <QVariantList>
 #include <QVector>
 
+#include <optional>
+
 class QTextDocument;
 class AppSettings;
 class QEvent;
@@ -34,17 +36,31 @@ public:
     bool replaceCurrent(const QString &query, const QString &replacement, bool caseSensitive);
     int replaceAll(const QString &query, const QString &replacement, bool caseSensitive);
 
-    static bool isCJK(QChar ch);
-    static bool isAsciiAlnum(QChar ch);
-    static bool isSoftSeparator(QChar ch);
-    static bool isInsideBlockFormula(const QString &text, int position);
-    static QString formatLineSpacing(const QString &line);
-
 signals:
     void commandsChanged();
     void uiCommandRequested(const QString &commandId);
 
 private:
+    struct EditFootprint {
+        int start = 0;
+        int end = 0;
+    };
+
+    struct TypedEditResult {
+        bool consumed = false;
+        bool textChanged = false;
+        bool runAutoSpacing = false;
+        EditFootprint footprint;
+    };
+
+    struct FormatUndoSnapshot {
+        QString originalText;
+        QString formattedText;
+        int selectionStart = 0;
+        int selectionEnd = 0;
+        int cursorPosition = 0;
+    };
+
     struct Definition {
         QString id;
         QString title;
@@ -60,21 +76,21 @@ private:
     bool transformSelectedLines(const QString &commandId);
     bool deleteSelectedLines();
     bool toggleCurrentCheckbox();
-    bool handleTypedText(const QString &text);
-    bool insertPair(const QString &opening, const QString &closing);
-    bool insertFenceBlock();
+    TypedEditResult handleTypedText(const QString &text);
+    std::optional<EditFootprint> insertPair(const QString &opening, const QString &closing);
+    std::optional<EditFootprint> insertFenceBlock();
     bool handleSpecialBackspace();
     bool handleListEnter();
     bool jumpOutOfPair();
     bool changeIndent(bool outdent);
     bool formatSpacing();
-    void formatSpacingInRange(int rangeStart, int rangeEnd);
-    void autoSpaceAroundCursor(int cursorPosition);
-    void autoSpaceAroundRange(int rangeStart, int rangeEnd);
-    void completeInputMethodCommit(const QString &committedText, const QString &beforeText,
-                                   const QString &selectedText, int selectionStart,
-                                   int selectionEnd);
+    void applyAutoSpacing(EditFootprint footprint, bool includeInternalBoundaries = false);
+    bool isInsideFencedBlock(int position) const;
+    std::optional<EditFootprint> completeInputMethodCommit(
+        const QString &committedText, const QString &beforeText,
+        const QString &selectedText, int selectionStart, int selectionEnd);
     void selectRange(int start, int end);
+    void selectRangeWithActiveEnd(int start, int end, int activeEnd);
     void focusEditor();
     QString selectedText() const;
     bool handleSelectionDragEvent(QEvent *event);
@@ -100,4 +116,5 @@ private:
     bool m_selectionDragActive = false;
     bool m_selectionDragPreviousKeepMouseGrab = false;
     QCursor m_selectionDragOriginalCursor;
+    std::optional<FormatUndoSnapshot> m_formatUndoSnapshot;
 };

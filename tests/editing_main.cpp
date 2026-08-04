@@ -1,10 +1,17 @@
 #include <QCoreApplication>
+#include <QDateTime>
+#include <QElapsedTimer>
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QLocalSocket>
+#include <QStringList>
 #include <QThread>
 
+#include "cjktextprocessor.h"
+
 #include <array>
+#include <functional>
+#include <utility>
 
 namespace {
 
@@ -15,7 +22,7 @@ QString serverName()
                                   : QString::fromUtf8(overrideName);
 }
 
-QJsonObject request(const QString &command, QJsonObject arguments = {}, int timeoutMs = 3000)
+QJsonObject request(const QString &command, QJsonObject arguments = {}, int timeoutMs = 5000)
 {
     arguments.insert(QStringLiteral("command"), command);
     QLocalSocket socket;
@@ -30,11 +37,14 @@ QJsonObject request(const QString &command, QJsonObject arguments = {}, int time
                 {QStringLiteral("error"), QStringLiteral("write timeout")}};
     }
     QByteArray response;
+    const qint64 deadline = QDateTime::currentMSecsSinceEpoch() + 15000;
     while (!response.contains('\n')) {
-        if (!socket.waitForReadyRead(timeoutMs)) {
+        const qint64 remaining = deadline - QDateTime::currentMSecsSinceEpoch();
+        if (remaining <= 0) {
             return {{QStringLiteral("ok"), false},
                     {QStringLiteral("error"), QStringLiteral("read timeout")}};
         }
+        socket.waitForReadyRead(qMin<qint64>(remaining, 250));
         response += socket.readAll();
     }
     const QJsonDocument document = QJsonDocument::fromJson(response.left(response.indexOf('\n')));
@@ -44,15 +54,23 @@ QJsonObject request(const QString &command, QJsonObject arguments = {}, int time
                                               QStringLiteral("invalid response")}};
 }
 
-bool setTextAndSelection(const QString &text, int start, int end)
+bool setTextAndSelection(const QString &text, int start, int end, int cursor = -1)
 {
     const QJsonObject set = request(QStringLiteral("testSetText"),
                                     {{QStringLiteral("text"), text}});
-    const QJsonObject select = request(QStringLiteral("testSetSelection"),
-                                       {{QStringLiteral("start"), start},
-                                        {QStringLiteral("end"), end}});
+    QJsonObject selectArguments{{QStringLiteral("start"), start},
+                                {QStringLiteral("end"), end}};
+    if (cursor >= 0) {
+        selectArguments.insert(QStringLiteral("cursor"), cursor);
+    }
+    const QJsonObject select = request(QStringLiteral("testSetSelection"), selectArguments);
     return set.value(QStringLiteral("ok")).toBool()
         && select.value(QStringLiteral("invoked")).toBool();
+}
+
+QJsonObject editorStatus()
+{
+    return request(QStringLiteral("status"));
 }
 
 QJsonObject execute(const QString &commandId)
@@ -69,12 +87,14 @@ QJsonObject dragSelection(int start, int end, int dropPosition)
                     {QStringLiteral("dropPosition"), dropPosition}});
 }
 
-QJsonObject keyPress(const QString &text = {}, const QString &key = {}, bool shift = false)
+QJsonObject keyPress(const QString &text = {}, const QString &key = {}, bool shift = false,
+                     const QString &modifiers = {})
 {
     return request(QStringLiteral("testKeyPress"),
                    {{QStringLiteral("text"), text},
                     {QStringLiteral("key"), key},
-                    {QStringLiteral("shift"), shift}});
+                    {QStringLiteral("shift"), shift},
+                    {QStringLiteral("modifiers"), modifiers}});
 }
 
 QJsonObject inputMethodCommit(const QString &text)
@@ -108,6 +128,170 @@ void addCheck(QJsonObject &checks, QJsonObject &details, const QString &name, bo
     if (!detail.isUndefined()) {
         details.insert(name, detail);
     }
+}
+
+void addCjkCheck(QJsonObject &checks, QJsonObject &details, const QString &name,
+                 bool passed, const QString &input, const QString &action,
+                 const QString &expected, const QString &actual,
+                 const QJsonObject &status = {})
+{
+    QJsonObject detail{
+        {QStringLiteral("input"), input},
+        {QStringLiteral("action"), action},
+        {QStringLiteral("expected"), expected},
+        {QStringLiteral("actual"), actual},
+    };
+    if (!status.isEmpty()) {
+        detail.insert(QStringLiteral("status"), status);
+    }
+    addCheck(checks, details, name, passed, detail);
+}
+
+void cjkExpect(QJsonObject &checks, QJsonObject &details, const QString &name,
+               const QString &input, int start, int end, const QString &action,
+               const std::function<QJsonObject()> &perform,
+               const QString &expectedText, int expectedCursor = -1,
+               int expectedSelectionStart = -1, int expectedSelectionEnd = -1)
+{
+    setTextAndSelection(input, start, end);
+    perform();
+    QThread::msleep(30);
+    const QString actualText = editorText();
+    const QJsonObject status = editorStatus();
+    const bool textOk = actualText == expectedText;
+    const bool cursorOk = expectedCursor < 0
+        || status.value(QStringLiteral("cursorPosition")).toInt() == expectedCursor;
+    const bool selectionOk = (expectedSelectionStart < 0
+                              || status.value(QStringLiteral("selectionStart")).toInt()
+                                  == expectedSelectionStart)
+        && (expectedSelectionEnd < 0
+            || status.value(QStringLiteral("selectionEnd")).toInt()
+                == expectedSelectionEnd);
+    addCjkCheck(checks, details, name, textOk && cursorOk && selectionOk,
+                input, action, expectedText, actualText, status);
+}
+
+void formatExpect(QJsonObject &checks, QJsonObject &details, const QString &name,
+                  const QString &input, int start, int end, int cursor,
+                  const QString &expectedText, int expectedCursor = -1,
+                  int expectedSelectionStart = -1, int expectedSelectionEnd = -1)
+{
+    setTextAndSelection(input, start, end, cursor);
+    execute(QStringLiteral("formatSpacing"));
+    const QString actualText = editorText();
+    const QJsonObject status = editorStatus();
+    const bool textOk = actualText == expectedText;
+    const bool cursorOk = expectedCursor < 0
+        || status.value(QStringLiteral("cursorPosition")).toInt() == expectedCursor;
+    const bool selectionOk = (expectedSelectionStart < 0
+                              || status.value(QStringLiteral("selectionStart")).toInt()
+                                  == expectedSelectionStart)
+        && (expectedSelectionEnd < 0
+            || status.value(QStringLiteral("selectionEnd")).toInt()
+                == expectedSelectionEnd);
+    addCjkCheck(checks, details, name, textOk && cursorOk && selectionOk,
+                input, QStringLiteral("Alt+F / formatSpacing"), expectedText,
+                actualText, status);
+}
+
+struct ExpectedSpan {
+    int outerStart = 0;
+    int outerEnd = 0;
+    int contentStart = 0;
+    int contentEnd = 0;
+    CjkText::ProtectedKind kind = CjkText::ProtectedKind::FencedCode;
+};
+
+bool spansMatch(const QVector<CjkText::ProtectedSpan> &actual,
+                const QVector<ExpectedSpan> &expected)
+{
+    if (actual.size() != expected.size()) {
+        return false;
+    }
+    for (int i = 0; i < actual.size(); ++i) {
+        const CjkText::ProtectedSpan &span = actual.at(i);
+        const ExpectedSpan &wanted = expected.at(i);
+        if (span.outerStart != wanted.outerStart
+            || span.outerEnd != wanted.outerEnd
+            || span.contentStart != wanted.contentStart
+            || span.contentEnd != wanted.contentEnd
+            || span.kind != wanted.kind) {
+            return false;
+        }
+    }
+    return true;
+}
+
+QString spanSummary(const QVector<CjkText::ProtectedSpan> &spans)
+{
+    QStringList parts;
+    for (const CjkText::ProtectedSpan &span : spans) {
+        parts << QStringLiteral("[%1,%2) content[%3,%4) kind=%5")
+            .arg(span.outerStart).arg(span.outerEnd)
+            .arg(span.contentStart).arg(span.contentEnd)
+            .arg(static_cast<int>(span.kind));
+    }
+    return parts.join(QStringLiteral("; "));
+}
+
+QString expectedSpanSummary(const QVector<ExpectedSpan> &spans)
+{
+    QStringList parts;
+    for (const ExpectedSpan &span : spans) {
+        parts << QStringLiteral("[%1,%2) content[%3,%4) kind=%5")
+            .arg(span.outerStart).arg(span.outerEnd)
+            .arg(span.contentStart).arg(span.contentEnd)
+            .arg(static_cast<int>(span.kind));
+    }
+    return parts.join(QStringLiteral("; "));
+}
+
+void parseExpect(QJsonObject &checks, QJsonObject &details, const QString &name,
+                 const QString &text, const QVector<ExpectedSpan> &expectedBlockSpans,
+                 const QVector<ExpectedSpan> &expectedInlineSpans,
+                 const QVector<ExpectedSpan> &expectedUnclosedSpans = {})
+{
+    const CjkText::DocumentAnalysis analysis = CjkText::analyzeDocument(text);
+    const bool passed = spansMatch(analysis.blockSpans, expectedBlockSpans)
+        && spansMatch(analysis.inlineSpans, expectedInlineSpans)
+        && spansMatch(analysis.unclosedInlineSpans, expectedUnclosedSpans);
+    QJsonObject detail{
+        {QStringLiteral("input"), text},
+        {QStringLiteral("expectedBlockSpans"), expectedSpanSummary(expectedBlockSpans)},
+        {QStringLiteral("expectedInlineSpans"), expectedSpanSummary(expectedInlineSpans)},
+        {QStringLiteral("expectedUnclosedSpans"), expectedSpanSummary(expectedUnclosedSpans)},
+        {QStringLiteral("actualBlockSpans"), spanSummary(analysis.blockSpans)},
+        {QStringLiteral("actualInlineSpans"), spanSummary(analysis.inlineSpans)},
+        {QStringLiteral("actualUnclosedSpans"), spanSummary(analysis.unclosedInlineSpans)},
+    };
+    addCheck(checks, details, name, passed, detail);
+}
+
+QString applyInsertions(const QString &text, const QVector<int> &insertions)
+{
+    QString result = text;
+    for (auto it = insertions.crbegin(); it != insertions.crend(); ++it) {
+        result.insert(*it, QLatin1Char(' '));
+    }
+    return result;
+}
+
+QString buildPerfDocument(int minimumLength)
+{
+    QString document;
+    document.reserve(minimumLength + 256);
+    const QString normalLine = QStringLiteral("中文ABC123`code`中文$x+1$结束\n");
+    const QString mixedBlock = QStringLiteral(
+        "```\n$$\n中文ABC\n```\n"
+        "$$\n```\n中文ABC\n$$\n");
+    int blockIndex = 0;
+    while (document.size() < minimumLength) {
+        document += normalLine;
+        if (++blockIndex % 5 == 0) {
+            document += mixedBlock;
+        }
+    }
+    return document;
 }
 
 } // namespace
@@ -987,6 +1171,53 @@ int main(int argc, char *argv[])
     addCheck(checks, details, QStringLiteral("cjkPairBackspace"),
              fullParenDeleted && ellipsisDeleted && emdashDeleted, {});
 
+    // --- 全配对退格参数化（验收用例三 F） ---
+    {
+        const QVector<std::pair<QString, QString>> allPairs{
+            {QStringLiteral("("), QStringLiteral(")")},
+            {QStringLiteral("["), QStringLiteral("]")},
+            {QStringLiteral("{"), QStringLiteral("}")},
+            {QStringLiteral("<"), QStringLiteral(">")},
+            {QStringLiteral("（"), QStringLiteral("）")},
+            {QStringLiteral("［"), QStringLiteral("］")},
+            {QStringLiteral("｛"), QStringLiteral("｝")},
+            {QStringLiteral("＜"), QStringLiteral("＞")},
+            {QStringLiteral("【"), QStringLiteral("】")},
+            {QStringLiteral("〔"), QStringLiteral("〕")},
+            {QStringLiteral("〖"), QStringLiteral("〗")},
+            {QStringLiteral("〘"), QStringLiteral("〙")},
+            {QStringLiteral("〚"), QStringLiteral("〛")},
+            {QStringLiteral("《"), QStringLiteral("》")},
+            {QStringLiteral("〈"), QStringLiteral("〉")},
+            {QStringLiteral("「"), QStringLiteral("」")},
+            {QStringLiteral("『"), QStringLiteral("』")},
+            {QStringLiteral("“"), QStringLiteral("”")},
+            {QStringLiteral("‘"), QStringLiteral("’")},
+            {QStringLiteral("`"), QStringLiteral("`")},
+            {QStringLiteral("\""), QStringLiteral("\"")},
+            {QStringLiteral("'"), QStringLiteral("'")},
+            {QStringLiteral("＂"), QStringLiteral("＂")},
+            {QStringLiteral("＇"), QStringLiteral("＇")},
+        };
+        QStringList failures;
+        for (const auto &pair : allPairs) {
+            const QString pairText = pair.first + pair.second;
+            setTextAndSelection(pairText, pair.first.size(), pair.first.size());
+            keyPress({}, QStringLiteral("Backspace"));
+            const QString afterBackspace = editorText();
+            request(QStringLiteral("testUndo"));
+            const QString afterUndo = editorText();
+            if (!afterBackspace.isEmpty() || afterUndo != pairText) {
+                failures << QStringLiteral("%1(backspace=%2,undo=%3)")
+                    .arg(pairText, afterBackspace, afterUndo);
+            }
+        }
+        addCheck(checks, details, QStringLiteral("backspaceAllDelimiterPairs"),
+                 failures.isEmpty(),
+                 QJsonObject{{QStringLiteral("failures"), failures.join(QLatin1Char(';'))},
+                             {QStringLiteral("pairCount"), allPairs.size()}});
+    }
+
     // --- CJK Auto Spacing & Cursor Following ---
     setTextAndSelection(QStringLiteral("中文"), 2, 2);
     keyPress(QStringLiteral("A"), QStringLiteral("A"));
@@ -1177,6 +1408,695 @@ int main(int argc, char *argv[])
                  && fmtUserBenchmarkPassed,
              QJsonObject{{QStringLiteral("benchmarkPassed"), fmtUserBenchmarkPassed},
                          {QStringLiteral("actualOutput"), editorText()}});
+
+    // --- CJK Fix: Individual KeyPress Punctuation Checks (KEY-001..013) ---
+    const auto keyAction = [](const QString &text) {
+        return [text] { return keyPress(text, text); };
+    };
+    cjkExpect(checks, details, QStringLiteral("cjkKeyComma"),
+              QStringLiteral("中文"), 2, 2, QStringLiteral("key ,"),
+              keyAction(QStringLiteral(",")), QStringLiteral("中文，"), 3);
+    cjkExpect(checks, details, QStringLiteral("cjkKeyPeriod"),
+              QStringLiteral("中文"), 2, 2, QStringLiteral("key ."),
+              keyAction(QStringLiteral(".")), QStringLiteral("中文。"), 3);
+    cjkExpect(checks, details, QStringLiteral("cjkKeyColon"),
+              QStringLiteral("中文"), 2, 2, QStringLiteral("key :"),
+              keyAction(QStringLiteral(":")), QStringLiteral("中文："), 3);
+    cjkExpect(checks, details, QStringLiteral("cjkKeyQuestion"),
+              QStringLiteral("中文"), 2, 2, QStringLiteral("key ?"),
+              keyAction(QStringLiteral("?")), QStringLiteral("中文？"), 3);
+    cjkExpect(checks, details, QStringLiteral("cjkKeyExclaim"),
+              QStringLiteral("中文"), 2, 2, QStringLiteral("key !"),
+              keyAction(QStringLiteral("!")), QStringLiteral("中文！"), 3);
+    cjkExpect(checks, details, QStringLiteral("cjkKeySemi"),
+              QStringLiteral("中文"), 2, 2, QStringLiteral("key ;"),
+              keyAction(QStringLiteral(";")), QStringLiteral("中文；"), 3);
+    cjkExpect(checks, details, QStringLiteral("cjkKeyParenPair"),
+              QStringLiteral("中文"), 2, 2, QStringLiteral("key ("),
+              keyAction(QStringLiteral("(")), QStringLiteral("中文（）"), 3);
+    cjkExpect(checks, details, QStringLiteral("cjkKeyBracketPair"),
+              QStringLiteral("中文"), 2, 2, QStringLiteral("key [ after CJK"),
+              keyAction(QStringLiteral("[")), QStringLiteral("中文【】"), 3);
+    cjkExpect(checks, details, QStringLiteral("cjkKeyDoubleQuotePair"),
+              QStringLiteral("中文"), 2, 2, QStringLiteral("key \" after CJK"),
+              keyAction(QStringLiteral("\"")), QStringLiteral("中文“”"), 3);
+    cjkExpect(checks, details, QStringLiteral("cjkKeySingleQuotePair"),
+              QStringLiteral("中文"), 2, 2, QStringLiteral("key ' after CJK"),
+              keyAction(QStringLiteral("'")), QStringLiteral("中文‘’"), 3);
+    cjkExpect(checks, details, QStringLiteral("cjkKeyChainComma"),
+              QStringLiteral("中文，"), 3, 3, QStringLiteral("key ,"),
+              keyAction(QStringLiteral(",")), QStringLiteral("中文，，"), 4);
+    cjkExpect(checks, details, QStringLiteral("cjkKeyChainPeriod"),
+              QStringLiteral("中文。"), 3, 3, QStringLiteral("key ."),
+              keyAction(QStringLiteral(".")), QStringLiteral("中文。。"), 4);
+    cjkExpect(checks, details, QStringLiteral("cjkKeyEllipsisAscii"),
+              QStringLiteral("中文.."), 4, 4, QStringLiteral("key ."),
+              keyAction(QStringLiteral(".")), QStringLiteral("中文……"), 4);
+    cjkExpect(checks, details, QStringLiteral("cjkKeyEllipsisFull"),
+              QStringLiteral("中文。。"), 4, 4, QStringLiteral("key ."),
+              keyAction(QStringLiteral(".")), QStringLiteral("中文……"), 4);
+    cjkExpect(checks, details, QStringLiteral("cjkKeyEllipsisFullFull"),
+              QStringLiteral("中文。。"), 4, 4, QStringLiteral("key 。"),
+              keyAction(QStringLiteral("。")), QStringLiteral("中文……"), 4);
+    cjkExpect(checks, details, QStringLiteral("cjkKeyEllipsisMixedDotFullNegative"),
+              QStringLiteral("中文.。"), 4, 4, QStringLiteral("key ."),
+              keyAction(QStringLiteral(".")), QStringLiteral("中文.。."), 5);
+    cjkExpect(checks, details, QStringLiteral("cjkKeyEllipsisMixedFullDotNegative"),
+              QStringLiteral("中文.."), 4, 4, QStringLiteral("key 。"),
+              keyAction(QStringLiteral("。")), QStringLiteral("中文..。"), 5);
+    cjkExpect(checks, details, QStringLiteral("cjkKeyEllipsisFullDotNegative"),
+              QStringLiteral("中文。."), 4, 4, QStringLiteral("key 。"),
+              keyAction(QStringLiteral("。")), QStringLiteral("中文。.。"), 5);
+    cjkExpect(checks, details, QStringLiteral("cjkKeyEllipsisHalfDotTailNegative"),
+              QStringLiteral("中文。."), 4, 4, QStringLiteral("key ."),
+              keyAction(QStringLiteral(".")), QStringLiteral("中文。.."), 5);
+    cjkExpect(checks, details, QStringLiteral("cjkKeyEmdash"),
+              QStringLiteral("中文-"), 3, 3, QStringLiteral("key -"),
+              keyAction(QStringLiteral("-")), QStringLiteral("中文——"), 4);
+
+    // --- CJK Fix: Protected Region KeyPress (PROTECT-KEY-001..005) ---
+    cjkExpect(checks, details, QStringLiteral("protectKeyInlineCode"),
+              QStringLiteral("`中文`"), 2, 2, QStringLiteral("key , inside inline code"),
+              keyAction(QStringLiteral(",")), QStringLiteral("`中,文`"), 3);
+    cjkExpect(checks, details, QStringLiteral("protectKeyInlineQuote"),
+              QStringLiteral("`中文`"), 3, 3, QStringLiteral("key \" inside inline code"),
+              keyAction(QStringLiteral("\"")), QStringLiteral("`中文\"\"`"), 4);
+    cjkExpect(checks, details, QStringLiteral("protectKeyInlineFormula"),
+              QStringLiteral("$中文..$"), 5, 5, QStringLiteral("key . inside inline formula"),
+              keyAction(QStringLiteral(".")), QStringLiteral("$中文...$"), 6);
+    cjkExpect(checks, details, QStringLiteral("protectKeyFence"),
+              QStringLiteral("```\n中文-\n```"), 7, 7,
+              QStringLiteral("key - inside fenced code"),
+              keyAction(QStringLiteral("-")), QStringLiteral("```\n中文--\n```"), 8);
+    cjkExpect(checks, details, QStringLiteral("protectKeyBlockFormula"),
+              QStringLiteral("$$\n中文\n$$"), 5, 5,
+              QStringLiteral("key , inside block formula"),
+              keyAction(QStringLiteral(",")), QStringLiteral("$$\n中文,\n$$"), 6);
+    setTextAndSelection(QStringLiteral("$$中文$$"), 4, 4);
+    keyPress(QStringLiteral(","), QStringLiteral(","));
+    QThread::msleep(30);
+    const QString singleLineFormulaCommaText = editorText();
+    const bool singleLineFormulaCommaKept =
+        singleLineFormulaCommaText == QStringLiteral("$$中文,$$");
+    setTextAndSelection(QStringLiteral("$$中文$$"), 3, 3);
+    keyPress(QStringLiteral("A"), QStringLiteral("A"));
+    QThread::msleep(30);
+    const QString singleLineFormulaSpacingText = editorText();
+    const bool singleLineFormulaSpacingKept =
+        singleLineFormulaSpacingText == QStringLiteral("$$中A文$$");
+    const QJsonObject singleLineFormulaStatus = editorStatus();
+    addCjkCheck(checks, details, QStringLiteral("protectKeySingleLineFormula"),
+                singleLineFormulaCommaKept && singleLineFormulaSpacingKept,
+                QStringLiteral("$$中文$$"), QStringLiteral("key , / key A inside $$...$$"),
+                QStringLiteral("$$中文,$$ 与 $$中A文$$"),
+                singleLineFormulaCommaText + QStringLiteral(" 与 ")
+                    + singleLineFormulaSpacingText,
+                singleLineFormulaStatus);
+
+    // --- CJK Fix: Real-time Spacing (LIVE-001..009) ---
+    cjkExpect(checks, details, QStringLiteral("liveCjkThenAscii"),
+              QStringLiteral("中文"), 2, 2, QStringLiteral("key A"),
+              keyAction(QStringLiteral("A")), QStringLiteral("中文 A"), 4);
+    cjkExpect(checks, details, QStringLiteral("liveAsciiThenCjk"),
+              QStringLiteral("ABC"), 3, 3, QStringLiteral("key 中"),
+              keyAction(QStringLiteral("中")), QStringLiteral("ABC 中"), 5);
+    cjkExpect(checks, details, QStringLiteral("liveMiddleInsert"),
+              QStringLiteral("中文"), 1, 1, QStringLiteral("key A"),
+              keyAction(QStringLiteral("A")), QStringLiteral("中 A 文"), 4);
+    cjkExpect(checks, details, QStringLiteral("liveInlineCodeMiddle"),
+              QStringLiteral("`中文`"), 2, 2, QStringLiteral("key A inside inline code"),
+              keyAction(QStringLiteral("A")), QStringLiteral("`中A文`"), 3);
+    cjkExpect(checks, details, QStringLiteral("liveBacktickOpeningSpacing"),
+              QStringLiteral("中文"), 2, 2, QStringLiteral("key ` after CJK"),
+              keyAction(QStringLiteral("`")), QStringLiteral("中文 ``"), 4);
+    cjkExpect(checks, details, QStringLiteral("liveDollarOpeningSpacing"),
+              QStringLiteral("中文"), 2, 2, QStringLiteral("key $ after CJK"),
+              keyAction(QStringLiteral("$")), QStringLiteral("中文 $"), 4);
+    cjkExpect(checks, details, QStringLiteral("liveInlineFormulaMiddle"),
+              QStringLiteral("$中文$"), 2, 2, QStringLiteral("key A inside inline formula"),
+              keyAction(QStringLiteral("A")), QStringLiteral("$中A文$"), 3);
+
+    setTextAndSelection(QStringLiteral("中文"), 2, 2);
+    keyPress(QStringLiteral("`"), QStringLiteral("`"));
+    keyPress(QStringLiteral("A"), QStringLiteral("A"));
+    keyPress(QStringLiteral("`"), QStringLiteral("`"));
+    keyPress(QStringLiteral("文"), QStringLiteral("文"));
+    QThread::msleep(30);
+    const QString liveInlineCodeSpacingText = editorText();
+    const QJsonObject liveInlineCodeSpacingStatus = editorStatus();
+    addCjkCheck(checks, details, QStringLiteral("liveInlineCodeSpacing"),
+                liveInlineCodeSpacingText == QStringLiteral("中文 `A` 文"),
+                QStringLiteral("中文 + ` + A + ` + 文"),
+                QStringLiteral("typing 中文`A`文"),
+                QStringLiteral("中文 `A` 文"), liveInlineCodeSpacingText,
+                liveInlineCodeSpacingStatus);
+
+    setTextAndSelection(QStringLiteral("中文"), 2, 2);
+    keyPress(QStringLiteral("$"), QStringLiteral("$"));
+    keyPress(QStringLiteral("x"), QStringLiteral("x"));
+    keyPress(QStringLiteral("$"), QStringLiteral("$"));
+    keyPress(QStringLiteral("文"), QStringLiteral("文"));
+    QThread::msleep(30);
+    const QString liveInlineFormulaSpacingText = editorText();
+    const QJsonObject liveInlineFormulaSpacingStatus = editorStatus();
+    addCjkCheck(checks, details, QStringLiteral("liveInlineFormulaSpacing"),
+                liveInlineFormulaSpacingText == QStringLiteral("中文 $x$ 文"),
+                QStringLiteral("中文 + $ + x + $ + 文"),
+                QStringLiteral("typing 中文$x$文"),
+                QStringLiteral("中文 $x$ 文"), liveInlineFormulaSpacingText,
+                liveInlineFormulaSpacingStatus);
+
+    setTextAndSelection(QStringLiteral("```\n$$\n```\n"), 11, 11);
+    keyPress(QStringLiteral("中"), QStringLiteral("中"));
+    keyPress(QStringLiteral("文"), QStringLiteral("文"));
+    keyPress(QStringLiteral("A"), QStringLiteral("A"));
+    QThread::msleep(30);
+    const QString liveFenceWithFormulaText = editorText();
+    const QJsonObject liveFenceWithFormulaStatus = editorStatus();
+    addCjkCheck(checks, details, QStringLiteral("liveFenceWithFormulaMarker"),
+                liveFenceWithFormulaText == QStringLiteral("```\n$$\n```\n中文 A"),
+                QStringLiteral("```\\n$$\\n```\\n + 中文A"),
+                QStringLiteral("typing 中文A after fence containing $$"),
+                QStringLiteral("```\n$$\n```\n中文 A"), liveFenceWithFormulaText,
+                liveFenceWithFormulaStatus);
+
+    setTextAndSelection(QStringLiteral("$$\n```\n$$\n"), 11, 11);
+    keyPress(QStringLiteral("中"), QStringLiteral("中"));
+    keyPress(QStringLiteral("文"), QStringLiteral("文"));
+    keyPress(QStringLiteral("A"), QStringLiteral("A"));
+    QThread::msleep(30);
+    const QString liveFormulaWithFenceText = editorText();
+    const QJsonObject liveFormulaWithFenceStatus = editorStatus();
+    addCjkCheck(checks, details, QStringLiteral("liveFormulaWithFenceMarker"),
+                liveFormulaWithFenceText == QStringLiteral("$$\n```\n$$\n中文 A"),
+                QStringLiteral("$$\\n```\\n$$\\n + 中文A"),
+                QStringLiteral("typing 中文A after formula containing ```"),
+                QStringLiteral("$$\n```\n$$\n中文 A"), liveFormulaWithFenceText,
+                liveFormulaWithFenceStatus);
+
+    // --- CJK Fix: Selection Wrapping via KeyPress (WRAP-001..007) ---
+    cjkExpect(checks, details, QStringLiteral("wrapKeyParen"),
+              QStringLiteral("中文"), 0, 2, QStringLiteral("key ( on CJK selection"),
+              keyAction(QStringLiteral("(")), QStringLiteral("（中文）"), 3, 1, 3);
+    cjkExpect(checks, details, QStringLiteral("wrapKeyBracket"),
+              QStringLiteral("中文"), 0, 2, QStringLiteral("key [ on CJK selection"),
+              keyAction(QStringLiteral("[")), QStringLiteral("【中文】"), 3, 1, 3);
+    cjkExpect(checks, details, QStringLiteral("wrapKeyDoubleQuote"),
+              QStringLiteral("中文"), 0, 2, QStringLiteral("key \" on CJK selection"),
+              keyAction(QStringLiteral("\"")), QStringLiteral("“中文”"), 3, 1, 3);
+    cjkExpect(checks, details, QStringLiteral("wrapKeySingleQuote"),
+              QStringLiteral("中文"), 0, 2, QStringLiteral("key ' on CJK selection"),
+              keyAction(QStringLiteral("'")), QStringLiteral("‘中文’"), 3, 1, 3);
+    cjkExpect(checks, details, QStringLiteral("wrapKeyLessThan"),
+              QStringLiteral("中文"), 0, 2, QStringLiteral("key < on CJK selection"),
+              keyAction(QStringLiteral("<")), QStringLiteral("<中文>"), 3, 1, 3);
+    cjkExpect(checks, details, QStringLiteral("wrapKeyAsciiParen"),
+              QStringLiteral("ABC"), 0, 3, QStringLiteral("key ( on ASCII selection"),
+              keyAction(QStringLiteral("(")), QStringLiteral("(ABC)"), 4, 1, 4);
+    cjkExpect(checks, details, QStringLiteral("wrapKeyMixedBracket"),
+              QStringLiteral("A中文B"), 0, 4, QStringLiteral("key [ on mixed selection"),
+              keyAction(QStringLiteral("[")), QStringLiteral("【A中文B】"), 5, 1, 5);
+
+    // --- 保护区内选区包裹必须退回 ASCII（最终清单 §4/§D） ---
+    cjkExpect(checks, details, QStringLiteral("wrapProtectedInlineCodeKeyParen"),
+              QStringLiteral("`中文`"), 1, 3, QStringLiteral("key ( inside inline code"),
+              keyAction(QStringLiteral("(")), QStringLiteral("`(中文)`"), 4, 2, 4);
+    cjkExpect(checks, details, QStringLiteral("wrapProtectedInlineFormulaKeyParen"),
+              QStringLiteral("$中文$"), 1, 3, QStringLiteral("key ( inside inline formula"),
+              keyAction(QStringLiteral("(")), QStringLiteral("$(中文)$"), 4, 2, 4);
+    cjkExpect(checks, details, QStringLiteral("wrapProtectedInlineCodeImeParen"),
+              QStringLiteral("`中文`"), 1, 3, QStringLiteral("IME ( inside inline code"),
+              [] { return inputMethodCommit(QStringLiteral("(")); },
+              QStringLiteral("`(中文)`"), 4, 2, 4);
+    cjkExpect(checks, details, QStringLiteral("wrapProtectedInlineFormulaImeParen"),
+              QStringLiteral("$中文$"), 1, 3, QStringLiteral("IME ( inside inline formula"),
+              [] { return inputMethodCommit(QStringLiteral("(")); },
+              QStringLiteral("$(中文)$"), 4, 2, 4);
+
+    // --- CJK Fix: Alt+F (FORMAT-001..015) ---
+    formatExpect(checks, details, QStringLiteral("formatCurrentLineOnly"),
+                 QStringLiteral("第一行ABC\n第二行"), 0, 0, 0,
+                 QStringLiteral("第一行 ABC\n第二行"), 0);
+    formatExpect(checks, details, QStringLiteral("formatSelectionInsideLine"),
+                 QStringLiteral("AA中文B\nCC"), 2, 5, 5,
+                 QStringLiteral("AA中文 B\nCC"), 6, 2, 6);
+    formatExpect(checks, details, QStringLiteral("formatInlineContentSelection"),
+                 QStringLiteral("`中文ABC`"), 1, 7, 7,
+                 QStringLiteral("`中文ABC`"), 7, 1, 7);
+    formatExpect(checks, details, QStringLiteral("formatCrossLeftDelimiter"),
+                 QStringLiteral("中文`code`文"), 1, 6, 6,
+                 QStringLiteral("中文 `code`文"), 7, 1, 7);
+    formatExpect(checks, details, QStringLiteral("formatCrossRightDelimiter"),
+                 QStringLiteral("中文`code`文"), 4, 9, 9,
+                 QStringLiteral("中文`code` 文"), 10, 4, 10);
+    formatExpect(checks, details, QStringLiteral("formatFullInlineSpan"),
+                 QStringLiteral("中文`code`文"), 1, 9, 9,
+                 QStringLiteral("中文 `code` 文"), 11, 1, 11);
+    formatExpect(checks, details, QStringLiteral("formatFenceSelection"),
+                 QStringLiteral("```\n中文ABC\n```"), 4, 10, 10,
+                 QStringLiteral("```\n中文ABC\n```"), 10, 4, 10);
+    formatExpect(checks, details, QStringLiteral("formatBlockFormulaSelection"),
+                 QStringLiteral("$$\n中文ABC\n$$"), 3, 9, 9,
+                 QStringLiteral("$$\n中文ABC\n$$"), 9, 3, 9);
+    formatExpect(checks, details, QStringLiteral("formatSingleLineFormulaNextLine"),
+                 QStringLiteral("$$x+1$$\n中文ABC"), 0, 13, 13,
+                 QStringLiteral("$$x+1$$\n中文 ABC"), 14, 0, 14);
+    formatExpect(checks, details, QStringLiteral("formatInvalidFenceTrailing"),
+                 QStringLiteral("```js\n中文ABC\n```oops\n后续ABC\n```"), 0, 0, 0,
+                 QStringLiteral("```js\n中文ABC\n```oops\n后续ABC\n```"), 0);
+    formatExpect(checks, details, QStringLiteral("formatForwardSelection"),
+                 QStringLiteral("前中文ABC后"), 1, 6, 6,
+                 QStringLiteral("前中文 ABC后"), 7, 1, 7);
+    formatExpect(checks, details, QStringLiteral("formatReverseSelection"),
+                 QStringLiteral("前中文ABC后"), 1, 6, 1,
+                 QStringLiteral("前中文 ABC后"), 1, 1, 7);
+    formatExpect(checks, details, QStringLiteral("formatCollapsedCursor"),
+                 QStringLiteral("中文ABC"), 3, 3, 3,
+                 QStringLiteral("中文 ABC"), 4);
+
+    setTextAndSelection(QStringLiteral("中文 ABC"), 3, 3, 3);
+    execute(QStringLiteral("formatSpacing"));
+    const QString formatNoChangeText = editorText();
+    const QJsonObject formatNoChangeStatus = editorStatus();
+    request(QStringLiteral("testUndo"));
+    const QString formatNoChangeAfterUndo = editorText();
+    addCjkCheck(checks, details, QStringLiteral("formatNoChange"),
+                formatNoChangeText == QStringLiteral("中文 ABC")
+                    && formatNoChangeAfterUndo == QStringLiteral("中文 ABC")
+                    && formatNoChangeStatus.value(QStringLiteral("cursorPosition")).toInt() == 3,
+                QStringLiteral("中文 ABC"), QStringLiteral("Alt+F then Undo"),
+                QStringLiteral("中文 ABC / 中文 ABC"), formatNoChangeText,
+                formatNoChangeStatus);
+
+    setTextAndSelection(QStringLiteral("中文ABC中文123"), 0, 0, 0);
+    execute(QStringLiteral("formatSpacing"));
+    const QString formatMultiText = editorText();
+    const QJsonObject formatMultiStatus = editorStatus();
+    const QJsonObject formatUndo = request(QStringLiteral("testUndo"));
+    const QString formatMultiAfterUndo = formatUndo.value(QStringLiteral("text")).toString();
+    const QJsonObject formatRedo = request(QStringLiteral("testRedo"));
+    const QString formatMultiAfterRedo = formatRedo.value(QStringLiteral("text")).toString();
+    addCjkCheck(checks, details, QStringLiteral("formatMultiInsertionsUndoRedo"),
+                formatMultiText == QStringLiteral("中文 ABC 中文 123")
+                    && formatMultiAfterUndo == QStringLiteral("中文ABC中文123")
+                    && formatMultiAfterRedo == QStringLiteral("中文 ABC 中文 123"),
+                QStringLiteral("中文ABC中文123"), QStringLiteral("Alt+F / Undo / Redo"),
+                QStringLiteral("中文 ABC 中文 123 → 中文ABC中文123 → 中文 ABC 中文 123"),
+                formatMultiText, formatMultiStatus);
+
+    // --- 未闭合行内分隔符：Alt+F 整体不操作（最终清单 §5/用例二） ---
+    formatExpect(checks, details, QStringLiteral("formatUnclosedFormulaNoOp"),
+                 QStringLiteral("末$中文ABC"), 0, 0, 0,
+                 QStringLiteral("末$中文ABC"), 0);
+    formatExpect(checks, details, QStringLiteral("formatUnclosedBacktickNoOp"),
+                 QStringLiteral("末`中文ABC"), 0, 0, 0,
+                 QStringLiteral("末`中文ABC"), 0);
+
+    // --- 验收用例一：反向、多行、跨保护区的选区格式化 ---
+    {
+        const QString caseOneInput = QStringLiteral(
+            "前A中文ABC\n"
+            "前`中A文`后\n"
+            "前$中A文$后\n"
+            "```js\n"
+            "$$\n"
+            "中文ABC\n"
+            "```oops\n"
+            "ABC中文\n"
+            "```\n"
+            "$$\n"
+            "```\n"
+            "中文ABC\n"
+            "$$\n"
+            "$$x中文A$$\n"
+            "普通한글ABC123结束\n"
+            "尾ABC中文Z外");
+        const QString caseOneExpected = QStringLiteral(
+            "前A中文 ABC\n"
+            "前 `中A文` 后\n"
+            "前 $中A文$ 后\n"
+            "```js\n"
+            "$$\n"
+            "中文ABC\n"
+            "```oops\n"
+            "ABC中文\n"
+            "```\n"
+            "$$\n"
+            "```\n"
+            "中文ABC\n"
+            "$$\n"
+            "$$x中文A$$\n"
+            "普通한글 ABC123 结束\n"
+            "尾 ABC中文Z外");
+        const int selectionStart = caseOneInput.indexOf(QStringLiteral("前A")) + 2;
+        const int selectionEnd = caseOneInput.indexOf(QStringLiteral("尾ABC")) + 4;
+        setTextAndSelection(caseOneInput, selectionStart, selectionEnd, selectionStart);
+        execute(QStringLiteral("formatSpacing"));
+        const QString caseOneActual = editorText();
+        const QJsonObject caseOneStatus = editorStatus();
+        const int expectedEnd = selectionEnd
+            + (caseOneExpected.size() - caseOneInput.size());
+        const bool caseOneTextOk = caseOneActual == caseOneExpected;
+        const bool caseOneSelectionOk =
+            caseOneStatus.value(QStringLiteral("selectionStart")).toInt() == selectionStart
+            && caseOneStatus.value(QStringLiteral("selectionEnd")).toInt() == expectedEnd
+            && caseOneStatus.value(QStringLiteral("cursorPosition")).toInt() == selectionStart;
+        keyPress({}, QStringLiteral("Z"), false, QStringLiteral("ctrl"));
+        const QString caseOneUndoText = editorText();
+        const QJsonObject caseOneUndoStatus = editorStatus();
+        const bool caseOneUndoOk = caseOneUndoText == caseOneInput
+            && caseOneUndoStatus.value(QStringLiteral("selectionStart")).toInt()
+                == selectionStart
+            && caseOneUndoStatus.value(QStringLiteral("selectionEnd")).toInt()
+                == selectionEnd
+            && caseOneUndoStatus.value(QStringLiteral("cursorPosition")).toInt()
+                == selectionStart;
+        const QJsonObject caseOneRedo = request(QStringLiteral("testRedo"));
+        const bool caseOneRedoOk =
+            caseOneRedo.value(QStringLiteral("text")).toString() == caseOneExpected;
+        addCjkCheck(checks, details, QStringLiteral("acceptanceCaseOne"),
+                    caseOneTextOk && caseOneSelectionOk && caseOneUndoOk && caseOneRedoOk,
+                    QStringLiteral("反向多行跨保护区选区"), QStringLiteral("Alt+F / Undo / Redo"),
+                    caseOneExpected, caseOneActual,
+                    QJsonObject{
+                        {QStringLiteral("status"), caseOneStatus},
+                        {QStringLiteral("undoStatus"), caseOneUndoStatus},
+                        {QStringLiteral("undoOk"), caseOneUndoOk},
+                        {QStringLiteral("redoOk"), caseOneRedoOk},
+                    });
+    }
+
+    // --- 验收用例二：整行格式化（未闭合公式段不操作） ---
+    {
+        const QString caseTwoInput = QStringLiteral(
+            "上一行ABC中文\n"
+            "$$x+1$$\n"
+            "甲A1乙，B2丙-日C3前`中A文`后$x中A$末$中文ABC\n"
+            "下一行中文ABC");
+        const QString caseTwoExpected = QStringLiteral(
+            "上一行ABC中文\n"
+            "$$x+1$$\n"
+            "甲 A1 乙，B2 丙-日 C3 前 `中A文` 后 $x中A$ 末$中文ABC\n"
+            "下一行中文ABC");
+        const int lineThreeStart = caseTwoInput.indexOf(QStringLiteral("甲"));
+        setTextAndSelection(caseTwoInput, lineThreeStart, lineThreeStart, lineThreeStart);
+        execute(QStringLiteral("formatSpacing"));
+        const QString caseTwoActual = editorText();
+        const QJsonObject caseTwoStatus = editorStatus();
+        const bool caseTwoTextOk = caseTwoActual == caseTwoExpected;
+        const bool caseTwoCursorOk =
+            caseTwoStatus.value(QStringLiteral("cursorPosition")).toInt() == lineThreeStart;
+        const QJsonObject caseTwoUndo = request(QStringLiteral("testUndo"));
+        const bool caseTwoUndoOk =
+            caseTwoUndo.value(QStringLiteral("text")).toString() == caseTwoInput;
+        addCjkCheck(checks, details, QStringLiteral("acceptanceCaseTwo"),
+                    caseTwoTextOk && caseTwoCursorOk && caseTwoUndoOk,
+                    QStringLiteral("整行格式化含未闭合公式"), QStringLiteral("Alt+F / Undo"),
+                    caseTwoExpected, caseTwoActual,
+                    QJsonObject{
+                        {QStringLiteral("status"), caseTwoStatus},
+                        {QStringLiteral("undoOk"), caseTwoUndoOk},
+                    });
+    }
+
+    // --- CJK Fix: IME (IME-001..008) ---
+    const auto imeAction = [](const QString &text) {
+        return [text] { return inputMethodCommit(text); };
+    };
+    cjkExpect(checks, details, QStringLiteral("imeAfterCjk"),
+              QStringLiteral("中文"), 2, 2, QStringLiteral("IME commit ABC"),
+              imeAction(QStringLiteral("ABC")), QStringLiteral("中文 ABC"), 6);
+    cjkExpect(checks, details, QStringLiteral("imeMiddle"),
+              QStringLiteral("中文"), 1, 1, QStringLiteral("IME commit ABC"),
+              imeAction(QStringLiteral("ABC")), QStringLiteral("中 ABC 文"), 6);
+    cjkExpect(checks, details, QStringLiteral("imeMultiCharInternalBoundaries"),
+              QStringLiteral("首尾"), 1, 1, QStringLiteral("IME commit A中文B"),
+              imeAction(QStringLiteral("A中文B")), QStringLiteral("首 A 中文 B 尾"), 9);
+    cjkExpect(checks, details, QStringLiteral("imeInlineCode"),
+              QStringLiteral("`中文`"), 1, 1, QStringLiteral("IME commit ABC in inline code"),
+              imeAction(QStringLiteral("ABC")), QStringLiteral("`ABC中文`"), 4);
+    cjkExpect(checks, details, QStringLiteral("imeInlineFormula"),
+              QStringLiteral("$中文$"), 1, 1, QStringLiteral("IME commit ABC in inline formula"),
+              imeAction(QStringLiteral("ABC")), QStringLiteral("$ABC中文$"), 4);
+    cjkExpect(checks, details, QStringLiteral("imeFence"),
+              QStringLiteral("```\n中文\n```"), 6, 6,
+              QStringLiteral("IME commit ABC in fenced code"),
+              imeAction(QStringLiteral("ABC")), QStringLiteral("```\n中文ABC\n```"), 9);
+    cjkExpect(checks, details, QStringLiteral("imeBlockFormula"),
+              QStringLiteral("$$\n中文\n$$"), 5, 5,
+              QStringLiteral("IME commit ABC in block formula"),
+              imeAction(QStringLiteral("ABC")), QStringLiteral("$$\n中文ABC\n$$"), 8);
+    cjkExpect(checks, details, QStringLiteral("imeWrapParen"),
+              QStringLiteral("中文"), 0, 2, QStringLiteral("IME commit ( on CJK selection"),
+              imeAction(QStringLiteral("(")), QStringLiteral("（中文）"), 3, 1, 3);
+    cjkExpect(checks, details, QStringLiteral("imeWrapBracket"),
+              QStringLiteral("中文"), 0, 2, QStringLiteral("IME commit [ on CJK selection"),
+              imeAction(QStringLiteral("[")), QStringLiteral("【中文】"), 3, 1, 3);
+    cjkExpect(checks, details, QStringLiteral("imeWrapDoubleQuote"),
+              QStringLiteral("中文"), 0, 2, QStringLiteral("IME commit \" on CJK selection"),
+              imeAction(QStringLiteral("\"")), QStringLiteral("“中文”"), 3, 1, 3);
+    cjkExpect(checks, details, QStringLiteral("imeWrapSingleQuote"),
+              QStringLiteral("中文"), 0, 2, QStringLiteral("IME commit ' on CJK selection"),
+              imeAction(QStringLiteral("'")), QStringLiteral("‘中文’"), 3, 1, 3);
+    cjkExpect(checks, details, QStringLiteral("imeWrapLessThan"),
+              QStringLiteral("中文"), 0, 2, QStringLiteral("IME commit < on CJK selection"),
+              imeAction(QStringLiteral("<")), QStringLiteral("<中文>"), 3, 1, 3);
+    cjkExpect(checks, details, QStringLiteral("imeWrapAsciiParen"),
+              QStringLiteral("ABC"), 0, 3, QStringLiteral("IME commit ( on ASCII selection"),
+              imeAction(QStringLiteral("(")), QStringLiteral("(ABC)"), 4, 1, 4);
+    cjkExpect(checks, details, QStringLiteral("imePunctuationNoConvert"),
+              QStringLiteral("中文"), 2, 2, QStringLiteral("IME commit ,"),
+              imeAction(QStringLiteral(",")), QStringLiteral("中文,"), 3);
+
+    // --- CJK Fix: Pure Parser Tests (PARSE-001..019) ---
+    using CjkText::ProtectedKind;
+    parseExpect(checks, details, QStringLiteral("parseFencedBlock"),
+                QStringLiteral("```js\n中文ABC\n```"),
+                {{0, 15, 6, 12, ProtectedKind::FencedCode}}, {});
+    parseExpect(checks, details, QStringLiteral("parseInvalidFenceTrailing"),
+                QStringLiteral("```js\n中文ABC\n```oops\n后续ABC\n```"),
+                {{0, 29, 6, 26, ProtectedKind::FencedCode}}, {});
+    parseExpect(checks, details, QStringLiteral("parseLongerOpeningRun"),
+                QStringLiteral("````\nabc\n```\nxyz\n````"),
+                {{0, 21, 5, 17, ProtectedKind::FencedCode}}, {});
+    parseExpect(checks, details, QStringLiteral("parseLongerClosingRun"),
+                QStringLiteral("```\nabc\n````"),
+                {{0, 12, 4, 8, ProtectedKind::FencedCode}}, {});
+    parseExpect(checks, details, QStringLiteral("parseTildeDoesNotClose"),
+                QStringLiteral("```\n~~~\n```"),
+                {{0, 11, 4, 8, ProtectedKind::FencedCode}}, {});
+    parseExpect(checks, details, QStringLiteral("parseFormulaMarkerInsideFence"),
+                QStringLiteral("```\n$$\n```\n中文A"),
+                {{0, 10, 4, 7, ProtectedKind::FencedCode}}, {});
+    parseExpect(checks, details, QStringLiteral("parseFenceMarkerInsideFormula"),
+                QStringLiteral("$$\n```\n$$\n中文A"),
+                {{0, 9, 3, 7, ProtectedKind::BlockFormula}}, {});
+    parseExpect(checks, details, QStringLiteral("parseSingleLineFormula"),
+                QStringLiteral("$$x+1$$\n中文A"),
+                {{0, 7, 2, 5, ProtectedKind::BlockFormula}}, {});
+    parseExpect(checks, details, QStringLiteral("parseSingleLineFormulaSpaces"),
+                QStringLiteral("$$ x $$"),
+                {{0, 7, 2, 5, ProtectedKind::BlockFormula}}, {});
+    parseExpect(checks, details, QStringLiteral("parseMultiLineFormula"),
+                QStringLiteral("$$\n中文\n$$"),
+                {{0, 8, 3, 6, ProtectedKind::BlockFormula}}, {});
+    parseExpect(checks, details, QStringLiteral("parseUnclosedFormula"),
+                QStringLiteral("$$\n中文"),
+                {{0, 5, 3, 5, ProtectedKind::BlockFormula}}, {});
+    parseExpect(checks, details, QStringLiteral("parseUnclosedFormulaLikeLine"),
+                QStringLiteral("$$x+1"), {}, {});
+    parseExpect(checks, details, QStringLiteral("parseInlineCode"),
+                QStringLiteral("`code`"),
+                {}, {{0, 6, 1, 5, ProtectedKind::InlineCode}});
+    parseExpect(checks, details, QStringLiteral("parseInlineCodeDoubleRun"),
+                QStringLiteral("``code``"),
+                {}, {{0, 8, 2, 6, ProtectedKind::InlineCode}});
+    parseExpect(checks, details, QStringLiteral("parseInlineCodeLongerRunRejected"),
+                QStringLiteral("`a``"), {}, {},
+                {{0, 4, 1, 4, ProtectedKind::InlineCode}});
+    parseExpect(checks, details, QStringLiteral("parseInlineCodeUnclosed"),
+                QStringLiteral("`unclosed"), {}, {},
+                {{0, 9, 1, 9, ProtectedKind::InlineCode}});
+    parseExpect(checks, details, QStringLiteral("parseInlineFormula"),
+                QStringLiteral("$x+1$"),
+                {}, {{0, 5, 1, 4, ProtectedKind::InlineFormula}});
+    parseExpect(checks, details, QStringLiteral("parseEscapedFormulaOpening"),
+                QStringLiteral("\\$x$"), {}, {},
+                {{3, 4, 4, 4, ProtectedKind::InlineFormula}});
+    parseExpect(checks, details, QStringLiteral("parseInlineInsideBlockIgnored"),
+                QStringLiteral("```\n`code` $x$\n```"),
+                {{0, 18, 4, 15, ProtectedKind::FencedCode}}, {});
+    parseExpect(checks, details, QStringLiteral("parseUnclosedFormulaTail"),
+                QStringLiteral("末$中文ABC"), {}, {},
+                {{1, 7, 2, 7, ProtectedKind::InlineFormula}});
+    parseExpect(checks, details, QStringLiteral("parseUnclosedBacktickTail"),
+                QStringLiteral("末`中文ABC"), {}, {},
+                {{1, 7, 2, 7, ProtectedKind::InlineCode}});
+    parseExpect(checks, details, QStringLiteral("parseClosedFormulaNoUnclosed"),
+                QStringLiteral("$x$"), {}, {{0, 3, 1, 2, ProtectedKind::InlineFormula}}, {});
+    parseExpect(checks, details, QStringLiteral("parseUnclosedAfterClosed"),
+                QStringLiteral("$x$末$中文ABC"),
+                {}, {{0, 3, 1, 2, ProtectedKind::InlineFormula}},
+                {{4, 10, 5, 10, ProtectedKind::InlineFormula}});
+
+    // --- CJK Fix: Pure Spacing Planner Tests (SPACE-001..018) ---
+    const auto spaceExpect = [&](const QString &name, const QString &text,
+                                 CjkText::BoundaryRange range,
+                                 const QVector<int> &expected,
+                                 const QString &expectedText,
+                                 bool allowPendingDelimiterSpacing = true) {
+        const CjkText::DocumentAnalysis analysis = CjkText::analyzeDocument(text);
+        const QVector<int> actual = CjkText::collectSpacingInsertions(
+            text, range, analysis, allowPendingDelimiterSpacing);
+        const QString actualText = applyInsertions(text, actual);
+        const auto joinInts = [](const QVector<int> &values) {
+            QStringList parts;
+            for (int value : values) {
+                parts << QString::number(value);
+            }
+            return parts.join(QLatin1Char(','));
+        };
+        QJsonObject detail{
+            {QStringLiteral("input"), text},
+            {QStringLiteral("range"), QStringLiteral("[%1,%2]").arg(range.first).arg(range.last)},
+            {QStringLiteral("expectedInsertions"), joinInts(expected)},
+            {QStringLiteral("actualInsertions"), joinInts(actual)},
+            {QStringLiteral("expectedText"), expectedText},
+            {QStringLiteral("actualText"), actualText},
+        };
+        addCheck(checks, details, name,
+                 actual == expected && actualText == expectedText, detail);
+    };
+
+    spaceExpect(QStringLiteral("spaceCjkAscii"), QStringLiteral("中文ABC"),
+                {1, 4}, {2}, QStringLiteral("中文 ABC"));
+    spaceExpect(QStringLiteral("spaceAsciiCjk"), QStringLiteral("ABC中文"),
+                {1, 4}, {3}, QStringLiteral("ABC 中文"));
+    spaceExpect(QStringLiteral("spaceCjkNumber"), QStringLiteral("中文123"),
+                {1, 4}, {2}, QStringLiteral("中文 123"));
+    spaceExpect(QStringLiteral("spaceAlnumOnly"), QStringLiteral("Python3"),
+                {1, 6}, {}, QStringLiteral("Python3"));
+    spaceExpect(QStringLiteral("spaceExistingSpace"), QStringLiteral("中文 ABC"),
+                {1, 5}, {}, QStringLiteral("中文 ABC"));
+    spaceExpect(QStringLiteral("spaceSoftSeparator"), QStringLiteral("中文，ABC"),
+                {1, 5}, {}, QStringLiteral("中文，ABC"));
+    spaceExpect(QStringLiteral("spaceHyphen"), QStringLiteral("中文-ABC"),
+                {1, 5}, {}, QStringLiteral("中文-ABC"));
+    spaceExpect(QStringLiteral("spaceSlash"), QStringLiteral("ABC/中文"),
+                {1, 5}, {}, QStringLiteral("ABC/中文"));
+    spaceExpect(QStringLiteral("spaceInlineCodeBoundaries"),
+                QStringLiteral("中文`code`中文"), {1, 8}, {2, 8},
+                QStringLiteral("中文 `code` 中文"));
+    spaceExpect(QStringLiteral("spaceInlineFormulaBoundaries"),
+                QStringLiteral("公式$x+1$成立"), {1, 7}, {2, 7},
+                QStringLiteral("公式 $x+1$ 成立"));
+    spaceExpect(QStringLiteral("spaceInlineCodeContent"),
+                QStringLiteral("`中文ABC`"), {1, 7}, {},
+                QStringLiteral("`中文ABC`"));
+    spaceExpect(QStringLiteral("spaceInlineFormulaContent"),
+                QStringLiteral("$中文ABC$"), {1, 6}, {},
+                QStringLiteral("$中文ABC$"));
+    spaceExpect(QStringLiteral("spaceInlineContentOnly"),
+                QStringLiteral("`中文ABC`"), {2, 6}, {},
+                QStringLiteral("`中文ABC`"));
+    spaceExpect(QStringLiteral("spaceTruncatedDelimiter"),
+                QStringLiteral("中文`code`文"), {1, 3}, {2},
+                QStringLiteral("中文 `code`文"));
+    spaceExpect(QStringLiteral("spaceInsideFence"),
+                QStringLiteral("```\n中文ABC\n```"), {1, 13}, {},
+                QStringLiteral("```\n中文ABC\n```"));
+    spaceExpect(QStringLiteral("spaceAfterFence"),
+                QStringLiteral("```\n```\n中文ABC"), {1, 13}, {10},
+                QStringLiteral("```\n```\n中文 ABC"));
+    spaceExpect(QStringLiteral("spaceAfterSingleLineFormula"),
+                QStringLiteral("$$x$$\n中文ABC"), {1, 10}, {8},
+                QStringLiteral("$$x$$\n中文 ABC"));
+    spaceExpect(QStringLiteral("spaceEmptyAndSingleCharRange"),
+                QStringLiteral("中文ABC"), {2, 1}, {},
+                QStringLiteral("中文ABC"));
+    spaceExpect(QStringLiteral("spacePendingBacktickStart"),
+                QStringLiteral("中文``"), {1, 3}, {2},
+                QStringLiteral("中文 ``"));
+    spaceExpect(QStringLiteral("spacePendingDollarStart"),
+                QStringLiteral("中文$"), {1, 2}, {2},
+                QStringLiteral("中文 $"));
+    spaceExpect(QStringLiteral("spaceEscapedDollarStart"),
+                QStringLiteral("中文\\$"), {1, 3}, {},
+                QStringLiteral("中文\\$"));
+    spaceExpect(QStringLiteral("spaceUnclosedFormulaAltF"),
+                QStringLiteral("末$中文ABC"), {1, 6}, {},
+                QStringLiteral("末$中文ABC"), /*allowPendingDelimiterSpacing=*/false);
+    {
+        const QString unclosedText = QStringLiteral("末$中文ABC");
+        const CjkText::DocumentAnalysis unclosedAnalysis =
+            CjkText::analyzeDocument(unclosedText);
+        const QVector<int> realtimeInsertions = CjkText::collectSpacingInsertions(
+            unclosedText, {1, 6}, unclosedAnalysis, /*allowPendingDelimiterSpacing=*/true);
+        addCheck(checks, details, QStringLiteral("spaceUnclosedFormulaRealtime"),
+                 realtimeInsertions == QVector<int>{1},
+                 QJsonObject{{QStringLiteral("insertions"),
+                              [&realtimeInsertions] {
+                                  QStringList values;
+                                  for (int value : realtimeInsertions) {
+                                      values << QString::number(value);
+                                  }
+                                  return values.join(QLatin1Char(','));
+                              }()}});
+    }
+
+    // --- CJK Fix: Performance Scaling Record ---
+    const QString perfSmall = buildPerfDocument(20000);
+    const QString perfLarge = buildPerfDocument(100000);
+    QElapsedTimer perfTimer;
+    perfTimer.start();
+    const CjkText::DocumentAnalysis smallAnalysis = CjkText::analyzeDocument(perfSmall);
+    const qint64 smallAnalyzeNs = perfTimer.nsecsElapsed();
+    perfTimer.restart();
+    const QVector<int> smallInsertions = CjkText::collectSpacingInsertions(
+        perfSmall, {1, static_cast<int>(perfSmall.size() - 1)}, smallAnalysis);
+    const qint64 smallCollectNs = perfTimer.nsecsElapsed();
+    perfTimer.restart();
+    const CjkText::DocumentAnalysis largeAnalysis = CjkText::analyzeDocument(perfLarge);
+    const qint64 largeAnalyzeNs = perfTimer.nsecsElapsed();
+    perfTimer.restart();
+    const QVector<int> largeInsertions = CjkText::collectSpacingInsertions(
+        perfLarge, {1, static_cast<int>(perfLarge.size() - 1)}, largeAnalysis);
+    const qint64 largeCollectNs = perfTimer.nsecsElapsed();
+    perfTimer.restart();
+    const CjkText::DocumentAnalysis imeAnalysis = CjkText::analyzeDocument(perfLarge);
+    const qint64 imeAnalyzeNs = perfTimer.nsecsElapsed();
+    perfTimer.restart();
+    const int footprintStart = perfLarge.size() / 2;
+    const QVector<int> imeInsertions = CjkText::collectSpacingInsertions(
+        perfLarge, {footprintStart, footprintStart + 100}, imeAnalysis);
+    const qint64 imeCollectNs = perfTimer.nsecsElapsed();
+    const bool perfScalingOk = largeAnalyzeNs < 25 * qMax<qint64>(1, smallAnalyzeNs)
+        && largeCollectNs < 25 * qMax<qint64>(1, smallCollectNs);
+    const bool perfStructureOk = largeAnalysis.blockSpans.size() >= 3
+        && largeAnalysis.inlineSpans.size() >= 100;
+    addCheck(checks, details, QStringLiteral("cjkPerfScaling"),
+             perfScalingOk && perfStructureOk,
+             QJsonObject{
+                 {QStringLiteral("smallLength"), perfSmall.size()},
+                 {QStringLiteral("largeLength"), perfLarge.size()},
+                 {QStringLiteral("smallAnalyzeMs"),
+                  QString::number(smallAnalyzeNs / 1000000.0, 'f', 3)},
+                 {QStringLiteral("smallCollectMs"),
+                  QString::number(smallCollectNs / 1000000.0, 'f', 3)},
+                 {QStringLiteral("largeAnalyzeMs"),
+                  QString::number(largeAnalyzeNs / 1000000.0, 'f', 3)},
+                 {QStringLiteral("largeCollectMs"),
+                  QString::number(largeCollectNs / 1000000.0, 'f', 3)},
+                 {QStringLiteral("imeAnalyzeMs"),
+                  QString::number(imeAnalyzeNs / 1000000.0, 'f', 3)},
+                 {QStringLiteral("imeCollectMs"),
+                  QString::number(imeCollectNs / 1000000.0, 'f', 3)},
+                 {QStringLiteral("blockSpans"), largeAnalysis.blockSpans.size()},
+                 {QStringLiteral("inlineSpans"), largeAnalysis.inlineSpans.size()},
+                 {QStringLiteral("smallInsertions"), smallInsertions.size()},
+                 {QStringLiteral("largeInsertions"), largeInsertions.size()},
+                 {QStringLiteral("imeInsertions"), imeInsertions.size()},
+             });
 
     bool allPassed = true;
     for (auto it = checks.constBegin(); it != checks.constEnd(); ++it) {
