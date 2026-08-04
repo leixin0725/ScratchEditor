@@ -1522,7 +1522,7 @@ int main(int argc, char *argv[])
               keyAction(QStringLiteral("中")), QStringLiteral("ABC 中"), 5);
     cjkExpect(checks, details, QStringLiteral("liveMiddleInsert"),
               QStringLiteral("中文"), 1, 1, QStringLiteral("key A"),
-              keyAction(QStringLiteral("A")), QStringLiteral("中 A 文"), 4);
+              keyAction(QStringLiteral("A")), QStringLiteral("中 A 文"), 3);
     cjkExpect(checks, details, QStringLiteral("liveInlineCodeMiddle"),
               QStringLiteral("`中文`"), 2, 2, QStringLiteral("key A inside inline code"),
               keyAction(QStringLiteral("A")), QStringLiteral("`中A文`"), 3);
@@ -1532,6 +1532,37 @@ int main(int argc, char *argv[])
     cjkExpect(checks, details, QStringLiteral("liveDollarOpeningSpacing"),
               QStringLiteral("中文"), 2, 2, QStringLiteral("key $ after CJK"),
               keyAction(QStringLiteral("$")), QStringLiteral("中文 $"), 4);
+
+    setTextAndSelection(QStringLiteral("中文"), 0, 0);
+    keyPress(QStringLiteral("A"), QStringLiteral("A"));
+    keyPress(QStringLiteral("B"), QStringLiteral("B"));
+    keyPress(QStringLiteral("C"), QStringLiteral("C"));
+    QThread::msleep(30);
+    const QString liveAsciiRunAfterCjkText = editorText();
+    const QJsonObject liveAsciiRunAfterCjkStatus = editorStatus();
+    addCjkCheck(checks, details, QStringLiteral("liveAsciiRunAfterCjk"),
+                liveAsciiRunAfterCjkText == QStringLiteral("ABC 中文")
+                    && liveAsciiRunAfterCjkStatus.value(
+                           QStringLiteral("cursorPosition")).toInt() == 3,
+                QStringLiteral("中文@0 + A B C"),
+                QStringLiteral("typing ABC before 中文"),
+                QStringLiteral("ABC 中文"), liveAsciiRunAfterCjkText,
+                liveAsciiRunAfterCjkStatus);
+
+    setTextAndSelection(QStringLiteral("中文"), 1, 1);
+    keyPress(QStringLiteral("A"), QStringLiteral("A"));
+    keyPress(QStringLiteral("B"), QStringLiteral("B"));
+    QThread::msleep(30);
+    const QString liveAsciiRunMiddleCjkText = editorText();
+    const QJsonObject liveAsciiRunMiddleCjkStatus = editorStatus();
+    addCjkCheck(checks, details, QStringLiteral("liveAsciiRunMiddleCjk"),
+                liveAsciiRunMiddleCjkText == QStringLiteral("中 AB 文")
+                    && liveAsciiRunMiddleCjkStatus.value(
+                           QStringLiteral("cursorPosition")).toInt() == 4,
+                QStringLiteral("中|文 + A B"),
+                QStringLiteral("typing AB between 中文"),
+                QStringLiteral("中 AB 文"), liveAsciiRunMiddleCjkText,
+                liveAsciiRunMiddleCjkStatus);
     cjkExpect(checks, details, QStringLiteral("liveInlineFormulaMiddle"),
               QStringLiteral("$中文$"), 2, 2, QStringLiteral("key A inside inline formula"),
               keyAction(QStringLiteral("A")), QStringLiteral("$中A文$"), 3);
@@ -1828,10 +1859,10 @@ int main(int argc, char *argv[])
               imeAction(QStringLiteral("ABC")), QStringLiteral("中文 ABC"), 6);
     cjkExpect(checks, details, QStringLiteral("imeMiddle"),
               QStringLiteral("中文"), 1, 1, QStringLiteral("IME commit ABC"),
-              imeAction(QStringLiteral("ABC")), QStringLiteral("中 ABC 文"), 6);
+              imeAction(QStringLiteral("ABC")), QStringLiteral("中 ABC 文"), 5);
     cjkExpect(checks, details, QStringLiteral("imeMultiCharInternalBoundaries"),
               QStringLiteral("首尾"), 1, 1, QStringLiteral("IME commit A中文B"),
-              imeAction(QStringLiteral("A中文B")), QStringLiteral("首 A 中文 B 尾"), 9);
+              imeAction(QStringLiteral("A中文B")), QStringLiteral("首 A 中文 B 尾"), 8);
     cjkExpect(checks, details, QStringLiteral("imeInlineCode"),
               QStringLiteral("`中文`"), 1, 1, QStringLiteral("IME commit ABC in inline code"),
               imeAction(QStringLiteral("ABC")), QStringLiteral("`ABC中文`"), 4);

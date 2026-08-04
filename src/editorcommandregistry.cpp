@@ -2403,8 +2403,10 @@ void EditorCommandRegistry::applyAutoSpacing(EditFootprint footprint,
     }
     editCursor.endEditBlock();
 
+    // 光标恰位于插入点时保持在其左侧：右外侧自动空格属于“已输入片段之后”的边界，
+    // 光标停在空格之前可让后续连续 ASCII 输入并入同一片段，而不是被逐个空格拆开。
     const int newCursor =
-        CjkText::positionAfterInsertions(cursorPosition, insertions, true);
+        CjkText::positionAfterInsertions(cursorPosition, insertions, false);
     const int newSelectionStart =
         CjkText::positionAfterInsertions(selectionStart, insertions, false);
     const int newSelectionEnd =
