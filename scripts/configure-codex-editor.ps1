@@ -95,13 +95,18 @@ if ([string]::IsNullOrWhiteSpace($userProfileDirectory)) {
     throw "USERPROFILE is not available."
 }
 $bashProfilePath = Join-Path $userProfileDirectory ".bashrc"
+$vscodeSettingsPath = Join-Path $env:APPDATA "Code\User\settings.json"
 $localInstallationDocument = Join-Path $projectRoot "docs\codex-editor-installation.local.md"
 $startMarker = "# >>> ScratchEditor Codex external editor >>>"
 $endMarker = "# <<< ScratchEditor Codex external editor <<<"
 $managedBlockLines = @(
     $startMarker,
     "# Managed by $($PSScriptRoot.Replace('\', '/'))/configure-codex-editor.ps1",
-    "export VISUAL='$bashCommand'",
+    'if [ "${TERM_PROGRAM:-}" = "vscode" ]; then',
+    "    export VISUAL='code --wait'",
+    'else',
+    "    export VISUAL='$bashCommand'",
+    'fi',
     'export EDITOR="$VISUAL"',
     $endMarker
 )
@@ -117,6 +122,8 @@ function Test-BashProfile {
     $profileText = Get-BashProfileText
     $expectedVisual = "export VISUAL='$bashCommand'"
     return $profileText.Contains($startMarker) `
+        -and $profileText.Contains('if [ "${TERM_PROGRAM:-}" = "vscode" ]; then') `
+        -and $profileText.Contains("export VISUAL='code --wait'") `
         -and $profileText.Contains($expectedVisual) `
         -and $profileText.Contains('export EDITOR="$VISUAL"')
 }
@@ -160,6 +167,58 @@ function Write-BashProfile {
     [System.IO.File]::WriteAllText($bashProfilePath, $profileText, $utf8WithoutBom)
 }
 
+function Test-VsCodeTerminalEnvironment {
+    if (-not (Test-Path -LiteralPath $vscodeSettingsPath -PathType Leaf)) {
+        return $false
+    }
+    $settingsText = [System.IO.File]::ReadAllText($vscodeSettingsPath)
+    $propertyMatch = [Regex]::Match(
+        $settingsText,
+        '(?ms)"terminal\.integrated\.env\.windows"\s*:\s*\{(?<body>.*?)\}')
+    if (-not $propertyMatch.Success) {
+        return $false
+    }
+    $body = $propertyMatch.Groups['body'].Value
+    return [Regex]::IsMatch($body, '"VISUAL"\s*:\s*"code --wait"') `
+        -and [Regex]::IsMatch($body, '"EDITOR"\s*:\s*"code --wait"')
+}
+
+function Write-VsCodeTerminalEnvironment {
+    if (Test-VsCodeTerminalEnvironment) {
+        return
+    }
+    if (Test-Path -LiteralPath $vscodeSettingsPath -PathType Leaf) {
+        $settingsText = [System.IO.File]::ReadAllText($vscodeSettingsPath)
+        if ($settingsText -match '"terminal\.integrated\.env\.windows"\s*:') {
+            throw "VS Code terminal.integrated.env.windows already exists with different VISUAL or EDITOR values."
+        }
+        $backupPath = "$vscodeSettingsPath.before-codex-editor.bak"
+        if (-not (Test-Path -LiteralPath $backupPath)) {
+            Copy-Item -LiteralPath $vscodeSettingsPath -Destination $backupPath
+        }
+    } else {
+        $settingsDirectory = Split-Path -Parent $vscodeSettingsPath
+        New-Item -ItemType Directory -Path $settingsDirectory -Force | Out-Null
+        $settingsText = "{}"
+    }
+
+    $newline = if ($settingsText.Contains("`r`n")) { "`r`n" } else { "`n" }
+    $propertyLines = @(
+        '    "terminal.integrated.env.windows": {',
+        '        "VISUAL": "code --wait",',
+        '        "EDITOR": "code --wait"',
+        '    },'
+    )
+    $propertyText = $newline + ($propertyLines -join $newline) + $newline
+    $openingBrace = $settingsText.IndexOf('{')
+    if ($openingBrace -lt 0) {
+        throw "VS Code settings.json does not contain a root object."
+    }
+    $settingsText = $settingsText.Insert($openingBrace + 1, $propertyText)
+    $utf8WithoutBom = New-Object System.Text.UTF8Encoding($false)
+    [System.IO.File]::WriteAllText($vscodeSettingsPath, $settingsText, $utf8WithoutBom)
+}
+
 function Write-LocalInstallationDocument {
     $generatedAt = [DateTimeOffset]::Now.ToString("yyyy-MM-dd HH:mm:ss zzz")
     $ahkScriptPath = "D:\Documents\AutoHotkey\KeysRedirect.ahk"
@@ -177,12 +236,16 @@ function Write-LocalInstallationDocument {
         ('| Project root | `' + $projectRoot + '` |'),
         ('| Build source | `' + $resolvedSourceEditorPath + '` |'),
         ('| Stable Codex editor | `' + $resolvedEditorPath + '` |'),
-        ('| `VISUAL` / `EDITOR` | `' + $windowsCommand + '` |'),
+        ('| Regular-terminal `VISUAL` / `EDITOR` | `' + $windowsCommand + '` |'),
+        '| VS Code integrated-terminal `VISUAL` / `EDITOR` | `code --wait` |',
         ('| Git Bash profile | `' + $bashProfilePath + '` |'),
+        ('| VS Code user settings | `' + $vscodeSettingsPath + '` |'),
         ('| Active AHK script | `' + $ahkScriptPath + '` |'),
         ('| AHK default ScratchEditor target | `' + $ahkEditorPath + '` |'),
         '',
-        'Codex uses the stable copy. Rebuilding the project does not update it automatically.',
+        'Ctrl+G uses VS Code inside the VS Code integrated terminal and the stable ScratchEditor copy in regular terminals.',
+        'Clickable Codex file citations continue to use VS Code in every terminal through `file_opener = "vscode"`.',
+        'Rebuilding the project does not update the stable ScratchEditor copy automatically.',
         'The project `build/` and `.tools/` directories can be cleaned after installation, but they must be restored before the next update.',
         '',
         '## Update the stable copy',
@@ -209,15 +272,18 @@ if ($Action -eq "Install") {
     [Environment]::SetEnvironmentVariable("VISUAL", $windowsCommand, "User")
     [Environment]::SetEnvironmentVariable("EDITOR", $windowsCommand, "User")
     Write-BashProfile
+    Write-VsCodeTerminalEnvironment
     Write-LocalInstallationDocument
 }
 
 $userVisual = [Environment]::GetEnvironmentVariable("VISUAL", "User")
 $userEditor = [Environment]::GetEnvironmentVariable("EDITOR", "User")
 $bashProfileConfigured = Test-BashProfile
+$vscodeTerminalConfigured = Test-VsCodeTerminalEnvironment
 $persistentConfigurationValid = $userVisual -eq $windowsCommand `
     -and $userEditor -eq $windowsCommand `
-    -and $bashProfileConfigured
+    -and $bashProfileConfigured `
+    -and $vscodeTerminalConfigured
 
 [PSCustomObject]@{
     ExpectedCommand = $windowsCommand
@@ -225,6 +291,8 @@ $persistentConfigurationValid = $userVisual -eq $windowsCommand `
     UserEditor = $userEditor
     GitBashProfile = $bashProfilePath
     GitBashConfigured = $bashProfileConfigured
+    VsCodeSettings = $vscodeSettingsPath
+    VsCodeTerminalConfigured = $vscodeTerminalConfigured
     LocalInstallationDocument = $localInstallationDocument
     CurrentProcessVisual = $env:VISUAL
     CurrentProcessEditor = $env:EDITOR

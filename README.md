@@ -153,6 +153,11 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\configure-code
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\configure-codex-editor.ps1 -Action Check
 ```
 
+外部编辑器按终端环境区分：VS Code 集成终端中的 `Ctrl+G` 使用 `code --wait`，普通终端使用稳定部署的
+ScratchEditor。Git Bash 通过 `TERM_PROGRAM=vscode` 判断；VS Code 用户设置中的
+`terminal.integrated.env.windows` 为 PowerShell、CMD 等其他集成终端注入相同变量。Codex 文件引用的
+点击行为不受此切换影响，仍由全局 `file_opener = "vscode"` 统一交给 VS Code。
+
 Codex 在 composer 中按 `Ctrl+G`；pi 也可在自己的 `settings.json` 中优先配置：
 
 ```json

@@ -48,6 +48,9 @@ pi 的官方设置文档以 `code --wait` 为例，说明调用方需要等待�
 和 Git Bash 配置；项目的 `build/` 或 `.tools/` 被清理后，Codex 外部编辑器仍可继续工作。脚本还会
 生成被 Git 忽略的 `docs/codex-editor-installation.local.md`，集中记录本机实际路径和更新命令；源码
 更新后需要重新执行 `-Action Install` 覆盖稳定副本，单纯重新构建不会自动更新 Codex 实际调用的程序。
+受管 Git Bash 配置还会检查 `TERM_PROGRAM=vscode`：VS Code 集成终端使用 `code --wait`，普通终端
+使用稳定部署的 ScratchEditor。该选择只影响 `Ctrl+G`；可点击文件引用仍由 Codex 的 `file_opener`
+独立控制。
 
 ## 实施前基线的阻塞点
 
