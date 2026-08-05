@@ -1350,10 +1350,10 @@ bool EditorCommandRegistry::transformSelectedLines(const QString &commandId)
             return commandId.back().digitValue();
         }
         if (commandId == QStringLiteral("increaseHeadingLevel")) {
-            return currentLevel == 0 ? 1 : qMin(6, currentLevel + 1);
+            return currentLevel == 0 ? 0 : qMin(6, currentLevel + 1);
         }
         if (commandId == QStringLiteral("decreaseHeadingLevel")) {
-            return currentLevel == 0 ? 6 : qMax(1, currentLevel - 1);
+            return currentLevel == 0 ? 0 : qMax(1, currentLevel - 1);
         }
         if (currentLevel == 0) {
             return 1;
@@ -1384,7 +1384,8 @@ bool EditorCommandRegistry::transformSelectedLines(const QString &commandId)
 
     for (QString &line : lines) {
         if (line.trimmed().isEmpty()) {
-            if (headingCommand && originalStart == originalEnd && lines.size() == 1) {
+            if (headingCommand && !adjustHeading && originalStart == originalEnd
+                && lines.size() == 1) {
                 const int targetLevel = targetHeadingLevel(0);
                 line = QString(targetLevel, QLatin1Char('#')) + QLatin1Char(' ');
             } else if (commandId == QStringLiteral("toggleQuote") && !removeQuote) {
@@ -1394,6 +1395,10 @@ bool EditorCommandRegistry::transformSelectedLines(const QString &commandId)
         }
         if (headingCommand) {
             const QRegularExpressionMatch match = headingPrefix.match(line);
+            if (adjustHeading && !match.hasMatch()) {
+                // Ctrl+Num+- / Ctrl+Num++ 只推进或回退已经存在的标题行。
+                continue;
+            }
             const int currentLevel = match.hasMatch() ? match.captured(1).size() : 0;
             int targetLevel = targetHeadingLevel(currentLevel);
             const bool togglesMatchingHeading = setHeading && match.hasMatch()
@@ -1431,6 +1436,12 @@ bool EditorCommandRegistry::transformSelectedLines(const QString &commandId)
     }
 
     const QString transformed = lines.join(QLatin1Char('\n'));
+    if (headingCommand && transformed == segment) {
+        // 没有任何行被实际修改（例如标题推进命令落在普通文本行上），
+        // 保持原有选区与光标不动，避免产生无意义的编辑块。
+        focusEditor();
+        return true;
+    }
     QTextCursor cursor(m_document);
     cursor.setPosition(lineStart);
     cursor.setPosition(lineEnd, QTextCursor::KeepAnchor);

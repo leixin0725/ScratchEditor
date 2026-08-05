@@ -245,7 +245,7 @@ EditorController::EditorController(bool testMode, QElapsedTimer *startupTimer,
         m_externalFileReady = m_externalFileSession->load(&m_externalFileText,
                                                           &m_externalFileError);
         m_statusMessage = m_externalFileReady
-            ? QStringLiteral("Ctrl+S / Esc 保存并返回 CLI")
+            ? QStringLiteral("Ctrl+S / Esc 保存并返回 CLI · Ctrl+W 不保存退出")
             : m_externalFileError;
         m_statusHealthy = m_externalFileReady;
     }
@@ -1257,6 +1257,11 @@ void EditorController::dispatchCommand(QLocalSocket *socket, const QJsonObject &
         response.insert(QStringLiteral("findClosed"), findClosed);
         response.insert(QStringLiteral("settingsClosed"), settingsClosed);
         sendResponse(socket, response, startedNs, requestId);
+    } else if (command == QStringLiteral("testDiscardClose")) {
+        discardAndHide();
+        QJsonObject response = statusObject();
+        response.insert(QStringLiteral("command"), command);
+        sendResponse(socket, response, startedNs, requestId);
     } else if (command == QStringLiteral("testResetShortcuts")) {
         resetShortcuts();
         QJsonObject response = statusObject();
@@ -1421,6 +1426,7 @@ void EditorController::showEditor()
     if (!m_ready || isVisible()) {
         return;
     }
+    m_discardClose = false;
     ++m_focusGeneration;
 
     // 记录唤起窗口：外部模式使用进程初始化时的前台快照，常驻模式
@@ -1458,7 +1464,8 @@ void EditorController::showEditor()
             m_editor->setProperty("cursorPosition", m_externalFileText.size());
             m_externalFileLoadedIntoEditor = true;
         }
-        setExternalFileState(true, QStringLiteral("Ctrl+S / Esc 保存并返回 CLI"));
+        setExternalFileState(true,
+                             QStringLiteral("Ctrl+S / Esc 保存并返回 CLI · Ctrl+W 不保存退出"));
     } else {
         QString clipboardText;
         QString clipboardError;
@@ -1575,6 +1582,23 @@ void EditorController::deliverAndHide()
     }
 }
 
+void EditorController::discardAndHide()
+{
+    if (externalFileMode()) {
+        // Ctrl+W：不写回文件，也不记忆窗口几何，完全回退到打开之前的状态。
+        if (m_externalFileCompleted) {
+            return;
+        }
+        m_externalFileCompleted = true;
+        m_discardClose = true;
+        restorePreviousFocus();
+        QTimer::singleShot(0, qApp, [] { QCoreApplication::exit(0); });
+        return;
+    }
+    // 普通剪贴板临时编辑器：只关闭窗口，不回写剪贴板，也不持久化任何状态。
+    commitAndHide(false, false);
+}
+
 bool EditorController::saveExternalFile()
 {
     if (!externalFileMode() || !m_editor) {
@@ -1606,7 +1630,8 @@ bool EditorController::saveExternalFile()
     }
 
     m_externalFileError.clear();
-    setExternalFileState(true, QStringLiteral("已保存 · Ctrl+S / Esc 保存并返回 CLI"));
+    setExternalFileState(true,
+                         QStringLiteral("已保存 · Ctrl+S / Esc 保存并返回 CLI · Ctrl+W 不保存退出"));
     return true;
 }
 
@@ -1626,7 +1651,7 @@ bool EditorController::commitExternalFileAndExit()
     return true;
 }
 
-bool EditorController::commitAndHide(bool deliverAfterHide)
+bool EditorController::commitAndHide(bool deliverAfterHide, bool persistState)
 {
     if (!m_window || (!m_window->isVisible() && !m_hiding) || !m_editor) {
         return true;
@@ -1635,18 +1660,22 @@ bool EditorController::commitAndHide(bool deliverAfterHide)
         return true;
     }
 
-    const QString text = m_editor->property("text").toString();
-    if (!text.isEmpty()) {
-        QString clipboardError;
-        if (!writeClipboardText(text, &clipboardError)) {
-            setClipboardState(false, clipboardError);
-            m_window->raise();
-            m_window->requestActivate();
-            QMetaObject::invokeMethod(m_editor, "forceActiveFocus");
-            return false;
+    if (persistState) {
+        const QString text = m_editor->property("text").toString();
+        if (!text.isEmpty()) {
+            QString clipboardError;
+            if (!writeClipboardText(text, &clipboardError)) {
+                setClipboardState(false, clipboardError);
+                m_window->raise();
+                m_window->requestActivate();
+                QMetaObject::invokeMethod(m_editor, "forceActiveFocus");
+                return false;
+            }
         }
+        setClipboardState(true);
+    } else {
+        m_discardClose = true;
     }
-    setClipboardState(true);
     m_deliverAfterHide = deliverAfterHide;
     const bool transitionRunning = m_windowTransitionGroup
         && m_windowTransitionGroup->state() == QAbstractAnimation::Running;
@@ -1940,7 +1969,7 @@ bool EditorController::writeClipboardText(const QString &text, QString *errorMes
 void EditorController::setClipboardState(bool healthy, const QString &message)
 {
     const QString newMessage = healthy
-        ? QStringLiteral("Esc 关闭并复制 · Ctrl+S 关闭并输入到下一个窗口")
+        ? QStringLiteral("Esc 关闭并复制 · Ctrl+S 关闭并输入 · Ctrl+W 关闭不保存")
         : message;
     const bool healthChanged = m_clipboardHealthy != healthy;
     const bool statusHealthChanged = m_statusHealthy != healthy;
@@ -2044,7 +2073,7 @@ void EditorController::updateWindowAnchor()
 
 void EditorController::saveWindowGeometry()
 {
-    if (!m_window || !m_settings || !m_positioned) {
+    if (m_discardClose || !m_window || !m_settings || !m_positioned) {
         return;
     }
     const bool transitionRunning = m_windowTransitionGroup

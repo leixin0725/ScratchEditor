@@ -581,6 +581,34 @@ int main(int argc, char *argv[])
                  && editorText() == QStringLiteral("### one\n### two"));
 
     setTextAndSelection(QStringLiteral("plain"), 2, 2);
+    const QJsonObject plainHeadingIncrease = execute(QStringLiteral("increaseHeadingLevel"));
+    setTextAndSelection(QStringLiteral("plain"), 2, 2);
+    const QJsonObject plainHeadingDecrease = execute(QStringLiteral("decreaseHeadingLevel"));
+    setTextAndSelection(QString(), 0, 0);
+    const QJsonObject emptyHeadingIncrease = execute(QStringLiteral("increaseHeadingLevel"));
+    setTextAndSelection(QStringLiteral("### title\nplain"), 0, 14);
+    const QJsonObject mixedHeadingIncrease = execute(QStringLiteral("increaseHeadingLevel"));
+    setTextAndSelection(QStringLiteral("# only"), 2, 2);
+    const QJsonObject levelOneDecrease = execute(QStringLiteral("decreaseHeadingLevel"));
+    addCheck(checks, details, QStringLiteral("directionalHeadingsOnlyExistingHeadingLines"),
+             plainHeadingIncrease.value(QStringLiteral("text")).toString()
+                     == QStringLiteral("plain")
+                 && plainHeadingIncrease.value(QStringLiteral("cursorPosition")).toInt() == 2
+                 && plainHeadingDecrease.value(QStringLiteral("text")).toString()
+                     == QStringLiteral("plain")
+                 && emptyHeadingIncrease.value(QStringLiteral("text")).toString().isEmpty()
+                 && emptyHeadingIncrease.value(QStringLiteral("cursorPosition")).toInt() == 0
+                 && mixedHeadingIncrease.value(QStringLiteral("text")).toString()
+                     == QStringLiteral("#### title\nplain")
+                 && levelOneDecrease.value(QStringLiteral("text")).toString()
+                     == QStringLiteral("# only"),
+             QJsonObject{{QStringLiteral("increasePlain"), plainHeadingIncrease},
+                         {QStringLiteral("decreasePlain"), plainHeadingDecrease},
+                         {QStringLiteral("increaseEmpty"), emptyHeadingIncrease},
+                         {QStringLiteral("increaseMixed"), mixedHeadingIncrease},
+                         {QStringLiteral("decreaseLevelOne"), levelOneDecrease}});
+
+    setTextAndSelection(QStringLiteral("plain"), 2, 2);
     const QJsonObject collapsedDirectHeading = execute(QStringLiteral("setHeading2"));
     setTextAndSelection(QStringLiteral("# plain"), 5, 5);
     const QJsonObject collapsedCycledHeading = execute(QStringLiteral("cycleHeading"));

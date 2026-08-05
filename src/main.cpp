@@ -130,6 +130,12 @@ int main(int argc, char *argv[])
             controller.completeExternalFileTest(replacementText);
         });
     }
+    if (externalFileMode && controller.testMode()
+        && qEnvironmentVariableIsSet("SCRATCHEDITOR_EXTERNAL_TEST_DISCARD")) {
+        QTimer::singleShot(500, &controller, [&controller] {
+            controller.discardAndHide();
+        });
+    }
 
     return app.exec();
 }

@@ -115,6 +115,17 @@ bool sendCtrlS(HWND window)
     return true;
 }
 
+bool sendCtrlW(HWND window)
+{
+    Q_UNUSED(window);
+    // 与 Ctrl+S 相同，PostMessage 无法携带全局修饰键状态，改用真实注入。
+    keybd_event(VK_CONTROL, 0, 0, 0);
+    keybd_event('W', 0, 0, 0);
+    keybd_event('W', 0, KEYEVENTF_KEYUP, 0);
+    keybd_event(VK_CONTROL, 0, KEYEVENTF_KEYUP, 0);
+    return true;
+}
+
 void forceForeground(HWND window)
 {
     const DWORD currentThread = GetCurrentThreadId();
@@ -337,6 +348,36 @@ int main(int argc, char *argv[])
     const QJsonObject afterDeliverStatus = command(QStringLiteral("status"));
     details.insert(QStringLiteral("ctrlSForegroundAfterHide"),
                    afterDeliverStatus.value(QStringLiteral("foregroundHwnd")).toString());
+
+    const QString clipboardBeforeDiscard = readClipboardText();
+    const QString discardText = QStringLiteral("Ctrl+W 关闭不保存回归测试：中文");
+    command(QStringLiteral("show"));
+    command(QStringLiteral("testSetText"), {{QStringLiteral("text"), discardText}});
+    SetForegroundWindow(editorWindow);
+    QThread::msleep(50);
+    const bool ctrlWSent = sendCtrlW(editorWindow);
+    const QJsonObject discardedStatus = waitForStatus([](const QJsonObject &status) {
+        return !status.value(QStringLiteral("visible")).toBool();
+    });
+    const QString discardedClipboard = readClipboardText();
+    checks.insert(QStringLiteral("ctrlWClosesWithoutSaving"),
+                  ctrlWSent && !discardedStatus.value(QStringLiteral("visible")).toBool()
+                      && discardedClipboard == clipboardBeforeDiscard);
+    details.insert(QStringLiteral("ctrlWStatus"), discardedStatus);
+    details.insert(QStringLiteral("ctrlWClipboardBefore"), clipboardBeforeDiscard);
+    details.insert(QStringLiteral("ctrlWClipboardAfter"), discardedClipboard);
+
+    // 无前台焦点环境下键盘注入不可用；用测试专用 IPC 再次确定性验证
+    // Ctrl+W 语义：窗口关闭且不回写剪贴板。
+    command(QStringLiteral("show"));
+    command(QStringLiteral("testSetText"), {{QStringLiteral("text"), discardText}});
+    const QJsonObject discardedViaIpc = command(QStringLiteral("testDiscardClose"));
+    const QString discardedViaIpcClipboard = readClipboardText();
+    checks.insert(QStringLiteral("ctrlWIpcClosesWithoutSaving"),
+                  !discardedViaIpc.value(QStringLiteral("visible")).toBool()
+                      && discardedViaIpcClipboard == clipboardBeforeDiscard);
+    details.insert(QStringLiteral("ctrlWIpcStatus"), discardedViaIpc);
+    details.insert(QStringLiteral("ctrlWIpcClipboardAfter"), discardedViaIpcClipboard);
 
     command(QStringLiteral("show"));
     const QString lockedWriteText = QStringLiteral("系统回归剪贴板写入异常保留内容");

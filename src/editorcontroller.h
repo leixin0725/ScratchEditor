@@ -95,6 +95,7 @@ public:
     Q_INVOKABLE void registerEditor(QObject *editor);
     Q_INVOKABLE void hideEditor();
     Q_INVOKABLE void deliverAndHide();
+    Q_INVOKABLE void discardAndHide();
     Q_INVOKABLE bool saveExternalFile();
     Q_INVOKABLE void animationBenchmarkFinished();
     Q_INVOKABLE bool executeCommand(const QString &commandId);
@@ -147,7 +148,7 @@ private:
                         const QString &requestId, const QJsonObject &request);
     void waitForNextFrame(QLocalSocket *socket, QJsonObject response, qint64 startedNs,
                           const QString &requestId);
-    bool commitAndHide(bool deliverAfterHide = false);
+    bool commitAndHide(bool deliverAfterHide = false, bool persistState = true);
     bool commitExternalFileAndExit();
     void setExternalFileState(bool healthy, const QString &message);
     void startWindowTransition(qreal targetOpacity, const QRect &targetGeometry,
@@ -209,7 +210,7 @@ private:
     bool m_positioned = false;
     bool m_firstFrameCaptured = false;
     QString m_firstFrameColor;
-    QString m_statusMessage = QStringLiteral("Esc 关闭并复制 · Ctrl+S 关闭并输入到下一个窗口");
+    QString m_statusMessage = QStringLiteral("Esc 关闭并复制 · Ctrl+S 关闭并输入 · Ctrl+W 关闭不保存");
     bool m_statusHealthy = true;
     bool m_clipboardHealthy = true;
     quintptr m_startupForegroundWindow = 0;
@@ -232,6 +233,7 @@ private:
     int m_screenOverlapRetries = 0;
     bool m_hiding = false;
     bool m_hideWhenAnimationFinishes = false;
+    bool m_discardClose = false;
     bool m_windowTransitionPreparationStable = true;
     QString m_settingsError;
     QTimer m_screenConfigurationTimer;

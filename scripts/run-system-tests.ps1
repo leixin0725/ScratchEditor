@@ -205,6 +205,8 @@ try {
         smartScrollbar = [bool]$systemBehavior.checks.smartScrollBar
         escapeClosesAndCopies = [bool]$systemBehavior.checks.escapeClosesAndCopies
         ctrlSClosesAndDelivers = [bool]$systemBehavior.checks.ctrlSClosesAndDelivers
+        ctrlWClosesWithoutSaving = [bool]$systemBehavior.checks.ctrlWClosesWithoutSaving
+        ctrlWIpcClosesWithoutSaving = [bool]$systemBehavior.checks.ctrlWIpcClosesWithoutSaving
         focusNotPulledBack = [bool]$systemBehavior.checks.focusNotPulledBack
         clipboardReadFailure = [bool]$systemBehavior.checks.clipboardReadFailureIsVisible
         clipboardWriteFailure = [bool]$systemBehavior.checks.clipboardWriteFailureKeepsEditor

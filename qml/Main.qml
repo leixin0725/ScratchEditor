@@ -176,6 +176,14 @@ Window {
     }
 
     Shortcut {
+        sequence: "Ctrl+W"
+        context: Qt.WindowShortcut
+        enabled: root.visible && !findPanel.visible && !commandPaletteLoader.active
+                 && !settingsLoader.active
+        onActivated: controller.discardAndHide()
+    }
+
+    Shortcut {
         sequence: "F3"
         context: Qt.WindowShortcut
         enabled: root.visible && findPanel.visible

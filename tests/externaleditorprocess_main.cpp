@@ -67,6 +67,17 @@ bool sendCtrlS(HWND window)
     keybd_event(VK_CONTROL, 0, KEYEVENTF_KEYUP, 0);
     return true;
 }
+
+bool sendCtrlW(HWND window)
+{
+    Q_UNUSED(window);
+    // 与 Ctrl+S 相同，PostMessage 无法携带全局修饰键状态，改用真实注入。
+    keybd_event(VK_CONTROL, 0, 0, 0);
+    keybd_event('W', 0, 0, 0);
+    keybd_event('W', 0, KEYEVENTF_KEYUP, 0);
+    keybd_event(VK_CONTROL, 0, KEYEVENTF_KEYUP, 0);
+    return true;
+}
 #endif
 
 bool check(bool condition, const QString &message)
@@ -263,6 +274,83 @@ int main(int argc, char *argv[])
         ctrlSProcess.kill();
         ctrlSProcess.waitForFinished(5000);
     }
+
+    const QString ctrlWFile = temporaryDirectory.filePath(
+        QStringLiteral("ctrl-w-discard-and-exit.md"));
+    failures += !check(writeText(ctrlWFile, QStringLiteral("# ctrl-w original\n")),
+                       QStringLiteral("无法创建 Ctrl+W 生命周期夹具"));
+    QProcess ctrlWProcess;
+    ctrlWProcess.setProcessEnvironment(residentEnvironment);
+    ctrlWProcess.setProgram(editor);
+    ctrlWProcess.setArguments(
+        {QStringLiteral("--test-mode"), QStringLiteral("--wait"), ctrlWFile});
+    ctrlWProcess.start();
+    failures += !check(ctrlWProcess.waitForStarted(5000),
+                       QStringLiteral("Ctrl+W 外部编辑进程无法启动"));
+    HWND ctrlWWindow = nullptr;
+    for (int attempt = 0; attempt < 200 && !ctrlWWindow; ++attempt) {
+        ctrlWWindow = findTopLevelWindow(static_cast<DWORD>(ctrlWProcess.processId()));
+        if (!ctrlWWindow) {
+            QThread::msleep(25);
+        }
+    }
+    failures += !check(ctrlWWindow != nullptr,
+                       QStringLiteral("Ctrl+W 外部编辑窗口未在预期时间内出现"));
+    if (ctrlWWindow) {
+        forceForeground(ctrlWWindow);
+        QThread::msleep(50);
+        const bool ctrlWSent = sendCtrlW(ctrlWWindow);
+        failures += !check(ctrlWProcess.waitForFinished(10000),
+                           QStringLiteral("Ctrl+W 后外部编辑进程未退出"));
+        failures += !check(
+            ctrlWSent && ctrlWProcess.exitStatus() == QProcess::NormalExit
+                && ctrlWProcess.exitCode() == 0,
+            QStringLiteral("Ctrl+W 应不保存并正常退出，实际退出码为 %1")
+                .arg(ctrlWProcess.exitCode()));
+        failures += !check(readText(ctrlWFile) == QStringLiteral("# ctrl-w original\n"),
+                           QStringLiteral("Ctrl+W 不应改写外部文件内容"));
+    } else {
+        ctrlWProcess.kill();
+        ctrlWProcess.waitForFinished(5000);
+    }
+#endif
+
+    // 无前台焦点的无头环境无法使用真实键盘注入；用测试专用自动丢弃路径
+    // 确定性验证 Ctrl+W 的语义：正常退出且不改写文件。
+    const QString discardFile = temporaryDirectory.filePath(
+        QStringLiteral("deterministic-discard-and-exit.md"));
+    failures += !check(writeText(discardFile, QStringLiteral("# discard original\n")),
+                       QStringLiteral("无法创建确定性 Ctrl+W 生命周期夹具"));
+#ifdef Q_OS_WIN
+    const QString settingsFilePath = QDir(QDir::tempPath() + QStringLiteral("/ScratchEditor/tests"))
+                                         .filePath(QStringLiteral("ScratchEditor.ExternalProcessTests.%1.ini")
+                                                       .arg(QCoreApplication::applicationPid()));
+    QSettings settingsBeforeDiscard(settingsFilePath, QSettings::IniFormat);
+    const QStringList settingsKeysBeforeDiscard = settingsBeforeDiscard.allKeys();
+#endif
+    QProcess discardProcess;
+    QProcessEnvironment discardEnvironment = residentEnvironment;
+    discardEnvironment.insert(QStringLiteral("SCRATCHEDITOR_EXTERNAL_TEST_DISCARD"),
+                              QStringLiteral("1"));
+    discardProcess.setProcessEnvironment(discardEnvironment);
+    discardProcess.setProgram(editor);
+    discardProcess.setArguments(
+        {QStringLiteral("--test-mode"), QStringLiteral("--wait"), discardFile});
+    discardProcess.start();
+    failures += !check(discardProcess.waitForStarted(5000),
+                       QStringLiteral("Ctrl+W 丢弃进程无法启动"));
+    failures += !check(discardProcess.waitForFinished(10000),
+                       QStringLiteral("Ctrl+W 丢弃后外部编辑进程未退出"));
+    failures += !check(discardProcess.exitStatus() == QProcess::NormalExit
+                           && discardProcess.exitCode() == 0,
+                       QStringLiteral("Ctrl+W 丢弃应正常退出，实际退出码为 %1")
+                           .arg(discardProcess.exitCode()));
+    failures += !check(readText(discardFile) == QStringLiteral("# discard original\n"),
+                       QStringLiteral("Ctrl+W 丢弃不应改写外部文件内容"));
+#ifdef Q_OS_WIN
+    QSettings settingsAfterDiscard(settingsFilePath, QSettings::IniFormat);
+    failures += !check(settingsAfterDiscard.allKeys() == settingsKeysBeforeDiscard,
+                       QStringLiteral("Ctrl+W 丢弃不应写入任何设置项"));
 #endif
 
     if (residentProcess.state() != QProcess::NotRunning) {
