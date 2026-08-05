@@ -28,6 +28,7 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\run-editing-te
 
 - 完整回归顺序以 `tests/README.md` 为准（release → system → 外部编辑器 → editing → window-ui → ahk → perf）。
 - `quit` 只是 test-mode IPC 命令，不是命令行参数；禁止执行 `ScratchEditor.exe --quit`。
+- 每次构建完成但未部署到稳定版时，主动向用户汇报可测试的可执行文件位置。
 
 ## 架构与运行边界
 

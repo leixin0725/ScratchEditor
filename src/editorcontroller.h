@@ -1,5 +1,6 @@
 #pragma once
 
+#include <QAbstractNativeEventFilter>
 #include <QElapsedTimer>
 #include <QFileSystemWatcher>
 #include <QHash>
@@ -12,12 +13,14 @@
 #include <QString>
 #include <QTimer>
 #include <QVariantList>
+#include <QVector>
 
 #include <memory>
 
 class QLocalSocket;
 class QParallelAnimationGroup;
 class QQuickWindow;
+class QScreen;
 class QVariantAnimation;
 class AppSettings;
 class EditorCommandRegistry;
@@ -25,13 +28,14 @@ class ExternalFileSession;
 class MarkdownHighlighter;
 class MarkdownStyle;
 
-class EditorController final : public QObject
+class EditorController final : public QObject, public QAbstractNativeEventFilter
 {
     Q_OBJECT
     Q_PROPERTY(bool visible READ isVisible NOTIFY visibleChanged)
     Q_PROPERTY(bool testMode READ testMode CONSTANT)
     Q_PROPERTY(bool externalFileMode READ externalFileMode CONSTANT)
     Q_PROPERTY(QString externalFileName READ externalFileName CONSTANT)
+    Q_PROPERTY(QString externalCliType READ externalCliType CONSTANT)
     Q_PROPERTY(QString statusMessage READ statusMessage NOTIFY statusMessageChanged)
     Q_PROPERTY(bool statusHealthy READ statusHealthy NOTIFY statusMessageChanged)
     Q_PROPERTY(bool clipboardHealthy READ clipboardHealthy NOTIFY clipboardStateChanged)
@@ -54,6 +58,9 @@ public:
                               const QString &externalFilePath = {}, QObject *parent = nullptr);
     ~EditorController() override;
 
+    bool nativeEventFilter(const QByteArray &eventType, void *message,
+                           qintptr *result) override;
+
     static QString serverName();
     static bool forwardToExistingInstance(const QString &command, int timeoutMs = 250);
 
@@ -65,6 +72,7 @@ public:
     bool externalFileReady() const;
     QString externalFileName() const;
     QString externalFileError() const;
+    QString externalCliType() const;
     bool completeExternalFileTest(const QString &text);
     QString statusMessage() const;
     bool statusHealthy() const;
@@ -155,7 +163,15 @@ private:
     void setClipboardState(bool healthy, const QString &message = {});
     bool restoreWindowGeometry();
     void saveWindowGeometry();
+    void updateWindowAnchor();
     QRect validatedWindowGeometry(const QRect &requested) const;
+    QJsonObject queryExistingInstance(const QString &command, int timeoutMs = 300) const;
+    QSize windowDefaultSize() const;
+    QSize windowMinimumSize() const;
+    QVector<QRect> availableScreenGeometries() const;
+    void watchScreen(QScreen *screen);
+    void scheduleScreenConfigurationUpdate();
+    void handleScreenConfigurationChanged();
     void restorePreviousFocus();
     QJsonObject statusObject() const;
     void runLargeDocumentBenchmark(QLocalSocket *socket, qint64 startedNs,
@@ -187,6 +203,7 @@ private:
     bool m_externalFileCompleted = false;
     QString m_externalFileText;
     QString m_externalFileError;
+    QString m_externalCliType;
     bool m_ready = false;
     qint64 m_readyStartupMs = -1;
     bool m_positioned = false;
@@ -195,6 +212,7 @@ private:
     QString m_statusMessage = QStringLiteral("Esc 关闭并复制 · Ctrl+S 关闭并输入到下一个窗口");
     bool m_statusHealthy = true;
     bool m_clipboardHealthy = true;
+    quintptr m_startupForegroundWindow = 0;
     quintptr m_previousForegroundWindow = 0;
     bool m_deliverAfterHide = false;
     quint64 m_focusGeneration = 0;
@@ -208,10 +226,17 @@ private:
     QVariantAnimation *m_windowOpacityAnimation = nullptr;
     QVariantAnimation *m_windowGeometryAnimation = nullptr;
     QRect m_windowRestingGeometry;
+    QString m_windowScreenName;
+    QPoint m_windowScreenOffset;
+    bool m_screenAdditionPending = false;
+    int m_screenOverlapRetries = 0;
     bool m_hiding = false;
     bool m_hideWhenAnimationFinishes = false;
     bool m_windowTransitionPreparationStable = true;
     QString m_settingsError;
+    QTimer m_screenConfigurationTimer;
+    QTimer m_displayChangeSettleTimer;
+    bool m_nativeDisplayChangeActive = false;
 
     PendingRequest m_pendingInput;
     QElapsedTimer m_inputTimer;

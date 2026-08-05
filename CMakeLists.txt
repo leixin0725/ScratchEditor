@@ -33,6 +33,8 @@ qt_add_executable(ScratchEditor WIN32
     src/markdownhighlighter.h
     src/markdownstyle.cpp
     src/markdownstyle.h
+    src/windowplacement.cpp
+    src/windowplacement.h
 )
 
 set(SCRATCHEDITOR_MARKDOWN_STYLE
@@ -78,7 +80,11 @@ qt_add_executable(ScratchEditorEditingTests
 
 qt_add_executable(ScratchEditorWindowUiTests
     tests/window_ui_main.cpp
+    src/windowplacement.cpp
+    src/windowplacement.h
 )
+
+target_include_directories(ScratchEditorWindowUiTests PRIVATE src)
 
 target_link_libraries(ScratchEditorWindowUiTests PRIVATE
     Qt6::Core

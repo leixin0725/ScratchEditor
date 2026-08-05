@@ -242,7 +242,11 @@ Window {
             anchors.left: parent.left
             anchors.leftMargin: root.marginSize - root.resizeMargin
             anchors.verticalCenter: parent.verticalCenter
-            text: controller.externalFileMode ? "外部提示词编辑器" : "临时编辑器"
+            text: controller.externalFileMode
+                  ? (controller.externalCliType.length > 0
+                     ? "外部提示词编辑器 · " + controller.externalCliType
+                     : "外部提示词编辑器")
+                  : "临时编辑器"
             color: root.themeStrongTextColor
             font.family: root.uiFontFamily
             font.pointSize: 11

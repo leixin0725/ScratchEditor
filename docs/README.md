@@ -3,6 +3,11 @@
 当前使用方式和默认快捷键以根目录 [`README.md`](../README.md) 为准。历史文档统一
 保存在 `archive/`，命名说明见 [`archive/NAMING-NOTE.md`](archive/NAMING-NOTE.md)。
 
+## 更新记录
+
+- [`2026-08-05-window-hotplug/`](2026-08-05-window-hotplug/README.md)：窗口放置与
+  外部提示词编辑器更新（独立几何记忆、多屏热插拔修复、外部文件静默退出、CLI 类型标题）。
+
 ## 历史归档
 
 归档报告是对应验收时点的历史快照，已记录的命令数量、快捷键、进程 ID、哈希和性能

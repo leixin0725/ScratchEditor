@@ -4,6 +4,8 @@
 #include <QFileInfo>
 #include <QProcess>
 #include <QProcessEnvironment>
+#include <QRect>
+#include <QSettings>
 #include <QTemporaryDir>
 #include <QTextStream>
 #include <QThread>
@@ -200,6 +202,27 @@ int main(int argc, char *argv[])
                        QStringLiteral("两个并发文件会话发生覆盖或丢失"));
     failures += !check(residentProcess.state() != QProcess::NotRunning,
                        QStringLiteral("外部文件会话不得结束或复用既有常驻实例"));
+
+#ifdef Q_OS_WIN
+    // 外部模式只把尺寸写入独立的 window/externalGeometry，
+    // 不得写入或覆盖临时编辑器的 window/geometry。
+    const QString settingsFile = QDir(QDir::tempPath() + QStringLiteral("/ScratchEditor/tests"))
+                                     .filePath(QStringLiteral("ScratchEditor.ExternalProcessTests.%1.ini")
+                                                   .arg(QCoreApplication::applicationPid()));
+    QSettings settings(settingsFile, QSettings::IniFormat);
+    const QVariant externalVariant =
+        settings.value(QStringLiteral("window/externalGeometry"));
+    const QRect externalGeometry =
+        externalVariant.canConvert<QRect>() ? externalVariant.toRect() : QRect();
+    const bool externalSizeSaved = externalGeometry.isValid()
+        && externalGeometry.x() == 0 && externalGeometry.y() == 0
+        && externalGeometry.width() > 0 && externalGeometry.height() > 0;
+    const bool tempKeyUntouched =
+        !settings.value(QStringLiteral("window/geometry")).isValid();
+    failures += !check(externalSizeSaved && tempKeyUntouched,
+                       QStringLiteral("外部模式尺寸记忆应独立写入 window/externalGeometry "
+                                      "且不触碰 window/geometry"));
+#endif
 
 #ifdef Q_OS_WIN
     const QString ctrlSFile = temporaryDirectory.filePath(

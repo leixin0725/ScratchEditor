@@ -5,7 +5,12 @@
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QLocalSocket>
+#include <QRect>
+#include <QSize>
 #include <QThread>
+#include <QVector>
+
+#include "windowplacement.h"
 
 namespace {
 
@@ -74,6 +79,127 @@ bool hasKey(const QJsonArray &keys, const QString &key)
     return false;
 }
 
+QJsonObject rectToJson(const QRect &rect)
+{
+    return {{QStringLiteral("x"), rect.x()},
+            {QStringLiteral("y"), rect.y()},
+            {QStringLiteral("width"), rect.width()},
+            {QStringLiteral("height"), rect.height()}};
+}
+
+void addPlacementUnitChecks(QJsonObject &checks, QJsonObject &details)
+{
+    using WindowPlacement::fitRestoredGeometry;
+    using WindowPlacement::nativeToLogicalRect;
+    using WindowPlacement::placeNearWindow;
+    const QSize minimum(500, 320);
+    const QSize defaultSize(920, 640);
+
+    const QVector<QRect> twoScreens{
+        QRect(0, 0, 1920, 1080), QRect(1920, 0, 1920, 1080)};
+    const QVector<QRect> singleScreen{QRect(0, 0, 1920, 1080)};
+    const QVector<QRect> smallScreen{QRect(0, 0, 400, 300)};
+    const QVector<QRect> smallReferenceScreen{
+        QRect(0, 0, 1000, 700), QRect(1920, 0, 1920, 1080)};
+
+    const QRect mixedDpiMapped = nativeToLogicalRect(
+        QRect(2304, 180, 1024, 720), QRect(2048, 0, 2560, 1440),
+        QRect(2048, 0, 2048, 1152));
+    addCheck(checks, details, QStringLiteral("placementMapsMixedDpiSecondaryOrigin"),
+             mixedDpiMapped == QRect(2253, 144, 819, 576),
+             rectToJson(mixedDpiMapped));
+
+    const QRect leftScreenMapped = nativeToLogicalRect(
+        QRect(-2304, 160, 1024, 640), QRect(-2560, 0, 2560, 1600),
+        QRect(-2560, 0, 2048, 1280));
+    addCheck(checks, details, QStringLiteral("placementMapsNegativeSecondaryOrigin"),
+             leftScreenMapped == QRect(-2355, 128, 819, 512),
+             rectToJson(leftScreenMapped));
+
+    const auto inside = fitRestoredGeometry(QRect(100, 100, 800, 600), minimum, twoScreens);
+    addCheck(checks, details, QStringLiteral("placementFitRestoredInside"),
+             inside && *inside == QRect(100, 100, 800, 600),
+             inside ? QJsonValue(rectToJson(*inside)) : QJsonValue(false));
+
+    const auto straddle = fitRestoredGeometry(QRect(1900, 100, 100, 600), minimum, twoScreens);
+    addCheck(checks, details, QStringLiteral("placementFitRestoredStraddle"),
+             straddle && *straddle == QRect(1920, 100, 500, 600),
+             straddle ? QJsonValue(rectToJson(*straddle)) : QJsonValue(false));
+
+    const auto offScreens = fitRestoredGeometry(QRect(5000, 5000, 800, 600), minimum, twoScreens);
+    addCheck(checks, details, QStringLiteral("placementFitRestoredOffScreensInvalid"),
+             !offScreens.has_value(), offScreens ? QJsonValue(rectToJson(*offScreens))
+                                                 : QJsonValue(QStringLiteral("invalid")));
+
+    const auto oversize = fitRestoredGeometry(QRect(0, 0, 3000, 1500), minimum, singleScreen);
+    addCheck(checks, details, QStringLiteral("placementFitRestoredShrinksOversize"),
+             oversize && *oversize == QRect(0, 0, 1920, 1080),
+             oversize ? QJsonValue(rectToJson(*oversize)) : QJsonValue(false));
+
+    const auto undersize = fitRestoredGeometry(QRect(0, 0, 300, 200), minimum, singleScreen);
+    addCheck(checks, details, QStringLiteral("placementFitRestoredEnforcesMinimum"),
+             undersize && *undersize == QRect(0, 0, 500, 320),
+             undersize ? QJsonValue(rectToJson(*undersize)) : QJsonValue(false));
+
+    const auto minOverflow =
+        fitRestoredGeometry(QRect(0, 0, 1000, 800), minimum, smallScreen);
+    addCheck(checks, details, QStringLiteral("placementFitRestoredMinimumLegal"),
+             minOverflow && *minOverflow == QRect(0, 0, 500, 320),
+             minOverflow ? QJsonValue(rectToJson(*minOverflow)) : QJsonValue(false));
+
+    const QRect reference(100, 100, 800, 60);
+    const auto rememberedAnchor = placeNearWindow(
+        QSize(920, 640), defaultSize, minimum, singleScreen, reference, QRect());
+    addCheck(checks, details, QStringLiteral("placementNearRememberedRightAnchor"),
+             rememberedAnchor == QRect(916, 100, 920, 640),
+             rectToJson(rememberedAnchor));
+
+    const auto defaultFallback = placeNearWindow(
+        QSize(3000, 2000), defaultSize, minimum, singleScreen, reference, QRect());
+    addCheck(checks, details, QStringLiteral("placementNearDefaultSizeFallback"),
+             defaultFallback == QRect(916, 100, 920, 640),
+             rectToJson(defaultFallback));
+
+    const auto shrunk = placeNearWindow(
+        QSize(2000, 2000), QSize(2000, 2000), minimum, singleScreen, reference, QRect());
+    addCheck(checks, details, QStringLiteral("placementNearShrinksToFit"),
+             shrunk == QRect(0, 0, 1920, 1080), rectToJson(shrunk));
+
+    const auto minLegal = placeNearWindow(
+        QSize(), defaultSize, minimum, smallScreen, QRect(0, 0, 200, 100), QRect());
+    addCheck(checks, details, QStringLiteral("placementNearMinimumLegal"),
+             minLegal == QRect(0, 0, 500, 320), rectToJson(minLegal));
+
+    const auto anchorOrder = placeNearWindow(
+        QSize(920, 640), defaultSize, minimum, singleScreen, reference, QRect(0, 0, 50, 50));
+    addCheck(checks, details, QStringLiteral("placementNearAnchorOrderRightFirst"),
+             anchorOrder == QRect(916, 100, 920, 640), rectToJson(anchorOrder));
+
+    const auto avoidOverlap = placeNearWindow(
+        QSize(500, 320), QSize(500, 320), minimum, singleScreen, QRect(0, 0, 800, 60),
+        QRect(816, 0, 300, 300));
+    addCheck(checks, details, QStringLiteral("placementNearAvoidsObstacleOverlap"),
+             avoidOverlap == QRect(0, 76, 500, 320), rectToJson(avoidOverlap));
+
+    const auto referenceScreen = placeNearWindow(
+        QSize(1500, 900), defaultSize, minimum, twoScreens, QRect(2000, 100, 800, 60),
+        QRect());
+    addCheck(checks, details, QStringLiteral("placementNearPrefersReferenceScreen"),
+             referenceScreen == QRect(2000, 176, 1500, 900), rectToJson(referenceScreen));
+
+    const auto degradedOnReferenceScreen = placeNearWindow(
+        QSize(1500, 900), defaultSize, minimum, smallReferenceScreen,
+        QRect(100, 100, 800, 60), QRect());
+    addCheck(checks, details, QStringLiteral("placementNearDegradesSizeOnReferenceScreen"),
+             degradedOnReferenceScreen == QRect(40, 30, 920, 640),
+             rectToJson(degradedOnReferenceScreen));
+
+    const auto noReference = placeNearWindow(
+        QSize(), defaultSize, minimum, singleScreen, std::nullopt, QRect());
+    addCheck(checks, details, QStringLiteral("placementNearCentersWithoutReference"),
+             noReference == QRect(500, 220, 920, 640), rectToJson(noReference));
+}
+
 } // namespace
 
 int main(int argc, char *argv[])
@@ -81,6 +207,8 @@ int main(int argc, char *argv[])
     QCoreApplication app(argc, argv);
     QJsonObject checks;
     QJsonObject details;
+
+    addPlacementUnitChecks(checks, details);
 
     const QJsonObject initial = request(QStringLiteral("status"));
     const QString configFile = initial.value(QStringLiteral("settingsFile")).toString();
@@ -177,6 +305,18 @@ int main(int argc, char *argv[])
                          {QStringLiteral("reopened"), reopenedWindow}});
     request(QStringLiteral("hide"));
     QThread::msleep(180);
+
+    const QJsonObject residentGeometry = request(QStringLiteral("getWindowGeometry"));
+    const QJsonObject residentStatus = request(QStringLiteral("status"));
+    addCheck(checks, details, QStringLiteral("residentGeometryQuery"),
+             residentGeometry.value(QStringLiteral("valid")).toBool()
+                 && residentGeometry.value(QStringLiteral("width")).toInt() > 0
+                 && residentGeometry.value(QStringLiteral("height")).toInt() > 0
+                 && residentGeometry.value(QStringLiteral("width")).toInt()
+                     == residentStatus.value(QStringLiteral("windowRestingWidth")).toInt()
+                 && residentGeometry.value(QStringLiteral("height")).toInt()
+                     == residentStatus.value(QStringLiteral("windowRestingHeight")).toInt(),
+             residentGeometry);
 
     const QJsonObject opened = execute(QStringLiteral("settings"));
     addCheck(checks, details, QStringLiteral("lazySettingsPage"),

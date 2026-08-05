@@ -4,10 +4,12 @@
 #include "externalfilesession.h"
 #include "markdownhighlighter.h"
 #include "markdownstyle.h"
+#include "windowplacement.h"
 
 #include <QClipboard>
 #include <QColor>
 #include <QCoreApplication>
+#include <QDir>
 #include <QEvent>
 #include <QFileInfo>
 #include <QFont>
@@ -40,10 +42,12 @@
 #include <algorithm>
 #include <cstring>
 #include <numeric>
+#include <optional>
 #include <utility>
 
 #ifdef Q_OS_WIN
 #  include <dwmapi.h>
+#  include <tlhelp32.h>
 #  include <windows.h>
 #endif
 
@@ -66,6 +70,136 @@ QString plainCommand(const QByteArray &line)
 }
 
 #ifdef Q_OS_WIN
+QRect nativeWindowLogicalRect(HWND hwnd)
+{
+    if (!hwnd || !IsWindow(hwnd) || IsIconic(hwnd)) {
+        return {};
+    }
+
+    RECT nativeRect{};
+    if (!GetWindowRect(hwnd, &nativeRect)) {
+        return {};
+    }
+    const QRect physical(nativeRect.left, nativeRect.top,
+                         nativeRect.right - nativeRect.left,
+                         nativeRect.bottom - nativeRect.top);
+    if (physical.width() <= 0 || physical.height() <= 0) {
+        return {};
+    }
+
+    MONITORINFO monitorInfo{};
+    monitorInfo.cbSize = sizeof(MONITORINFO);
+    const HMONITOR monitor = MonitorFromWindow(hwnd, MONITOR_DEFAULTTONULL);
+    if (!monitor || !GetMonitorInfoW(monitor, &monitorInfo)) {
+        return {};
+    }
+    const RECT &nativeMonitor = monitorInfo.rcMonitor;
+    const QRect monitorRect(nativeMonitor.left, nativeMonitor.top,
+                            nativeMonitor.right - nativeMonitor.left,
+                            nativeMonitor.bottom - nativeMonitor.top);
+
+    // Windows 上 Qt 的多屏全局原点仍使用原生屏幕位置，只有各屏的尺寸
+    // 按 DPR 缩放。因此不能把非主屏的 x/y 再乘 DPR，否则会在混合
+    // 缩放布局中匹配失败并回退到主屏。
+    QScreen *screen = nullptr;
+    bool exactMatch = false;
+    qint64 bestIntersectionArea = 0;
+    for (QScreen *candidate : QGuiApplication::screens()) {
+        const qreal dpr = candidate->devicePixelRatio();
+        const QRect logical = candidate->geometry();
+        const QRect candidatePhysical(
+            logical.topLeft(),
+            QSize(qRound(logical.width() * dpr), qRound(logical.height() * dpr)));
+        if (candidatePhysical == monitorRect) {
+            screen = candidate;
+            exactMatch = true;
+            break;
+        }
+        const QRect intersection = candidatePhysical.intersected(monitorRect);
+        const qint64 area = intersection.isValid()
+            ? static_cast<qint64>(intersection.width()) * intersection.height()
+            : 0;
+        if (area > bestIntersectionArea) {
+            bestIntersectionArea = area;
+            screen = candidate;
+        }
+    }
+    if (!screen || (!exactMatch && bestIntersectionArea == 0)) {
+        return {};
+    }
+
+    return WindowPlacement::nativeToLogicalRect(
+        physical, monitorRect, screen->geometry());
+}
+
+QRect logicalToNativeRect(const QRect &logicalRect, QScreen *screen)
+{
+    if (!screen || !logicalRect.isValid()) {
+        return {};
+    }
+    const QRect logicalScreen = screen->geometry();
+    const qreal dpr = screen->devicePixelRatio();
+    if (logicalScreen.isEmpty() || dpr <= 0.0) {
+        return {};
+    }
+    return QRect(
+        qRound(logicalScreen.x() + (logicalRect.x() - logicalScreen.x()) * dpr),
+        qRound(logicalScreen.y() + (logicalRect.y() - logicalScreen.y()) * dpr),
+        qMax(1, qRound(logicalRect.width() * dpr)),
+        qMax(1, qRound(logicalRect.height() * dpr)));
+}
+
+QString parentProcessExeName()
+{
+    HANDLE snapshot = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
+    if (snapshot == INVALID_HANDLE_VALUE) {
+        return {};
+    }
+    PROCESSENTRY32W entry{};
+    entry.dwSize = sizeof(entry);
+    const DWORD currentPid = GetCurrentProcessId();
+    DWORD parentPid = 0;
+    if (Process32FirstW(snapshot, &entry)) {
+        do {
+            if (entry.th32ProcessID == currentPid) {
+                parentPid = entry.th32ParentProcessID;
+                break;
+            }
+        } while (Process32NextW(snapshot, &entry));
+    }
+    QString result;
+    if (parentPid != 0 && Process32FirstW(snapshot, &entry)) {
+        do {
+            if (entry.th32ProcessID == parentPid) {
+                result = QString::fromWCharArray(entry.szExeFile);
+                break;
+            }
+        } while (Process32NextW(snapshot, &entry));
+    }
+    CloseHandle(snapshot);
+    return result;
+}
+
+QString cliLabelForParentProcess()
+{
+    const QString exe = parentProcessExeName().toLower();
+    if (exe.contains("codex")) {
+        return QStringLiteral("Codex");
+    }
+    if (exe == QStringLiteral("pi.exe") || exe.startsWith(QStringLiteral("pi."))) {
+        return QStringLiteral("pi");
+    }
+    if (exe.contains("claude")) {
+        return QStringLiteral("Claude Code");
+    }
+    // Node 承载的 CLI 通过环境变量进一步区分。
+    if (exe == QStringLiteral("node.exe")
+        && !qEnvironmentVariableIsEmpty("CODEX_HOME")) {
+        return QStringLiteral("Codex");
+    }
+    return {};
+}
+
 bool openClipboardWithRetry(HWND owner, DWORD *lastError)
 {
     constexpr int attempts = 6;
@@ -95,6 +229,17 @@ EditorController::EditorController(bool testMode, QElapsedTimer *startupTimer,
     , m_startupTimer(startupTimer)
     , m_testMode(testMode)
 {
+#ifdef Q_OS_WIN
+    // 外部编辑进程由 CLI 同步启动。在 QML 和原生窗口创建前立即快照
+    // 前台窗口，避免后续初始化期间焦点变化后错把另一个 CLI/IDE 窗口当成唤起者。
+    if (!externalFilePath.isEmpty()) {
+        const HWND foreground = GetForegroundWindow();
+        if (foreground && IsWindow(foreground)) {
+            m_startupForegroundWindow = reinterpret_cast<quintptr>(foreground);
+        }
+        m_externalCliType = cliLabelForParentProcess();
+    }
+#endif
     if (!externalFilePath.isEmpty()) {
         m_externalFileSession = std::make_unique<ExternalFileSession>(externalFilePath);
         m_externalFileReady = m_externalFileSession->load(&m_externalFileText,
@@ -123,9 +268,93 @@ EditorController::EditorController(bool testMode, QElapsedTimer *startupTimer,
             this, &EditorController::uiCommandRequested);
     m_monotonic.start();
     connect(&m_server, &QLocalServer::newConnection, this, &EditorController::acceptConnections);
+    m_screenConfigurationTimer.setSingleShot(true);
+    m_screenConfigurationTimer.setInterval(160);
+    connect(&m_screenConfigurationTimer, &QTimer::timeout,
+            this, &EditorController::handleScreenConfigurationChanged);
+    m_displayChangeSettleTimer.setSingleShot(true);
+    m_displayChangeSettleTimer.setInterval(2000);
+    connect(&m_displayChangeSettleTimer, &QTimer::timeout, this, [this] {
+        m_nativeDisplayChangeActive = false;
+    });
+    QGuiApplication::instance()->installNativeEventFilter(this);
+    for (QScreen *screen : QGuiApplication::screens()) {
+        watchScreen(screen);
+    }
+    connect(qGuiApp, &QGuiApplication::screenAdded, this, [this](QScreen *screen) {
+        watchScreen(screen);
+        m_screenAdditionPending = true;
+        scheduleScreenConfigurationUpdate();
+    });
+    connect(qGuiApp, &QGuiApplication::screenRemoved, this, [this](QScreen *removed) {
+        m_screenAdditionPending = false;
+#ifdef Q_OS_WIN
+        // 用窗口实际原生矩形与“被移除屏幕”的物理范围做重叠判断来快照锚点。
+        // 副屏被移除时 Qt 会先把窗口屏幕改到主屏，直接比较 window->screen()
+        // 会漏掉快照时机，导致恢复双屏后窗口回不到原副屏。
+        const HWND hwnd = m_window ? reinterpret_cast<HWND>(m_window->winId())
+                                   : nullptr;
+        RECT nativeRect{};
+        if (m_window && removed && hwnd && IsWindow(hwnd)
+            && GetWindowRect(hwnd, &nativeRect)) {
+            const QRect physical(nativeRect.left, nativeRect.top,
+                                 nativeRect.right - nativeRect.left,
+                                 nativeRect.bottom - nativeRect.top);
+            const QRect logicalScreen = removed->geometry();
+            const qreal dpr = removed->devicePixelRatio();
+            const QRect nativeScreen(
+                logicalScreen.topLeft(),
+                QSize(qRound(logicalScreen.width() * dpr),
+                      qRound(logicalScreen.height() * dpr)));
+            if (nativeScreen.intersects(physical)) {
+                const QRect logicalRect = WindowPlacement::nativeToLogicalRect(
+                    physical, nativeScreen, logicalScreen);
+                if (logicalRect.isValid()) {
+                    m_windowScreenName = removed->name();
+                    m_windowScreenOffset =
+                        logicalRect.topLeft() - logicalScreen.topLeft();
+                }
+            }
+        }
+#else
+        if (m_window && removed && m_window->screen() == removed) {
+            m_windowScreenName = removed->name();
+            m_windowScreenOffset =
+                m_window->geometry().topLeft() - removed->geometry().topLeft();
+        }
+#endif
+        scheduleScreenConfigurationUpdate();
+    });
+    connect(qGuiApp, &QGuiApplication::primaryScreenChanged, this, [this](QScreen *) {
+        scheduleScreenConfigurationUpdate();
+    });
 }
 
 EditorController::~EditorController() = default;
+
+bool EditorController::nativeEventFilter(const QByteArray &eventType, void *message,
+                                         qintptr *result)
+{
+    Q_UNUSED(result);
+#ifdef Q_OS_WIN
+    if (eventType == QByteArrayLiteral("windows_generic_MSG")
+        || eventType == QByteArrayLiteral("windows_dispatcher_MSG")) {
+        const auto *msg = static_cast<const MSG *>(message);
+        if (msg && msg->message == WM_DISPLAYCHANGE) {
+            // 显示拓扑变化的第一时间冻结锚点更新：此后 Qt/Windows 的窗口迁移
+            // 事件（screenChanged/Move/Resize）都不再改写窗口的“原屏幕记忆”，
+            // 直到布局稳定（2 秒）后恢复实时跟踪。
+            m_nativeDisplayChangeActive = true;
+            m_displayChangeSettleTimer.start();
+            scheduleScreenConfigurationUpdate();
+        }
+    }
+#else
+    Q_UNUSED(eventType);
+    Q_UNUSED(message);
+#endif
+    return false;
+}
 
 QString EditorController::serverName()
 {
@@ -149,6 +378,33 @@ bool EditorController::forwardToExistingInstance(const QString &command, int tim
     socket.waitForBytesWritten(timeoutMs);
     socket.disconnectFromServer();
     return true;
+}
+
+QJsonObject EditorController::queryExistingInstance(const QString &command, int timeoutMs) const
+{
+    QLocalSocket socket;
+    socket.connectToServer(serverName(), QIODevice::ReadWrite);
+    if (!socket.waitForConnected(timeoutMs)) {
+        return {};
+    }
+
+    const QJsonObject body{{QStringLiteral("command"), command},
+                           {QStringLiteral("requestId"), QStringLiteral("external-query")}};
+    const QByteArray payload = QJsonDocument(body).toJson(QJsonDocument::Compact) + '\n';
+    if (socket.write(payload) != payload.size() || !socket.waitForBytesWritten(timeoutMs)) {
+        return {};
+    }
+
+    QByteArray response;
+    while (!response.contains('\n')) {
+        if (!socket.waitForReadyRead(timeoutMs)) {
+            return {};
+        }
+        response += socket.readAll();
+    }
+    const QJsonDocument document =
+        QJsonDocument::fromJson(response.left(response.indexOf('\n')));
+    return document.isObject() ? document.object() : QJsonObject{};
 }
 
 bool EditorController::startServer()
@@ -203,6 +459,11 @@ QString EditorController::externalFileName() const
 QString EditorController::externalFileError() const
 {
     return m_externalFileError;
+}
+
+QString EditorController::externalCliType() const
+{
+    return m_externalCliType;
 }
 
 bool EditorController::completeExternalFileTest(const QString &text)
@@ -308,6 +569,23 @@ void EditorController::registerWindow(QQuickWindow *window)
     m_window = window;
     if (m_window) {
         m_window->installEventFilter(this);
+        connect(m_window, &QQuickWindow::screenChanged, this, [this](QScreen *screen) {
+            if (screen && m_window && m_window->isVisible() && !m_hiding
+                && m_windowRestingGeometry.isValid()
+                && !(m_windowTransitionGroup
+                     && m_windowTransitionGroup->state() == QAbstractAnimation::Running)
+                && !m_screenConfigurationTimer.isActive()
+                && !m_nativeDisplayChangeActive) {
+                const QString screenName = screen->name();
+                const QPoint screenOffset =
+                    m_window->geometry().topLeft() - screen->geometry().topLeft();
+                if (m_windowScreenName != screenName
+                    || m_windowScreenOffset != screenOffset) {
+                    m_windowScreenName = screenName;
+                    m_windowScreenOffset = screenOffset;
+                }
+            }
+        });
         m_windowTransitionGroup = new QParallelAnimationGroup(this);
         m_windowOpacityAnimation = new QVariantAnimation;
         m_windowGeometryAnimation = new QVariantAnimation;
@@ -577,12 +855,31 @@ void EditorController::dispatchCommand(QLocalSocket *socket, const QJsonObject &
     const QString requestId = request.value(QStringLiteral("requestId")).toString();
     const bool noReply = request.value(QStringLiteral("noReply")).toBool();
 
-    if (command == QStringLiteral("ping") || command == QStringLiteral("status")) {
+    if (command == QStringLiteral("ping") || command == QStringLiteral("status")
+        || command == QStringLiteral("getWindowGeometry")) {
         if (noReply) {
             return;
         }
-        QJsonObject response = statusObject();
-        response.insert(QStringLiteral("command"), command);
+        QJsonObject response;
+        if (command == QStringLiteral("getWindowGeometry")) {
+            // 只读查询：供外部编辑进程获取常驻临时编辑器的 resting 几何，
+            // 用于避免唤起时窗口重叠。
+            const bool positioned = m_positioned && m_window;
+            response.insert(QStringLiteral("command"), command);
+            response.insert(QStringLiteral("valid"), positioned);
+            if (positioned) {
+                const QRect geometry = m_windowRestingGeometry.isValid()
+                    ? m_windowRestingGeometry
+                    : m_window->geometry();
+                response.insert(QStringLiteral("x"), geometry.x());
+                response.insert(QStringLiteral("y"), geometry.y());
+                response.insert(QStringLiteral("width"), geometry.width());
+                response.insert(QStringLiteral("height"), geometry.height());
+            }
+        } else {
+            response = statusObject();
+            response.insert(QStringLiteral("command"), command);
+        }
         sendResponse(socket, response, startedNs, requestId);
         return;
     }
@@ -1126,12 +1423,27 @@ void EditorController::showEditor()
     }
     ++m_focusGeneration;
 
+    // 记录唤起窗口：外部模式使用进程初始化时的前台快照，常驻模式
+    // 使用每次唤起时的前台窗口。Windows Terminal/ConPTY 不保证终端窗口
+    // 出现在 CLI 的进程祖先链中，因此不用祖先进程的其他窗口覆盖前台快照。
+    std::optional<QRect> referenceRect;
 #ifdef Q_OS_WIN
-    if (externalFileMode()) {
+    {
         const HWND editorHwnd = reinterpret_cast<HWND>(m_window->winId());
-        const HWND foreground = GetForegroundWindow();
-        if (foreground && foreground != editorHwnd && IsWindow(foreground)) {
-            m_previousForegroundWindow = reinterpret_cast<quintptr>(foreground);
+        HWND invoker = externalFileMode()
+            ? reinterpret_cast<HWND>(m_startupForegroundWindow)
+            : GetForegroundWindow();
+        if ((!invoker || !IsWindow(invoker)) && externalFileMode()) {
+            invoker = GetForegroundWindow();
+        }
+        if (invoker && invoker != editorHwnd && IsWindow(invoker)) {
+            if (externalFileMode()) {
+                m_previousForegroundWindow = reinterpret_cast<quintptr>(invoker);
+            }
+            const QRect reference = nativeWindowLogicalRect(invoker);
+            if (reference.isValid()) {
+                referenceRect = reference;
+            }
         }
     }
 #endif
@@ -1160,17 +1472,43 @@ void EditorController::showEditor()
         }
     }
 
-    if (!m_positioned) {
-        QScreen *screen = QGuiApplication::primaryScreen();
-        if (screen) {
-            const QRect available = screen->availableGeometry();
-            m_window->setPosition(
-                available.x() + (available.width() - m_window->width()) / 2,
-                available.y() + (available.height() - m_window->height()) / 2);
+    const QVector<QRect> screens = availableScreenGeometries();
+    const QSize defaultSize = windowDefaultSize();
+    const QSize minimumSize = windowMinimumSize();
+    if (externalFileMode()) {
+        // 外部提示词编辑器：只记忆大小，每次唤起都靠近调用它的窗口重新摆放，
+        // 并尽量避开可能已打开的临时编辑器窗口。
+        QRect obstacle;
+        const QJsonObject response =
+            queryExistingInstance(QStringLiteral("getWindowGeometry"));
+        if (response.value(QStringLiteral("valid")).toBool()) {
+            obstacle = QRect(response.value(QStringLiteral("x")).toInt(),
+                             response.value(QStringLiteral("y")).toInt(),
+                             response.value(QStringLiteral("width")).toInt(),
+                             response.value(QStringLiteral("height")).toInt());
         }
+        const QSize rememberedSize = m_settings
+            ? m_settings->externalWindowGeometry().size()
+            : QSize();
+        m_windowRestingGeometry = WindowPlacement::placeNearWindow(
+            rememberedSize, defaultSize, minimumSize, screens, referenceRect, obstacle);
         m_positioned = true;
-        m_windowRestingGeometry = m_window->geometry();
+    } else if (!m_positioned) {
+        // 临时编辑器无记忆：在焦点窗口附近唤出。
+        m_windowRestingGeometry = WindowPlacement::placeNearWindow(
+            QSize(), defaultSize, minimumSize, screens, referenceRect, QRect());
+        m_positioned = true;
+    } else if (m_windowRestingGeometry.isValid()) {
+        // 临时编辑器有进程内记忆：每次打开按当前屏幕布局重新校正（兼容热插拔），
+        // 记忆完全失效时回退到焦点附近。
+        const auto fitted = WindowPlacement::fitRestoredGeometry(
+            m_windowRestingGeometry, minimumSize, screens);
+        m_windowRestingGeometry = fitted
+            ? *fitted
+            : WindowPlacement::placeNearWindow(
+                  QSize(), defaultSize, minimumSize, screens, referenceRect, QRect());
     }
+    updateWindowAnchor();
 
     const bool wasNativeVisible = m_window->isVisible();
     const QRect restingGeometry = m_windowRestingGeometry.isValid()
@@ -1239,7 +1577,19 @@ void EditorController::deliverAndHide()
 
 bool EditorController::saveExternalFile()
 {
-    if (!externalFileMode() || !m_externalFileReady || !m_editor) {
+    if (!externalFileMode() || !m_editor) {
+        return false;
+    }
+
+    const QFileInfo fileInfo(m_externalFileSession->filePath());
+    if (!fileInfo.exists() || !fileInfo.dir().exists()) {
+        // 唤起它的终端已关闭并清理了临时文件：没有可写回的目标，静默关闭，
+        // 不保存内容，也不把“找不到文件”当作需要用户处理的错误。
+        m_externalFileError.clear();
+        setExternalFileState(true, QStringLiteral("外部文件已不存在，直接退出"));
+        return true;
+    }
+    if (!m_externalFileReady) {
         return false;
     }
 
@@ -1618,9 +1968,10 @@ void EditorController::setExternalFileState(bool healthy, const QString &message
 
 QRect EditorController::validatedWindowGeometry(const QRect &requested) const
 {
+    const QSize minimum = windowMinimumSize();
     QRect candidate = requested;
-    candidate.setWidth(qMax(500, candidate.width()));
-    candidate.setHeight(qMax(320, candidate.height()));
+    candidate.setWidth(qMax(minimum.width(), candidate.width()));
+    candidate.setHeight(qMax(minimum.height(), candidate.height()));
 
     QScreen *targetScreen = nullptr;
     qint64 largestIntersection = 0;
@@ -1640,8 +1991,8 @@ QRect EditorController::validatedWindowGeometry(const QRect &requested) const
     }
 
     const QRect available = targetScreen->availableGeometry();
-    candidate.setWidth(qMin(candidate.width(), available.width()));
-    candidate.setHeight(qMin(candidate.height(), available.height()));
+    candidate.setWidth(qMax(minimum.width(), qMin(candidate.width(), available.width())));
+    candidate.setHeight(qMax(minimum.height(), qMin(candidate.height(), available.height())));
     candidate.moveLeft(qBound(available.left(), candidate.left(),
                               available.right() - candidate.width() + 1));
     candidate.moveTop(qBound(available.top(), candidate.top(),
@@ -1654,12 +2005,41 @@ bool EditorController::restoreWindowGeometry()
     if (!m_window || !m_settings) {
         return false;
     }
+    if (externalFileMode()) {
+        // 外部模式只记忆尺寸，位置在每次 showEditor() 时按唤起窗口重新计算。
+        return false;
+    }
     const QRect stored = m_settings->windowGeometry();
     if (!stored.isValid()) {
         return false;
     }
-    m_window->setGeometry(validatedWindowGeometry(stored));
+    const auto fitted = WindowPlacement::fitRestoredGeometry(
+        stored, windowMinimumSize(), availableScreenGeometries());
+    if (!fitted) {
+        return false;
+    }
+    m_window->setGeometry(*fitted);
+    m_windowRestingGeometry = *fitted;
     return true;
+}
+
+void EditorController::updateWindowAnchor()
+{
+    m_windowScreenName.clear();
+    m_windowScreenOffset = QPoint();
+    if (!m_windowRestingGeometry.isValid()) {
+        return;
+    }
+    QScreen *screen = QGuiApplication::screenAt(m_windowRestingGeometry.center());
+    if (!screen) {
+        screen = QGuiApplication::primaryScreen();
+    }
+    if (!screen) {
+        return;
+    }
+    m_windowScreenName = screen->name();
+    m_windowScreenOffset =
+        m_windowRestingGeometry.topLeft() - screen->geometry().topLeft();
 }
 
 void EditorController::saveWindowGeometry()
@@ -1671,8 +2051,267 @@ void EditorController::saveWindowGeometry()
         && m_windowTransitionGroup->state() == QAbstractAnimation::Running;
     const bool useRestingGeometry = m_windowRestingGeometry.isValid()
         && (transitionRunning || m_hiding || !m_window->isVisible());
-    m_settings->setWindowGeometry(useRestingGeometry ? m_windowRestingGeometry
-                                                     : m_window->geometry());
+    const QRect geometry = useRestingGeometry ? m_windowRestingGeometry
+                                              : m_window->geometry();
+    if (externalFileMode()) {
+        // 外部提示词编辑器只保存大小；父 CLI 窗口销毁后位置记忆没有意义。
+        m_settings->setExternalWindowGeometry(QRect(QPoint(0, 0), geometry.size()));
+    } else {
+        m_settings->setWindowGeometry(geometry);
+    }
+}
+
+QSize EditorController::windowDefaultSize() const
+{
+    // 与 qml/Main.qml 的初始 width/height 保持一致。
+    return QSize(920, 640);
+}
+
+QSize EditorController::windowMinimumSize() const
+{
+    return m_window
+        ? QSize(m_window->minimumWidth(), m_window->minimumHeight())
+        : QSize(500, 320);
+}
+
+QVector<QRect> EditorController::availableScreenGeometries() const
+{
+    QVector<QRect> screens;
+    const QList<QScreen *> allScreens = QGuiApplication::screens();
+    screens.reserve(allScreens.size());
+    QScreen *primary = QGuiApplication::primaryScreen();
+    if (primary) {
+        screens.append(primary->availableGeometry());
+    }
+    for (QScreen *screen : allScreens) {
+        if (screen && screen != primary) {
+            screens.append(screen->availableGeometry());
+        }
+    }
+    return screens;
+}
+
+void EditorController::watchScreen(QScreen *screen)
+{
+    if (!screen) {
+        return;
+    }
+    connect(screen, &QScreen::geometryChanged, this, [this](const QRect &) {
+        scheduleScreenConfigurationUpdate();
+    });
+    connect(screen, &QScreen::availableGeometryChanged, this, [this](const QRect &) {
+        scheduleScreenConfigurationUpdate();
+    });
+    connect(screen, &QScreen::logicalDotsPerInchChanged, this, [this](qreal) {
+        scheduleScreenConfigurationUpdate();
+    });
+}
+
+void EditorController::scheduleScreenConfigurationUpdate()
+{
+    // 屏幕移除时 Qt 会自行迁移窗口，Windows 也会紧接着发送 DPI/工作区
+    // 变化。合并这些信号，等布局稳定后再做一次最终校正，避免与 Qt 的
+    // 原生迁移争用旧坐标/旧 DPR。
+    m_screenConfigurationTimer.start();
+}
+
+void EditorController::handleScreenConfigurationChanged()
+{
+    if (!m_window || !m_positioned) {
+        return;
+    }
+    const QVector<QRect> screens = availableScreenGeometries();
+    if (screens.isEmpty()) {
+        return;
+    }
+
+    // 屏幕增删期间，Qt/Windows 的坐标空间可能短暂重叠（例如副屏仍报告原点 0、
+    // 主屏已重新加入），此时计算原生坐标会落到错误的屏幕上。等布局不再重叠
+    // 再校正；设置重试上限避免克隆/镜像等持续重叠场景下无限循环。
+    bool overlapping = false;
+    const QList<QScreen *> allScreens = QGuiApplication::screens();
+    for (int i = 0; i < allScreens.size() && !overlapping; ++i) {
+        for (int j = i + 1; j < allScreens.size(); ++j) {
+            if (allScreens[i]->geometry().intersects(allScreens[j]->geometry())) {
+                overlapping = true;
+                break;
+            }
+        }
+    }
+    if (overlapping && m_screenOverlapRetries < 20) {
+        ++m_screenOverlapRetries;
+        m_screenConfigurationTimer.start(100);
+        return;
+    }
+    m_screenOverlapRetries = 0;
+
+    // 显示器热插拔后，把当前（或 resting）几何重新校正到仍然存在的屏幕上。
+    // 主屏被拔除时 Qt 不会像非主屏那样主动迁移窗口，且 QWindow 的屏幕/DPR
+    // 缓存可能已经失效（screen() 为 null 时 geometry() 会按错误的缩放系数
+    // 换算），因此优先用原生 GetWindowRect 反推真实逻辑位置，避免把坏几何
+    // 写进记忆或作为下次摆放依据。
+    const bool visible = m_window->isVisible() && !m_hiding;
+    const bool transitionRunning = m_windowTransitionGroup
+        && m_windowTransitionGroup->state() == QAbstractAnimation::Running;
+    QRect current;
+    if (transitionRunning && m_windowRestingGeometry.isValid()) {
+        current = m_windowRestingGeometry;
+    } else if (visible) {
+#ifdef Q_OS_WIN
+        current = nativeWindowLogicalRect(reinterpret_cast<HWND>(m_window->winId()));
+#endif
+        if (!current.isValid()) {
+            current = m_window->geometry();
+        }
+    } else {
+        current = m_windowRestingGeometry.isValid() ? m_windowRestingGeometry
+                                                    : m_window->geometry();
+    }
+    // 尺寸优先使用记忆中的逻辑尺寸：跨 DPR 迁移时原生尺寸可能没有同步缩放，
+    // 直接用当前 geometry 会把“被压缩”的错误尺寸当成合法尺寸。
+    const QSize preferredSize = m_windowRestingGeometry.isValid()
+        ? m_windowRestingGeometry.size()
+        : (current.isValid() ? current.size() : windowDefaultSize());
+    const QSize minimumSize = windowMinimumSize();
+
+    QScreen *anchorScreen = nullptr;
+    if (!m_windowScreenName.isEmpty()) {
+        for (QScreen *candidate : QGuiApplication::screens()) {
+            if (candidate->name() == m_windowScreenName) {
+                anchorScreen = candidate;
+                break;
+            }
+        }
+    }
+    QScreen *positionScreen = current.isValid()
+        ? QGuiApplication::screenAt(current.center())
+        : nullptr;
+    // 单→多切换时，Qt 可能在坐标空间尚未重排前把窗口错误关联到新加回的屏幕
+    // （例如窗口物理位置短暂落在主屏矩形内），导致窗口不回到原副屏。此时以
+    // 锚定屏幕为准，而不是以瞬时原生位置为准。
+    QScreen *targetScreen = positionScreen ? positionScreen
+                                           : (anchorScreen ? anchorScreen
+                                                           : QGuiApplication::primaryScreen());
+    if (m_screenAdditionPending && anchorScreen && anchorScreen != positionScreen) {
+        targetScreen = anchorScreen;
+    }
+    if (!targetScreen) {
+        return;
+    }
+
+    QRect candidate(QPoint(), preferredSize);
+    if (targetScreen == anchorScreen) {
+        candidate.moveTopLeft(targetScreen->geometry().topLeft() + m_windowScreenOffset);
+    } else if (current.isValid()) {
+        candidate.moveTopLeft(current.topLeft());
+    } else {
+        candidate.moveCenter(targetScreen->geometry().center());
+    }
+    const auto fitted =
+        WindowPlacement::fitRestoredGeometry(candidate, minimumSize, screens);
+    const QRect target = fitted
+        ? *fitted
+        : WindowPlacement::placeNearWindow(
+              preferredSize, windowDefaultSize(), minimumSize, screens,
+              std::nullopt, QRect());
+
+    m_windowRestingGeometry = target;
+    if (anchorScreen) {
+        updateWindowAnchor();
+    }
+    m_screenAdditionPending = false;
+    if (!visible) {
+        return;
+    }
+
+    // 仅 update() 不会重建 RHI 交换链；若 QWindow 的 DPR/屏幕缓存失效，渲染缓冲
+    // 尺寸会与窗口原生尺寸错位（多→单时缓冲大于窗口、单→多时缓冲小于窗口，
+    // 边框出现在错误位置）。用原生坐标把窗口真实移动到目标屏幕并触发一次真实
+    // resize：Windows 会在跨 DPR 移动时发送 WM_DPICHANGED，Qt 借此重新关联屏幕
+    // 并刷新 DPR 缓存，等价于用户拖动窗口后的恢复路径。
+    auto reconcile = [this, target](bool force) {
+        if (!m_window || !m_window->isVisible() || m_hiding) {
+            return;
+        }
+        if (m_windowTransitionGroup
+            && m_windowTransitionGroup->state() == QAbstractAnimation::Running) {
+            m_window->update();
+            return;
+        }
+        QScreen *screen = QGuiApplication::screenAt(target.center());
+        if (!screen) {
+            screen = QGuiApplication::primaryScreen();
+        }
+        if (!screen) {
+            m_window->update();
+            return;
+        }
+        if (m_window->screen() && m_window->screen() != screen) {
+            m_window->setScreen(screen);
+        }
+        const qreal expectedDpr = screen->devicePixelRatio();
+        const bool dprMismatch =
+            !qFuzzyCompare(m_window->devicePixelRatio(), expectedDpr);
+        const bool screenMismatch = m_window->screen() != screen;
+        const bool geometryMismatch = m_window->geometry() != target;
+        if (force || geometryMismatch || dprMismatch || screenMismatch) {
+#ifdef Q_OS_WIN
+            const HWND hwnd = reinterpret_cast<HWND>(m_window->winId());
+            const QRect nativeTarget = logicalToNativeRect(target, screen);
+            if (hwnd && IsWindow(hwnd) && nativeTarget.isValid()) {
+                const QRect nudge = nativeTarget.adjusted(0, 0, 1, 1);
+                SetWindowPos(hwnd, nullptr, nudge.x(), nudge.y(), nudge.width(),
+                             nudge.height(), SWP_NOZORDER | SWP_NOACTIVATE);
+                SetWindowPos(hwnd, nullptr, nativeTarget.x(), nativeTarget.y(),
+                             nativeTarget.width(), nativeTarget.height(),
+                             SWP_NOZORDER | SWP_NOACTIVATE);
+            }
+#else
+            const QRect nudge = target.adjusted(0, 0, 1, 1);
+            m_window->setGeometry(nudge);
+            m_window->setGeometry(target);
+#endif
+        }
+        m_window->update();
+    };
+    reconcile(false);
+
+    // Windows/Qt 的 DPI 迁移事件可能在原生移动之后仍然覆盖窗口位置，因此分
+    // 三批（0ms/600ms/1400ms）重复断言目标位置与屏幕关联，直到系统稳定；每批
+    // 都会重新执行原生坐标校正，并兜底重设屏幕（平台窗口若被重建而隐藏则恢复
+    // 显示并重刷原生样式）。
+    auto finalize = [this, target, reconcile] {
+        if (!m_window || !m_window->isVisible() || m_hiding) {
+            return;
+        }
+        reconcile(true);
+        if (!m_window || !m_window->isVisible() || m_hiding) {
+            return;
+        }
+        QScreen *screen = QGuiApplication::screenAt(target.center());
+        if (!screen) {
+            screen = QGuiApplication::primaryScreen();
+        }
+        if (!screen) {
+            return;
+        }
+        const qreal expectedDpr = screen->devicePixelRatio();
+        if (m_window->screen() != screen
+            && !qFuzzyCompare(m_window->devicePixelRatio(), expectedDpr)) {
+            const bool wasVisible = m_window->isVisible();
+            m_window->setScreen(screen);
+            if (wasVisible && !m_window->isVisible()) {
+                m_window->show();
+                m_window->raise();
+                m_window->requestActivate();
+            }
+            applyNativeWindowStyle();
+            m_window->update();
+        }
+    };
+    QTimer::singleShot(0, this, [finalize] { finalize(); });
+    QTimer::singleShot(600, this, [finalize] { finalize(); });
+    QTimer::singleShot(1400, this, [finalize] { finalize(); });
 }
 
 void EditorController::restorePreviousFocus()
@@ -2000,6 +2639,35 @@ void EditorController::animationBenchmarkFinished()
 
 bool EditorController::eventFilter(QObject *watched, QEvent *event)
 {
+    if (watched == m_window && event->type() == QEvent::Resize
+        && m_window && m_window->isVisible()
+        && m_windowRestingGeometry.isValid() && !m_hiding
+        && !(m_windowTransitionGroup
+             && m_windowTransitionGroup->state() == QAbstractAnimation::Running)
+        && !m_screenConfigurationTimer.isActive()
+        && !m_nativeDisplayChangeActive) {
+        // 实时跟踪窗口尺寸，热插拔校正时按记忆尺寸恢复，避免丢失用户刚调整的大小。
+        m_windowRestingGeometry.setSize(m_window->size());
+    }
+    if (watched == m_window && event->type() == QEvent::Move
+        && m_window && m_window->isVisible() && m_window->screen()
+        && m_windowRestingGeometry.isValid() && !m_hiding
+        && !(m_windowTransitionGroup
+             && m_windowTransitionGroup->state() == QAbstractAnimation::Running)
+        && !m_screenConfigurationTimer.isActive()
+        && !m_nativeDisplayChangeActive) {
+        // 实时跟踪窗口所在屏幕与屏内偏移，拖动跨屏后锚点仍指向实际位置，
+        // 拔屏恢复时才能回到原屏幕。
+        m_windowRestingGeometry.moveTopLeft(m_window->geometry().topLeft());
+        const QString screenName = m_window->screen()->name();
+        const QPoint screenOffset =
+            m_window->geometry().topLeft() - m_window->screen()->geometry().topLeft();
+        if (m_windowScreenName != screenName || m_windowScreenOffset != screenOffset) {
+            m_windowScreenName = screenName;
+            m_windowScreenOffset = screenOffset;
+        }
+    }
+
     if (watched == m_window && m_commands && m_editor
         && (event->type() == QEvent::MouseButtonPress
             || event->type() == QEvent::MouseMove

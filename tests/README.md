@@ -5,9 +5,9 @@
 - `perf_main.cpp`：性能、真实 OS 输入和微软拼音验收客户端。
 - `system_main.cpp`：滚动条、Escape、焦点和剪贴板异常回归。
 - `editing_main.cpp`：编辑行为验证，覆盖 Markdown 高亮、编辑命令、查找替换和快捷键回归。
-- `window_ui_main.cpp`：窗口界面验证，覆盖设置页、主题字体、集中配置、窗口交互/配色、20 轮唤出关闭动画稳定性与明确排除项回归。
+- `window_ui_main.cpp`：窗口界面验证，覆盖设置页、主题字体、集中配置、窗口交互/配色、20 轮唤出关闭动画稳定性、窗口放置算法单元校验（记忆恢复、混合 DPI 非主屏坐标、尺寸阶梯、锚定顺序与重叠避让）与明确排除项回归。
 - `externalfilesession_main.cpp`：外部 CLI 编辑模式的 UTF-8/BOM、Unicode 路径、空文件、原子保存和错误边界回归。
-- `externaleditorprocess_main.cpp`：验证外部编辑进程在编辑期间持续等待、保存写回后以成功状态退出，并覆盖错误参数退出码。
+- `externaleditorprocess_main.cpp`：验证外部编辑进程在编辑期间持续等待、保存写回后以成功状态退出、外部尺寸记忆独立写入 `window/externalGeometry`，并覆盖错误参数退出码。
 - `../scripts/run-external-cli-integration.mjs`：通过伪终端实测 Codex 与 pi 的 `Ctrl+G`，由 ScratchEditor 写回 `/quit` 后确认 CLI 成功返回；Claude Code 暂不在此脚本中测试。
 
 CLI 级脚本需要一个已安装的 `node-pty` 包。本机默认复用全局 Gemini CLI 的依赖；其他环境可

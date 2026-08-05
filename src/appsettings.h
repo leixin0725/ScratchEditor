@@ -28,6 +28,8 @@ public:
 
     QRect windowGeometry() const;
     void setWindowGeometry(const QRect &geometry);
+    QRect externalWindowGeometry() const;
+    void setExternalWindowGeometry(const QRect &geometry);
 
     QString shortcut(const QString &commandId, const QString &defaultValue) const;
     void setShortcut(const QString &commandId, const QString &sequence);

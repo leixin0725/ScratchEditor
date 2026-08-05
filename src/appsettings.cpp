@@ -14,6 +14,7 @@ namespace {
 
 constexpr auto schemaVersionKey = "meta/schemaVersion";
 constexpr auto geometryKey = "window/geometry";
+constexpr auto externalGeometryKey = "window/externalGeometry";
 constexpr auto themeKey = "appearance/theme";
 constexpr auto fontFamilyKey = "editor/fontFamily";
 constexpr auto fontPointSizeKey = "editor/fontPointSize";
@@ -76,6 +77,24 @@ void AppSettings::setWindowGeometry(const QRect &geometry)
         return;
     }
     m_settings->setValue(QLatin1StringView(geometryKey), geometry);
+    sync();
+}
+
+QRect AppSettings::externalWindowGeometry() const
+{
+    if (!m_settings) {
+        return {};
+    }
+    const QVariant value = m_settings->value(QLatin1StringView(externalGeometryKey));
+    return value.canConvert<QRect>() ? value.toRect() : QRect{};
+}
+
+void AppSettings::setExternalWindowGeometry(const QRect &geometry)
+{
+    if (!m_settings || !geometry.isValid()) {
+        return;
+    }
+    m_settings->setValue(QLatin1StringView(externalGeometryKey), geometry);
     sync();
 }
 
