@@ -7,6 +7,8 @@
 
 - [`2026-08-05-window-hotplug/`](2026-08-05-window-hotplug/README.md)：窗口放置与
   外部提示词编辑器更新（独立几何记忆、多屏热插拔修复、外部文件静默退出、CLI 类型标题）。
+- `2026-08-06`：WSL 外部提示词编辑器部署适配，见根目录 [`README.md`](../README.md#cli-外部编辑器)
+  的「CLI 外部编辑器」与 [`scripts/configure-codex-editor-wsl.sh`](../scripts/configure-codex-editor-wsl.sh)。
 
 ## 历史归档
 

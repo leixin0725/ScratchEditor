@@ -190,6 +190,15 @@ ScratchEditor。Git Bash 通过 `TERM_PROGRAM=vscode` 判断；VS Code 用户设
 `terminal.integrated.env.windows` 为 PowerShell、CMD 等其他集成终端注入相同变量。Codex 文件引用的
 点击行为不受此切换影响，仍由全局 `file_opener = "vscode"` 统一交给 VS Code。
 
+WSL 复用同一判定：VS Code 集成终端自带 `TERM_PROGRAM=vscode`，因此 `Ctrl+G` 使用 `code --wait`；
+其他 WSL 终端使用 [`scripts/configure-codex-editor-wsl.sh`](scripts/configure-codex-editor-wsl.sh) 安装的
+包装脚本，先 `wslpath -w` 转换临时文件路径，再调用 C 盘稳定版 `CodexEditor\ScratchEditor.exe --wait`
+并回传退出码。`configure-codex-editor.ps1 -Action Install`（含每次 `build.ps1`）检测到 WSL 时会自动同步，
+也可在 WSL 中手动运行 `bash scripts/configure-codex-editor-wsl.sh install` 或 `check`。
+不需要 WSL 同步时，可在调用 `configure-codex-editor.ps1` 时附加 `-SkipWslSync`。
+WSL 侧暂不执行 `file_opener = "vscode"` 的 Windows 对齐；该选项只影响可点击文件引用，不影响
+`Ctrl+G` 外部提示词编辑器。
+
 Codex 在 composer 中按 `Ctrl+G`；安装脚本会自动把已检测到的 pi `settings.json` 指向同一个稳定副本：
 
 ```json

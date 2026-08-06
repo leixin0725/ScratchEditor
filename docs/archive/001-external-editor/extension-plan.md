@@ -1,5 +1,8 @@
 # 外部编辑器扩展计划书
 
+> 2026-08-06 更新：WSL 包装示例已实现为 `scripts/configure-codex-editor-wsl.sh`，
+> 正式使用说明以根目录 README 为准；以下仍是 2026-08-03 的计划快照。
+
 计划日期：2026-08-03
 依据：[`investigation-report.md`](investigation-report.md)
 

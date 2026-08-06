@@ -5,7 +5,8 @@ param(
     [string]$SourceEditorPath,
     [string]$InstallDirectory,
     [string]$AhkInstallDirectory,
-    [string]$AhkScriptPath = "D:\Documents\AutoHotkey\KeysRedirect.ahk"
+    [string]$AhkScriptPath = "D:\Documents\AutoHotkey\KeysRedirect.ahk",
+    [switch]$SkipWslSync
 )
 
 $ErrorActionPreference = "Stop"
@@ -124,6 +125,31 @@ function Start-StableAhkResident {
         }
     }
     throw "The stable AHK ScratchEditor resident did not become ready."
+}
+
+function Invoke-WslEditorConfiguration {
+    param(
+        [Parameter(Mandatory)]
+        [ValidateSet("install", "check")]
+        [string]$WslAction
+    )
+
+    if ($SkipWslSync) {
+        return $null
+    }
+    if ($null -eq (Get-Command "wsl.exe" -ErrorAction SilentlyContinue)) {
+        return $null
+    }
+    $wslScript = Join-Path $PSScriptRoot "configure-codex-editor-wsl.sh"
+    if (-not (Test-Path -LiteralPath $wslScript -PathType Leaf)) {
+        throw "WSL editor configuration script is missing: $wslScript"
+    }
+    $wslOutput = & wsl.exe --cd $projectRoot -- bash "./scripts/configure-codex-editor-wsl.sh" $WslAction 2>&1
+    $wslExitCode = $LASTEXITCODE
+    if ($wslExitCode -ne 0) {
+        throw "WSL editor configuration ($WslAction) failed with exit code $wslExitCode:`n$($wslOutput -join [Environment]::NewLine)"
+    }
+    return $true
 }
 
 function Install-EditorCopy {
@@ -462,6 +488,7 @@ function Write-LocalInstallationDocument {
         'Both installed editors watch the shared theme / Markdown config. Manual edits are applied while the editors are running; builds seed this file once and never overwrite later user changes.',
         'Edit `theme.accentColor` for the shared accent used by settings, the command palette, focus borders, text selections, the drag insertion cursor, and Markdown links. `theme.accentTextColor` controls text drawn on that accent.',
         'Clickable Codex file citations continue to use VS Code in every terminal through `file_opener = "vscode"`.',
+        'WSL uses `scripts/configure-codex-editor-wsl.sh` to install a wrapper at `~/.local/bin/scratcheditor-external-editor`; it converts WSL paths with `wslpath -w` and calls the stable Codex editor. WSL intentionally does not yet mirror `file_opener = "vscode"`.',
         'Every successful `scripts/build.ps1` build automatically installs the just-built ScratchEditor into both stable directories and refreshes Codex, pi, AHK, Git Bash, and VS Code configuration.',
         'Pass `-SkipLocalInstall` only for an intentionally isolated build. Direct CMake builds do not synchronize the stable installations.',
         'The project `build/` and `.tools/` directories can be cleaned after installation, but they must be restored before the next update.',
@@ -492,6 +519,7 @@ if ($Action -eq "Install") {
     Write-VsCodeTerminalEnvironment
     Write-PiEditorConfiguration
     Write-AhkEditorConfiguration
+    $wslSynced = Invoke-WslEditorConfiguration -WslAction "install"
     Write-LocalInstallationDocument
 }
 
@@ -503,6 +531,7 @@ $piDetected = Test-Path -LiteralPath $piSettingsPath -PathType Leaf
 $piEditorConfigured = Test-PiEditorConfiguration
 $ahkScriptDetected = Test-Path -LiteralPath $resolvedAhkScriptPath -PathType Leaf
 $ahkEditorConfigured = Test-AhkEditorConfiguration
+$wslChecked = Invoke-WslEditorConfiguration -WslAction "check"
 $installedCopiesMatch = (Get-FileHash -Algorithm SHA256 -LiteralPath $resolvedEditorPath).Hash `
     -eq (Get-FileHash -Algorithm SHA256 -LiteralPath $resolvedAhkEditorPath).Hash
 $persistentConfigurationValid = $userVisual -eq $windowsCommand `
@@ -532,6 +561,8 @@ $persistentConfigurationValid = $userVisual -eq $windowsCommand `
     AhkScript = $resolvedAhkScriptPath
     AhkEditorConfigured = $ahkEditorConfigured
     LocalInstallationDocument = $localInstallationDocument
+    WslSynced = $wslSynced
+    WslChecked = $wslChecked
     CurrentProcessVisual = $env:VISUAL
     CurrentProcessEditor = $env:EDITOR
     RestartRequired = $env:VISUAL -ne $windowsCommand -or $env:EDITOR -ne $windowsCommand

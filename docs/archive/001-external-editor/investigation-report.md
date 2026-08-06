@@ -1,5 +1,8 @@
 # 外部编辑器兼容性调查报告
 
+> 2026-08-06 更新：WSL 部署适配已落地（`scripts/configure-codex-editor-wsl.sh` + `wslpath -w`），
+> 正式说明以根目录 README 为准；以下仍是 2026-08-03 的调查快照。
+
 调查日期：2026-08-03
 调查范围：仅研究 Codex、pi-coding-agent 和 Claude Code CLI 通过 `Ctrl+G` 等入口唤起
 ScratchEditor 编辑提示词的传统外部编辑器流程；不包含 MCP、插件、智能体工具或项目文件操作。
