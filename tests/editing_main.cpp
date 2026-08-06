@@ -1564,6 +1564,98 @@ int main(int argc, char *argv[])
               QStringLiteral("a\"中文x"), 4, 4, QStringLiteral("IME commit \" closes CJK wrap"),
               [] { return inputMethodCommit(QStringLiteral("\"")); },
               QStringLiteral("a “中文” x"), 6);
+
+    // --- `·`（U+00B7）反引号别名（DOT-ALIAS-001..008） ---
+    cjkExpect(checks, details, QStringLiteral("dotAliasLiteralAfterChar"),
+              QStringLiteral("中文"), 2, 2, QStringLiteral("key · directly after CJK"),
+              keyAction(QStringLiteral("·")), QStringLiteral("中文"), 2);
+    cjkExpect(checks, details, QStringLiteral("dotAliasAfterSpaceBecomesBacktick"),
+              QStringLiteral("中文 "), 3, 3, QStringLiteral("key · after space"),
+              keyAction(QStringLiteral("·")), QStringLiteral("中文 ``"), 4);
+    cjkExpect(checks, details, QStringLiteral("dotAliasAsciiAfterSpace"),
+              QStringLiteral("abc "), 4, 4, QStringLiteral("key · after space (ASCII)"),
+              keyAction(QStringLiteral("·")), QStringLiteral("abc ``"), 5);
+    cjkExpect(checks, details, QStringLiteral("dotAliasSpaceAfterDotKeepsLiteral"),
+              QStringLiteral("中文·"), 3, 3, QStringLiteral("key space after ·"),
+              keyAction(QStringLiteral(" ")), QStringLiteral("中文· "), 4);
+    cjkExpect(checks, details, QStringLiteral("dotAliasDoubleCreatesPair"),
+              QStringLiteral("中文·"), 3, 3, QStringLiteral("key · closes dot pair"),
+              keyAction(QStringLiteral("·")), QStringLiteral("中文 ``"), 4);
+    cjkExpect(checks, details, QStringLiteral("dotAliasImeAfterSpace"),
+              QStringLiteral("中文 "), 3, 3, QStringLiteral("IME commit · after space"),
+              [] { return inputMethodCommit(QStringLiteral("·")); },
+              QStringLiteral("中文 ``"), 4);
+    cjkExpect(checks, details, QStringLiteral("dotAliasImeDoubleCreatesPair"),
+              QStringLiteral("中文·"), 3, 3, QStringLiteral("IME commit · after ·"),
+              [] { return inputMethodCommit(QStringLiteral("·")); },
+              QStringLiteral("中文 ``"), 4);
+    cjkExpect(checks, details, QStringLiteral("dotAliasImeLiteral"),
+              QStringLiteral("中文"), 2, 2, QStringLiteral("IME commit · directly after CJK"),
+              [] { return inputMethodCommit(QStringLiteral("·")); },
+              QStringLiteral("中文"), 2);
+    {
+        // 撤销：光标回到输入 `·` 之前的位置（DOT-UNDO-CURSOR-001..003）。
+        setTextAndSelection(QStringLiteral("中文 "), 3, 3);
+        keyPress(QStringLiteral("·"), QStringLiteral("·"));
+        QThread::msleep(30);
+        const QString spaced = editorText();
+        const int spacedCursor = editorStatus().value(QStringLiteral("cursorPosition")).toInt();
+        request(QStringLiteral("testUndo"));
+        QThread::msleep(30);
+        const QString undone = editorText();
+        const int undoneCursor = editorStatus().value(QStringLiteral("cursorPosition")).toInt();
+        addCheck(checks, details, QStringLiteral("dotAliasUndoRestoresPosition"),
+                 spaced == QStringLiteral("中文 ``") && spacedCursor == 4
+                     && undone == QStringLiteral("中文 ") && undoneCursor == 3,
+                 QJsonObject{{QStringLiteral("spaced"), spaced},
+                             {QStringLiteral("spacedCursor"), spacedCursor},
+                             {QStringLiteral("undone"), undone},
+                             {QStringLiteral("undoneCursor"), undoneCursor}});
+
+        setTextAndSelection(QStringLiteral("中文x·y"), 4, 4);
+        keyPress(QStringLiteral("·"), QStringLiteral("·"));
+        QThread::msleep(30);
+        const QString pairText = editorText();
+        const int pairCursor = editorStatus().value(QStringLiteral("cursorPosition")).toInt();
+        request(QStringLiteral("testUndo"));
+        QThread::msleep(30);
+        const QString pairUndone = editorText();
+        const int pairUndoneCursor =
+            editorStatus().value(QStringLiteral("cursorPosition")).toInt();
+        addCheck(checks, details, QStringLiteral("dotAliasDoubleUndoRestores"),
+                 pairText == QStringLiteral("中文x `` y") && pairCursor == 5
+                     && pairUndone == QStringLiteral("中文x·y") && pairUndoneCursor == 4,
+                 QJsonObject{{QStringLiteral("pairText"), pairText},
+                             {QStringLiteral("pairCursor"), pairCursor},
+                             {QStringLiteral("pairUndone"), pairUndone},
+                             {QStringLiteral("pairUndoneCursor"), pairUndoneCursor}});
+    }
+    {
+        // 行中双反引号：光标位于两个反引号中间，两侧自动空格（BT-PAIR-001..002）。
+        setTextAndSelection(QStringLiteral("中文xyz"), 4, 4);
+        keyPress(QStringLiteral("`"), QStringLiteral("`"));
+        QThread::msleep(30);
+        keyPress(QStringLiteral("`"), QStringLiteral("`"));
+        QThread::msleep(30);
+        const QString pairText = editorText();
+        const int pairCursor = editorStatus().value(QStringLiteral("cursorPosition")).toInt();
+        addCheck(checks, details, QStringLiteral("backtickPairMidlineSpacing"),
+                 pairText == QStringLiteral("中文xy `` z") && pairCursor == 6,
+                 QJsonObject{{QStringLiteral("text"), pairText},
+                             {QStringLiteral("cursor"), pairCursor}});
+
+        setTextAndSelection(QString(), 0, 0);
+        keyPress(QStringLiteral("`"), QStringLiteral("`"));
+        QThread::msleep(30);
+        keyPress(QStringLiteral("`"), QStringLiteral("`"));
+        QThread::msleep(30);
+        keyPress(QStringLiteral("`"), QStringLiteral("`"));
+        QThread::msleep(30);
+        const QString fenceText = editorText();
+        addCheck(checks, details, QStringLiteral("backtickFenceUpgradeLineStart"),
+                 fenceText == QStringLiteral("```\n```"),
+                 QJsonObject{{QStringLiteral("text"), fenceText}});
+    }
     cjkExpect(checks, details, QStringLiteral("protectKeyInlineFormula"),
               QStringLiteral("$中文..$"), 5, 5, QStringLiteral("key . inside inline formula"),
               keyAction(QStringLiteral(".")), QStringLiteral("$中文...$"), 6);
