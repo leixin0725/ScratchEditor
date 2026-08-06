@@ -10,6 +10,7 @@
 #include <QThread>
 #include <QVector>
 
+#include "statuspanelhints.h"
 #include "windowplacement.h"
 
 namespace {
@@ -226,6 +227,10 @@ int main(int argc, char *argv[])
                     == QStringLiteral("Microsoft YaHei UI")
                  && initial.value(QStringLiteral("editorFontPointSize")).toInt() == 13
                  && initial.value(QStringLiteral("animationsEnabled")).toBool()
+                 && initial.value(QStringLiteral("statusPanelFontSize")).toInt() == 10
+                 && initial.value(QStringLiteral("statusPanelShowDelayMs")).toInt() == 300
+                 && initial.value(QStringLiteral("statusPanelHideDelayMs")).toInt() == 250
+                 && initial.value(QStringLiteral("statusPanelMaxWidth")).toInt() == 360
                  && initial.value(QStringLiteral("transitionDuration")).toInt() == 120
                   && initial.value(QStringLiteral("themeBackgroundColor")).toString()
                      == QStringLiteral("#252525")
@@ -236,6 +241,13 @@ int main(int argc, char *argv[])
                   && initial.value(QStringLiteral("selectionDragColor")).toString()
                      == QStringLiteral("#85c7c0"),
              initial);
+    const QJsonArray initialHints = initial.value(QStringLiteral("statusPanelHints")).toArray();
+    const QStringList expectedHints = StatusPanelHints::forMode(false);
+    bool hintsMatch = initialHints.size() == expectedHints.size();
+    for (int index = 0; index < initialHints.size() && hintsMatch; ++index) {
+        hintsMatch = initialHints.at(index).toString() == expectedHints.at(index);
+    }
+    addCheck(checks, details, QStringLiteral("statusPanelHintsDefault"), hintsMatch, initial);
     addCheck(checks, details, QStringLiteral("windowInteractionLayout"),
              initial.value(QStringLiteral("cornerResizeEnabled")).toBool()
                  && initial.value(QStringLiteral("edgeDragEnabled")).toBool()
@@ -376,6 +388,50 @@ int main(int argc, char *argv[])
                  && invalidSize.value(QStringLiteral("theme")).toString() == QStringLiteral("light"),
              invalidSize);
 
+    const QJsonObject panelApplied = request(
+        QStringLiteral("testApplyStatusPanelSettings"),
+        {{QStringLiteral("fontSize"), 12},
+         {QStringLiteral("showDelayMs"), 500},
+         {QStringLiteral("hideDelayMs"), 400},
+         {QStringLiteral("maxWidth"), 420}});
+    addCheck(checks, details, QStringLiteral("statusPanelApplies"),
+             panelApplied.value(QStringLiteral("applied")).toBool()
+                 && panelApplied.value(QStringLiteral("statusPanelFontSize")).toInt() == 12
+                 && panelApplied.value(QStringLiteral("statusPanelShowDelayMs")).toInt() == 500
+                 && panelApplied.value(QStringLiteral("statusPanelHideDelayMs")).toInt() == 400
+                 && panelApplied.value(QStringLiteral("statusPanelMaxWidth")).toInt() == 420,
+             panelApplied);
+
+    const QJsonObject panelInvalid = request(
+        QStringLiteral("testApplyStatusPanelSettings"),
+        {{QStringLiteral("fontSize"), 8},
+         {QStringLiteral("showDelayMs"), 2500},
+         {QStringLiteral("hideDelayMs"), 100},
+         {QStringLiteral("maxWidth"), 100}});
+    addCheck(checks, details, QStringLiteral("statusPanelValidation"),
+             !panelInvalid.value(QStringLiteral("applied")).toBool()
+                 && !panelInvalid.value(QStringLiteral("settingsError")).toString().isEmpty()
+                 && panelInvalid.value(QStringLiteral("statusPanelFontSize")).toInt() == 12
+                 && panelInvalid.value(QStringLiteral("statusPanelShowDelayMs")).toInt() == 500
+                 && panelInvalid.value(QStringLiteral("statusPanelHideDelayMs")).toInt() == 400
+                 && panelInvalid.value(QStringLiteral("statusPanelMaxWidth")).toInt() == 420,
+             panelInvalid);
+
+    request(QStringLiteral("testSetText"),
+            {{QStringLiteral("text"), QStringLiteral("你好 World")}});
+    const QJsonObject summaryPlain = request(QStringLiteral("status"));
+    const QJsonObject summarySelected = request(
+        QStringLiteral("testSetSelection"),
+        {{QStringLiteral("start"), 0}, {QStringLiteral("end"), 2}});
+    addCheck(checks, details, QStringLiteral("statusPanelSummaryPlain"),
+             summaryPlain.value(QStringLiteral("statusPanelSummary")).toString()
+                 == QStringLiteral("共 8 字"),
+             summaryPlain);
+    addCheck(checks, details, QStringLiteral("statusPanelSummarySelected"),
+             summarySelected.value(QStringLiteral("statusPanelSummary")).toString()
+                 == QStringLiteral("2 / 8 字"),
+             summarySelected);
+
     const QJsonObject shortcut = request(
         QStringLiteral("testSetShortcut"),
         {{QStringLiteral("commandId"), QStringLiteral("toggleBold")},
@@ -393,12 +449,25 @@ int main(int argc, char *argv[])
                  && hasKey(keys, QStringLiteral("editor/fontFamily"))
                  && hasKey(keys, QStringLiteral("editor/fontPointSize"))
                  && hasKey(keys, QStringLiteral("ui/animationsEnabled"))
+                 && hasKey(keys, QStringLiteral("statusPanel/fontSize"))
+                 && hasKey(keys, QStringLiteral("statusPanel/showDelayMs"))
+                 && hasKey(keys, QStringLiteral("statusPanel/hideDelayMs"))
+                 && hasKey(keys, QStringLiteral("statusPanel/maxWidth"))
                  && hasKey(keys, QStringLiteral("shortcuts/toggleBold"))
                  && fileText.contains(QStringLiteral("[appearance]"))
                  && fileText.contains(QStringLiteral("[editor]"))
                  && fileText.contains(QStringLiteral("[ui]"))
+                 && fileText.contains(QStringLiteral("[statusPanel]"))
                  && fileText.contains(QStringLiteral("[shortcuts]")),
              config);
+
+    const QJsonObject panelReset = request(QStringLiteral("testResetStatusPanelSettings"));
+    addCheck(checks, details, QStringLiteral("statusPanelReset"),
+             panelReset.value(QStringLiteral("statusPanelFontSize")).toInt() == 10
+                 && panelReset.value(QStringLiteral("statusPanelShowDelayMs")).toInt() == 300
+                 && panelReset.value(QStringLiteral("statusPanelHideDelayMs")).toInt() == 250
+                 && panelReset.value(QStringLiteral("statusPanelMaxWidth")).toInt() == 360,
+             panelReset);
 
     const QStringList excludedCommands{
         QStringLiteral("togglePreview"), QStringLiteral("historyDrafts"),

@@ -18,6 +18,13 @@ public:
         bool animationsEnabled = true;
     };
 
+    struct StatusPanel {
+        int fontSize = 10;
+        int showDelayMs = 300;
+        int hideDelayMs = 250;
+        int maxWidth = 360;
+    };
+
     explicit AppSettings(bool testMode);
     ~AppSettings();
 
@@ -39,6 +46,10 @@ public:
     bool setAppearance(const QString &theme, const QString &fontFamily, int fontPointSize,
                        bool animationsEnabled, QString *errorMessage = nullptr);
     void resetAppearance();
+    StatusPanel statusPanel() const;
+    bool setStatusPanel(int fontSize, int showDelayMs, int hideDelayMs, int maxWidth,
+                        QString *errorMessage = nullptr);
+    void resetStatusPanel();
     void resetAll();
 
 private:
