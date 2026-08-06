@@ -986,9 +986,6 @@ void EditorController::dispatchCommand(QLocalSocket *socket, const QJsonObject &
         const QString text = request.value(QStringLiteral("text")).toString();
         m_editor->setProperty("text", text);
         m_editor->setProperty("cursorPosition", text.size());
-        if (m_commands) {
-            m_commands->resetPendingMiddleDot();
-        }
         if (auto *quickDocument = qvariant_cast<QQuickTextDocument *>(
                 m_editor->property("textDocument"))) {
             quickDocument->textDocument()->clearUndoRedoStacks();

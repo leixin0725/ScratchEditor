@@ -809,12 +809,6 @@ void EditorCommandRegistry::setEditor(QObject *editor, QTextDocument *document)
     resetSelectionDrag(true);
     m_editor = editor;
     m_document = document;
-    m_pendingMiddleDotPosition = -1;
-}
-
-void EditorCommandRegistry::resetPendingMiddleDot()
-{
-    m_pendingMiddleDotPosition = -1;
 }
 
 QVariantList EditorCommandRegistry::commands() const
@@ -1822,15 +1816,6 @@ EditorCommandRegistry::TypedEditResult EditorCommandRegistry::handleTypedText(co
     const int end = m_editor->property("selectionEnd").toInt();
     const bool hasSelection = start != end;
 
-    // 挂起点号：若上一输入是行中的单个 `·`，先在这里决定它是
-    // 双点号对（生成反引号对）还是普通字面点号。
-    if (m_pendingMiddleDotPosition >= 0) {
-        const auto resolved = resolvePendingMiddleDot(text, start);
-        if (resolved) {
-            return *resolved;
-        }
-    }
-
     if (text == QStringLiteral("-") && !hasSelection) {
         const int lineStart =
             documentText.lastIndexOf(QLatin1Char('\n'), qMax(0, start - 1)) + 1;
@@ -1850,15 +1835,12 @@ EditorCommandRegistry::TypedEditResult EditorCommandRegistry::handleTypedText(co
         }
     }
 
-    // `·`（U+00B7）别名：空格后单点号模拟反引号；连续双点号生成反引号对。
+    // `·`（U+00B7）别名：仅在空格后单点号时模拟反引号；紧贴字符输入保持字面。
     if (text == QStringLiteral("·") && !hasSelection) {
         if (const auto aliasResult = handleMiddleDotAlias(start)) {
             return *aliasResult;
         }
-        // 字符直接连 `·`：挂起等待下一个输入，双点号时整体生成反引号对，
-        // 保证一次撤销能还原到输入点号之前。
-        m_pendingMiddleDotPosition = start;
-        result.consumed = true;
+        // 字符直接连 `·`：视作普通输入，不做任何处理（由编辑器直接插入）。
         return result;
     }
 
@@ -2390,36 +2372,7 @@ EditorCommandRegistry::handleMiddleDotAlias(int start)
         return std::nullopt;
     }
 
-    // 双点号（规则 4）：光标前一字符已是 `·`，删除两个 `·`（含其前空格），
-    // 生成 `` `|` `` 结构（两个反引号，光标在中间），并触发自动空格判断。
-    if (documentText.at(start - 1) == QChar(u'\u00B7')) {
-        int removeStart = start - 1;
-        if (removeStart > 0 && documentText.at(removeStart - 1) == QLatin1Char(' ')) {
-            --removeStart;
-        }
-        QTextCursor cursor(m_document);
-        cursor.setPosition(removeStart);
-        cursor.setPosition(start, QTextCursor::KeepAnchor);
-        cursor.removeSelectedText();
-        m_editor->setProperty("cursorPosition", removeStart);
-        focusEditor();
-        QTextCursor insertionCursor(m_document);
-        insertionCursor.setPosition(removeStart);
-        insertionCursor.insertText(QStringLiteral("``"));
-        const int leftSpaces =
-            spaceBacktickPairBoundaries(m_document, removeStart, removeStart + 1);
-        m_editor->setProperty("cursorPosition", removeStart + 1 + leftSpaces);
-        focusEditor();
-        TypedEditResult result;
-        result.consumed = true;
-        result.textChanged = true;
-        // 边界空格已由 spaceBacktickPairBoundaries 处理，避免自动空格重复补左侧。
-        result.runAutoSpacing = false;
-        result.footprint = {removeStart, removeStart + 2};
-        return result;
-    }
-
-    // 空格后单点号（规则 2）：删除空格与 `·`，生成反引号对（光标在中间），
+    // 空格后单点号：删除空格与 `·`，生成反引号对（光标在中间），
     // 由边界空格逻辑补两侧空格（如 `中文 ·` 后得到 `中文 `` `）。
     if (documentText.at(start - 1) == QLatin1Char(' ')) {
         const int removeStart = start - 1;
@@ -2444,38 +2397,6 @@ EditorCommandRegistry::handleMiddleDotAlias(int start)
         return result;
     }
 
-    return std::nullopt;
-}
-
-std::optional<EditorCommandRegistry::TypedEditResult>
-EditorCommandRegistry::resolvePendingMiddleDot(const QString &text, int start)
-{
-    if (m_pendingMiddleDotPosition < 0) {
-        return std::nullopt;
-    }
-    const int pendingPosition = m_pendingMiddleDotPosition;
-    m_pendingMiddleDotPosition = -1;
-
-    const QString currentText = m_document->toPlainText();
-    if (pendingPosition > currentText.size()) {
-        return std::nullopt;
-    }
-
-    if (text == QStringLiteral("·") && start == pendingPosition) {
-        // 连续两个 `·`：把挂起的第一个点号插入后，由 handleMiddleDotAlias
-        // 一次性删除两个点号并生成反引号对（同一 undo 组内完成）。
-        QTextCursor cursor(m_document);
-        cursor.setPosition(pendingPosition);
-        cursor.insertText(QStringLiteral("·"));
-        m_editor->setProperty("cursorPosition", pendingPosition + 1);
-        return handleMiddleDotAlias(pendingPosition + 1);
-    }
-
-    // 后续输入不是 `·`：先把挂起点号作为字面量插入，再继续处理当前输入。
-    QTextCursor cursor(m_document);
-    cursor.setPosition(pendingPosition);
-    cursor.insertText(QStringLiteral("·"));
-    m_editor->setProperty("cursorPosition", pendingPosition + 1);
     return std::nullopt;
 }
 
@@ -2627,24 +2548,15 @@ EditorCommandRegistry::completeInputMethodCommit(const QString &committedText,
     if (!m_editor || !m_document) {
         return std::nullopt;
     }
-    // `·`（U+00B7）别名与键盘路径一致：空格后单点号模拟反引号；双点号生成反引号对。
+    // `·`（U+00B7）别名与键盘路径一致：仅在空格后单点号时模拟反引号；
+    // 紧贴字符输入保持字面。
     if (selectionStart == selectionEnd && committedText == QStringLiteral("·")) {
-        // 挂起点号优先：上一输入是行中单个 `·`，先决定它是双点号对还是字面点号。
-        if (m_pendingMiddleDotPosition >= 0) {
-            const auto resolved = resolvePendingMiddleDot(committedText, selectionStart);
-            if (resolved) {
-                return CompletionResult{
-                    resolved->footprint,
-                    resolved->runAutoSpacing};
-            }
-            // 非点号输入已在键盘路径处理；这里 committedText 是 `·`，必然成对。
-        }
         const QString currentText = m_document->toPlainText();
         // 提交的 `·` 已位于 selectionStart；先移除它，再按键盘路径同一状态检测。
         const bool aliased = selectionStart > 0
+            && selectionStart < currentText.size()
             && (currentText.mid(selectionStart, 1) == QStringLiteral("·"))
-            && (currentText.at(selectionStart - 1) == QChar(u'\u00B7')
-                || currentText.at(selectionStart - 1) == QLatin1Char(' '));
+            && currentText.at(selectionStart - 1) == QLatin1Char(' ');
         if (aliased) {
             QTextCursor removalCursor(m_document);
             removalCursor.setPosition(selectionStart);
@@ -2659,14 +2571,10 @@ EditorCommandRegistry::completeInputMethodCommit(const QString &committedText,
                 aliasResult->footprint,
                 aliasResult->runAutoSpacing};
         }
-        // 字符直接连 `·`：移除已提交的 `·` 并挂起，与键盘路径一致。
-        QTextCursor removalCursor(m_document);
-        removalCursor.setPosition(selectionStart);
-        removalCursor.setPosition(selectionStart + 1, QTextCursor::KeepAnchor);
-        removalCursor.removeSelectedText();
-        m_editor->setProperty("cursorPosition", selectionStart);
-        m_pendingMiddleDotPosition = selectionStart;
-        return CompletionResult{{selectionStart, selectionStart}, /*autoSpace=*/false};
+        // 字符直接连 `·`：保持字面量，不做任何处理。
+        return CompletionResult{
+            {selectionStart, selectionStart + 1},
+            /*autoSpace=*/false};
     }
 
     QString expectedText = beforeText;

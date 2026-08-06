@@ -24,7 +24,6 @@ public:
     explicit EditorCommandRegistry(AppSettings *settings, QObject *parent = nullptr);
 
     void setEditor(QObject *editor, QTextDocument *document);
-    void resetPendingMiddleDot();
     QVariantList commands() const;
     QString shortcut(const QString &commandId) const;
 
@@ -84,7 +83,6 @@ private:
     bool toggleCurrentCheckbox();
     TypedEditResult handleTypedText(const QString &text);
     std::optional<TypedEditResult> handleMiddleDotAlias(int start);
-    std::optional<TypedEditResult> resolvePendingMiddleDot(const QString &text, int start);
     std::optional<EditFootprint> insertPair(const QString &opening, const QString &closing);
     std::optional<EditFootprint> insertFenceBlock();
     bool handleSpecialBackspace();
@@ -125,5 +123,4 @@ private:
     bool m_selectionDragPreviousKeepMouseGrab = false;
     QCursor m_selectionDragOriginalCursor;
     std::optional<FormatUndoSnapshot> m_formatUndoSnapshot;
-    int m_pendingMiddleDotPosition = -1;
 };
