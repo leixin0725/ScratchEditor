@@ -1635,6 +1635,38 @@ int main(int argc, char *argv[])
                              {QStringLiteral("undone"), undone},
                              {QStringLiteral("undoneCursor"), undoneCursor}});
 
+        // IME 提交的插入与转换/自动空格必须合并为一次撤销（DOT-UNDO-IME-001..002）。
+        setTextAndSelection(QStringLiteral("中文 "), 3, 3);
+        inputMethodCommit(QStringLiteral("·"));
+        QThread::msleep(30);
+        const QString imeSpaced = editorText();
+        const int imeSpacedCursor =
+            editorStatus().value(QStringLiteral("cursorPosition")).toInt();
+        request(QStringLiteral("testUndo"));
+        QThread::msleep(30);
+        const QString imeUndone = editorText();
+        const int imeUndoneCursor =
+            editorStatus().value(QStringLiteral("cursorPosition")).toInt();
+        addCheck(checks, details, QStringLiteral("dotAliasImeUndoRestoresPosition"),
+                 imeSpaced == QStringLiteral("中文 ``") && imeSpacedCursor == 4
+                     && imeUndone == QStringLiteral("中文 ") && imeUndoneCursor == 3,
+                 QJsonObject{{QStringLiteral("imeSpaced"), imeSpaced},
+                             {QStringLiteral("imeSpacedCursor"), imeSpacedCursor},
+                             {QStringLiteral("imeUndone"), imeUndone},
+                             {QStringLiteral("imeUndoneCursor"), imeUndoneCursor}});
+
+        setTextAndSelection(QStringLiteral("中文"), 2, 2);
+        inputMethodCommit(QStringLiteral("A"));
+        QThread::msleep(30);
+        const QString imeAutoSpaced = editorText();
+        request(QStringLiteral("testUndo"));
+        QThread::msleep(30);
+        const QString imeAutoUndone = editorText();
+        addCheck(checks, details, QStringLiteral("imeCommitAutoSpacingUndoRestores"),
+                 imeAutoSpaced == QStringLiteral("中文 A")
+                     && imeAutoUndone == QStringLiteral("中文"),
+                 QJsonObject{{QStringLiteral("imeAutoSpaced"), imeAutoSpaced},
+                             {QStringLiteral("imeAutoUndone"), imeAutoUndone}});
     }
     {
         // 行中双反引号：光标位于两个反引号中间，两侧自动空格（BT-PAIR-001..002）。

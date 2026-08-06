@@ -1054,21 +1054,23 @@ bool EditorCommandRegistry::handleEditorEvent(QEvent *event)
         const int end = m_editor->property("selectionEnd").toInt();
         const QString beforeText = m_document->toPlainText();
         const QString selection = selectedText();
+        // 与键盘路径一致：先开启 edit block，让编辑器插入的提交文本与后续
+        // 完成处理合并为一次撤销（一次 Ctrl+Z 可整体撤销 IME 提交及其转换）。
+        QTextCursor undoGroupCursor(m_document);
+        undoGroupCursor.setPosition(start);
+        undoGroupCursor.beginEditBlock();
         if (!relevant) {
             QTimer::singleShot(0, this,
-                               [this, beforeText, start, end, committedText] {
-                if (!m_editor || !m_document) {
-                    return;
-                }
-                QTextCursor undoGroupCursor(m_document);
-                undoGroupCursor.setPosition(start);
-                undoGroupCursor.beginEditBlock();
-                QString expected = beforeText;
-                expected.replace(start, end - start, committedText);
-                if (m_document->toPlainText() == expected) {
-                    applyAutoSpacing(
-                        {start, start + static_cast<int>(committedText.size())},
-                        committedText.size() > 1);
+                               [this, beforeText, start, end, committedText,
+                                undoGroupCursor]() mutable {
+                if (m_editor && m_document) {
+                    QString expected = beforeText;
+                    expected.replace(start, end - start, committedText);
+                    if (m_document->toPlainText() == expected) {
+                        applyAutoSpacing(
+                            {start, start + static_cast<int>(committedText.size())},
+                            committedText.size() > 1);
+                    }
                 }
                 undoGroupCursor.endEditBlock();
             });
@@ -1076,17 +1078,14 @@ bool EditorCommandRegistry::handleEditorEvent(QEvent *event)
         }
 
         QTimer::singleShot(0, this,
-                           [this, committedText, beforeText, selection, start, end] {
-            if (!m_editor || !m_document) {
-                return;
-            }
-            QTextCursor undoGroupCursor(m_document);
-            undoGroupCursor.setPosition(start);
-            undoGroupCursor.beginEditBlock();
-            const auto completion = completeInputMethodCommit(
-                committedText, beforeText, selection, start, end);
-            if (completion && completion->autoSpace) {
-                applyAutoSpacing(completion->footprint);
+                           [this, committedText, beforeText, selection, start, end,
+                            undoGroupCursor]() mutable {
+            if (m_editor && m_document) {
+                const auto completion = completeInputMethodCommit(
+                    committedText, beforeText, selection, start, end);
+                if (completion && completion->autoSpace) {
+                    applyAutoSpacing(completion->footprint);
+                }
             }
             undoGroupCursor.endEditBlock();
         });
