@@ -53,6 +53,11 @@ private:
         EditFootprint footprint;
     };
 
+    struct CompletionResult {
+        EditFootprint footprint;
+        bool autoSpace = true;
+    };
+
     struct FormatUndoSnapshot {
         QString originalText;
         QString formattedText;
@@ -86,7 +91,7 @@ private:
     bool formatSpacing();
     void applyAutoSpacing(EditFootprint footprint, bool includeInternalBoundaries = false);
     bool isInsideFencedBlock(int position) const;
-    std::optional<EditFootprint> completeInputMethodCommit(
+    std::optional<CompletionResult> completeInputMethodCommit(
         const QString &committedText, const QString &beforeText,
         const QString &selectedText, int selectionStart, int selectionEnd);
     void selectRange(int start, int end);

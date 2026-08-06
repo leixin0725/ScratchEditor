@@ -13,6 +13,7 @@ enum class ProtectedKind {
     BlockFormula,
     InlineCode,
     InlineFormula,
+    InlineQuote,
 };
 
 struct ProtectedSpan {

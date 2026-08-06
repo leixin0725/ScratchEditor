@@ -1467,10 +1467,10 @@ int main(int argc, char *argv[])
               keyAction(QStringLiteral("[")), QStringLiteral("中文【】"), 3);
     cjkExpect(checks, details, QStringLiteral("cjkKeyDoubleQuotePair"),
               QStringLiteral("中文"), 2, 2, QStringLiteral("key \" after CJK"),
-              keyAction(QStringLiteral("\"")), QStringLiteral("中文“”"), 3);
+              keyAction(QStringLiteral("\"")), QStringLiteral("中文 “”"), 4);
     cjkExpect(checks, details, QStringLiteral("cjkKeySingleQuotePair"),
               QStringLiteral("中文"), 2, 2, QStringLiteral("key ' after CJK"),
-              keyAction(QStringLiteral("'")), QStringLiteral("中文‘’"), 3);
+              keyAction(QStringLiteral("'")), QStringLiteral("中文 ‘’"), 4);
     cjkExpect(checks, details, QStringLiteral("cjkKeyChainComma"),
               QStringLiteral("中文，"), 3, 3, QStringLiteral("key ,"),
               keyAction(QStringLiteral(",")), QStringLiteral("中文，，"), 4);
@@ -1508,7 +1508,62 @@ int main(int argc, char *argv[])
               keyAction(QStringLiteral(",")), QStringLiteral("`中,文`"), 3);
     cjkExpect(checks, details, QStringLiteral("protectKeyInlineQuote"),
               QStringLiteral("`中文`"), 3, 3, QStringLiteral("key \" inside inline code"),
-              keyAction(QStringLiteral("\"")), QStringLiteral("`中文\"\"`"), 4);
+              keyAction(QStringLiteral("\"")), QStringLiteral("`中文\"`"), 4);
+
+    // --- 行中引号：单开符 + 闭合收尾（MID-QUOTE-001..011） ---
+    cjkExpect(checks, details, QStringLiteral("midQuoteAsciiSingleOpen"),
+              QStringLiteral("abc"), 1, 1, QStringLiteral("key \" at midline"),
+              keyAction(QStringLiteral("\"")), QStringLiteral("a\"bc"), 2);
+    cjkExpect(checks, details, QStringLiteral("midQuoteSingleQuoteSingleOpen"),
+              QStringLiteral("abc"), 1, 1, QStringLiteral("key ' at midline"),
+              keyAction(QStringLiteral("'")), QStringLiteral("a'bc"), 2);
+    cjkExpect(checks, details, QStringLiteral("midQuoteBacktickSingleOpen"),
+              QStringLiteral("abc"), 1, 1, QStringLiteral("key ` at midline"),
+              keyAction(QStringLiteral("`")), QStringLiteral("a`bc"), 2);
+    cjkExpect(checks, details, QStringLiteral("midQuoteCurlySingleOpen"),
+              QStringLiteral("abc"), 1, 1, QStringLiteral("key “ at midline"),
+              keyAction(QStringLiteral("“")), QStringLiteral("a“bc"), 2);
+    cjkExpect(checks, details, QStringLiteral("midQuoteAsciiCloseNoCjk"),
+              QStringLiteral("a\"bc"), 3, 3, QStringLiteral("key \" to close wrap"),
+              keyAction(QStringLiteral("\"")), QStringLiteral("a\"b\"c"), 4);
+    cjkExpect(checks, details, QStringLiteral("midQuoteAsciiCloseCjkConverts"),
+              QStringLiteral("a\"中文x"), 4, 4, QStringLiteral("key \" closes CJK wrap"),
+              keyAction(QStringLiteral("\"")), QStringLiteral("a “中文” x"), 6);
+    cjkExpect(checks, details, QStringLiteral("midQuoteCloseSkipsExisting"),
+              QStringLiteral("a\"b\"c"), 3, 3, QStringLiteral("key \" skips existing closer"),
+              keyAction(QStringLiteral("\"")), QStringLiteral("a\"b\"c"), 4);
+    cjkExpect(checks, details, QStringLiteral("midQuoteCloseTriggersAutoSpacing"),
+              QStringLiteral("中文“Ax"), 4, 4, QStringLiteral("key ” closes wrap"),
+              keyAction(QStringLiteral("”")), QStringLiteral("中文 “A” x"), 6);
+    cjkExpect(checks, details, QStringLiteral("midQuoteLineEndKeepsAutoPair"),
+              QStringLiteral("abc"), 3, 3, QStringLiteral("key \" at line end"),
+              keyAction(QStringLiteral("\"")), QStringLiteral("abc\"\""), 4);
+    {
+        // 输入与自动空格必须合并为一次撤销（UNDO-GROUP-001）。
+        setTextAndSelection(QStringLiteral("中文"), 2, 2);
+        keyPress(QStringLiteral("\""), QStringLiteral("\""));
+        QThread::msleep(30);
+        const QString spaced = editorText();
+        request(QStringLiteral("testUndo"));
+        QThread::msleep(30);
+        const QString undone = editorText();
+        addCheck(checks, details, QStringLiteral("undoGroupsQuoteAndSpacing"),
+                 spaced == QStringLiteral("中文 “”") && undone == QStringLiteral("中文"),
+                 QJsonObject{{QStringLiteral("spaced"), spaced},
+                             {QStringLiteral("undone"), undone}});
+    }
+    cjkExpect(checks, details, QStringLiteral("midQuoteImeCurlySingleOpen"),
+              QStringLiteral("abc"), 1, 1, QStringLiteral("IME commit “ at midline"),
+              [] { return inputMethodCommit(QStringLiteral("“")); },
+              QStringLiteral("a“bc"), 2);
+    cjkExpect(checks, details, QStringLiteral("midQuoteImeCurlyCloseCjk"),
+              QStringLiteral("a“中文x"), 4, 4, QStringLiteral("IME commit ” closes wrap"),
+              [] { return inputMethodCommit(QStringLiteral("”")); },
+              QStringLiteral("a“中文”x"), 5);
+    cjkExpect(checks, details, QStringLiteral("midQuoteImeAsciiCloseCjkConverts"),
+              QStringLiteral("a\"中文x"), 4, 4, QStringLiteral("IME commit \" closes CJK wrap"),
+              [] { return inputMethodCommit(QStringLiteral("\"")); },
+              QStringLiteral("a “中文” x"), 6);
     cjkExpect(checks, details, QStringLiteral("protectKeyInlineFormula"),
               QStringLiteral("$中文..$"), 5, 5, QStringLiteral("key . inside inline formula"),
               keyAction(QStringLiteral(".")), QStringLiteral("$中文...$"), 6);

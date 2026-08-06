@@ -147,7 +147,7 @@ function Invoke-WslEditorConfiguration {
     $wslOutput = & wsl.exe --cd $projectRoot -- bash "./scripts/configure-codex-editor-wsl.sh" $WslAction 2>&1
     $wslExitCode = $LASTEXITCODE
     if ($wslExitCode -ne 0) {
-        throw "WSL editor configuration ($WslAction) failed with exit code $wslExitCode:`n$($wslOutput -join [Environment]::NewLine)"
+        throw "WSL editor configuration (${WslAction}) failed with exit code ${wslExitCode}:`n$($wslOutput -join [Environment]::NewLine)"
     }
     return $true
 }

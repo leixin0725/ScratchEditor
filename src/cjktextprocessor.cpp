@@ -131,6 +131,20 @@ void parseInlineSpans(const QString &line, int base, QVector<ProtectedSpan> *spa
     const int length = line.size();
     while (i < length) {
         const QChar character = line.at(i);
+        const QChar closingQuote = character == u'\u201C' ? u'\u201D'
+            : character == u'\u2018' ? u'\u2019' : QChar();
+        if (!closingQuote.isNull()) {
+            const int close = line.indexOf(closingQuote, i + 1);
+            if (close >= 0) {
+                spans->append({base + i, base + close + 1,
+                               base + i + 1, base + close,
+                               ProtectedKind::InlineQuote});
+                i = close + 1;
+            } else {
+                ++i;
+            }
+            continue;
+        }
         if (character == u'`') {
             const int runStart = i;
             while (i < length && line.at(i) == u'`') {
