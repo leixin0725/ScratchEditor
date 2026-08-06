@@ -83,6 +83,13 @@ private:
     bool toggleCurrentCheckbox();
     TypedEditResult handleTypedText(const QString &text);
     std::optional<TypedEditResult> handleMiddleDotAlias(int start);
+    std::optional<TypedEditResult> handleDoubleMiddleDot(int removeStart, int removeEnd);
+    std::optional<TypedEditResult> handleEmptyLineFenceUpgrade(int removeStart, int removeEnd);
+    std::optional<TypedEditResult> tryMergeMiddleDotConversion(
+        const QString &text, int start, const QString &currentText);
+    TypedEditResult insertBacktickPairAt(int position);
+    bool isMiddleDotDoubleDot(const QString &text, int position) const;
+    bool isMiddleDotEmptyLinePair(const QString &text, int position) const;
     std::optional<EditFootprint> insertPair(const QString &opening, const QString &closing);
     std::optional<EditFootprint> insertFenceBlock();
     bool handleSpecialBackspace();

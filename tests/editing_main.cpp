@@ -1566,7 +1566,7 @@ int main(int argc, char *argv[])
               QStringLiteral("a “中文” x"), 6);
 
     // --- `·`（U+00B7）反引号别名（DOT-ALIAS-001..012） ---
-    // 紧贴字符输入 `·` 一律保持字面，不做任何处理。
+    // 紧贴字符输入单个 `·` 保持字面；连续两个 `·` 生成反引号对（光标居中）。
     cjkExpect(checks, details, QStringLiteral("dotAliasLiteralAfterChar"),
               QStringLiteral("中文"), 2, 2, QStringLiteral("key · directly after CJK"),
               keyAction(QStringLiteral("·")), QStringLiteral("中文·"), 3);
@@ -1574,34 +1574,34 @@ int main(int argc, char *argv[])
               QStringLiteral("中文"), 2, 2, QStringLiteral("IME commit · directly after CJK"),
               [] { return inputMethodCommit(QStringLiteral("·")); },
               QStringLiteral("中文·"), 3);
-    cjkExpect(checks, details, QStringLiteral("dotAliasDoubleLiteralAfterChar"),
+    cjkExpect(checks, details, QStringLiteral("dotAliasDoubleLineEndPair"),
               QStringLiteral("中文"), 2, 2, QStringLiteral("key · twice directly after CJK"),
               [] {
                   keyPress(QStringLiteral("·"), QStringLiteral("·"));
                   return keyPress(QStringLiteral("·"), QStringLiteral("·"));
               },
-              QStringLiteral("中文··"), 4);
-    cjkExpect(checks, details, QStringLiteral("dotAliasImeDoubleLiteralAfterChar"),
+              QStringLiteral("中文 ``"), 4);
+    cjkExpect(checks, details, QStringLiteral("dotAliasImeDoubleLineEndPair"),
               QStringLiteral("中文"), 2, 2, QStringLiteral("IME commit · twice directly after CJK"),
               [] {
                   inputMethodCommit(QStringLiteral("·"));
                   return inputMethodCommit(QStringLiteral("·"));
               },
-              QStringLiteral("中文··"), 4);
-    cjkExpect(checks, details, QStringLiteral("dotAliasDoubleLiteralMidline"),
+              QStringLiteral("中文 ``"), 4);
+    cjkExpect(checks, details, QStringLiteral("dotAliasDoubleMidlinePair"),
               QStringLiteral("中文"), 1, 1, QStringLiteral("key · twice midline"),
               [] {
                   keyPress(QStringLiteral("·"), QStringLiteral("·"));
                   return keyPress(QStringLiteral("·"), QStringLiteral("·"));
               },
-              QStringLiteral("中··文"), 3);
-    cjkExpect(checks, details, QStringLiteral("dotAliasImeDoubleLiteralMidline"),
+              QStringLiteral("中 `` 文"), 3);
+    cjkExpect(checks, details, QStringLiteral("dotAliasImeDoubleMidlinePair"),
               QStringLiteral("中文"), 1, 1, QStringLiteral("IME commit · twice midline"),
               [] {
                   inputMethodCommit(QStringLiteral("·"));
                   return inputMethodCommit(QStringLiteral("·"));
               },
-              QStringLiteral("中··文"), 3);
+              QStringLiteral("中 `` 文"), 3);
     // 仅在空格后单点号时触发反引号转换。
     cjkExpect(checks, details, QStringLiteral("dotAliasAfterSpaceBecomesBacktick"),
               QStringLiteral("中文 "), 3, 3, QStringLiteral("key · after space"),
@@ -1616,6 +1616,91 @@ int main(int argc, char *argv[])
     cjkExpect(checks, details, QStringLiteral("dotAliasSpaceAfterDotKeepsLiteral"),
               QStringLiteral("中文·"), 3, 3, QStringLiteral("key space after ·"),
               keyAction(QStringLiteral(" ")), QStringLiteral("中文· "), 4);
+    // 行首与空行的连续双 `·` 同样生成反引号对（DOT2-001..004）。
+    cjkExpect(checks, details, QStringLiteral("dotAliasDoubleLineStartPair"),
+              QStringLiteral("中文"), 0, 0, QStringLiteral("key · twice at line start"),
+              [] {
+                  keyPress(QStringLiteral("·"), QStringLiteral("·"));
+                  return keyPress(QStringLiteral("·"), QStringLiteral("·"));
+              },
+              QStringLiteral("`` 中文"), 1);
+    cjkExpect(checks, details, QStringLiteral("dotAliasImeDoubleLineStartPair"),
+              QStringLiteral("中文"), 0, 0, QStringLiteral("IME commit · twice at line start"),
+              [] {
+                  inputMethodCommit(QStringLiteral("·"));
+                  return inputMethodCommit(QStringLiteral("·"));
+              },
+              QStringLiteral("`` 中文"), 1);
+    cjkExpect(checks, details, QStringLiteral("dotAliasDoubleEmptyLinePair"),
+              QString(), 0, 0, QStringLiteral("key · twice on empty line"),
+              [] {
+                  keyPress(QStringLiteral("·"), QStringLiteral("·"));
+                  return keyPress(QStringLiteral("·"), QStringLiteral("·"));
+              },
+              QStringLiteral("``"), 1);
+    cjkExpect(checks, details, QStringLiteral("dotAliasImeDoubleEmptyLinePair"),
+              QString(), 0, 0, QStringLiteral("IME commit · twice on empty line"),
+              [] {
+                  inputMethodCommit(QStringLiteral("·"));
+                  return inputMethodCommit(QStringLiteral("·"));
+              },
+              QStringLiteral("``"), 1);
+    // 完全空行上连按三个 `·`：`` 对升级为大代码块围栏（DOT2-FENCE-001..002）。
+    cjkExpect(checks, details, QStringLiteral("dotAliasTripleEmptyLineFence"),
+              QString(), 0, 0, QStringLiteral("key · three times on empty line"),
+              [] {
+                  keyPress(QStringLiteral("·"), QStringLiteral("·"));
+                  keyPress(QStringLiteral("·"), QStringLiteral("·"));
+                  return keyPress(QStringLiteral("·"), QStringLiteral("·"));
+              },
+              QStringLiteral("```\n```"), 3);
+    cjkExpect(checks, details, QStringLiteral("dotAliasImeTripleEmptyLineFence"),
+              QString(), 0, 0, QStringLiteral("IME commit · three times on empty line"),
+              [] {
+                  inputMethodCommit(QStringLiteral("·"));
+                  inputMethodCommit(QStringLiteral("·"));
+                  return inputMethodCommit(QStringLiteral("·"));
+              },
+              QStringLiteral("```\n```"), 3);
+    // 行尾 ASCII 双 `·` 同样成对（DOT2-005）。
+    cjkExpect(checks, details, QStringLiteral("dotAliasDoubleLineEndAsciiPair"),
+              QStringLiteral("abc"), 3, 3, QStringLiteral("key · twice after ASCII"),
+              [] {
+                  keyPress(QStringLiteral("·"), QStringLiteral("·"));
+                  return keyPress(QStringLiteral("·"), QStringLiteral("·"));
+              },
+              QStringLiteral("abc ``"), 5);
+    // 围栏代码块内：双 `·` 与三连点均保持字面（DOT2-FENCE-003..005）。
+    cjkExpect(checks, details, QStringLiteral("dotAliasDoubleInsideFenceLiteral"),
+              QStringLiteral("```\n\n```"), 4, 4,
+              QStringLiteral("key · twice inside fenced code"),
+              [] {
+                  keyPress(QStringLiteral("·"), QStringLiteral("·"));
+                  return keyPress(QStringLiteral("·"), QStringLiteral("·"));
+              },
+              QStringLiteral("```\n··\n```"), 6);
+    cjkExpect(checks, details, QStringLiteral("dotAliasImeDoubleInsideFenceLiteral"),
+              QStringLiteral("```\n\n```"), 4, 4,
+              QStringLiteral("IME commit · twice inside fenced code"),
+              [] {
+                  inputMethodCommit(QStringLiteral("·"));
+                  return inputMethodCommit(QStringLiteral("·"));
+              },
+              QStringLiteral("```\n··\n```"), 6);
+    cjkExpect(checks, details, QStringLiteral("dotAliasTripleInsideFenceLiteral"),
+              QStringLiteral("```\n\n```"), 4, 4,
+              QStringLiteral("key · three times inside fenced code"),
+              [] {
+                  keyPress(QStringLiteral("·"), QStringLiteral("·"));
+                  keyPress(QStringLiteral("·"), QStringLiteral("·"));
+                  return keyPress(QStringLiteral("·"), QStringLiteral("·"));
+              },
+              QStringLiteral("```\n···\n```"), 7);
+    // 有选区时输入单个 `·` 等价于 `` ` ``：包裹选区并触发自动空格（DOT2-WRAP-001）。
+    cjkExpect(checks, details, QStringLiteral("dotAliasSelectionWrapsBackticks"),
+              QStringLiteral("中文"), 1, 2, QStringLiteral("key · with selection"),
+              keyAction(QStringLiteral("·")),
+              QStringLiteral("中 `文`"), -1, 3, 4);
     {
         // 撤销：光标回到输入 `·` 之前的位置（DOT-UNDO-CURSOR-001..003）。
         setTextAndSelection(QStringLiteral("中文 "), 3, 3);
@@ -1667,6 +1752,109 @@ int main(int argc, char *argv[])
                      && imeAutoUndone == QStringLiteral("中文"),
                  QJsonObject{{QStringLiteral("imeAutoSpaced"), imeAutoSpaced},
                              {QStringLiteral("imeAutoUndone"), imeAutoUndone}});
+    }
+    {
+        // 双 `·` 成对、空行围栏升级与选区包裹均合并为一次撤销（DOT2-UNDO-001..005）。
+        setTextAndSelection(QStringLiteral("中文"), 1, 1);
+        keyPress(QStringLiteral("·"), QStringLiteral("·"));
+        keyPress(QStringLiteral("·"), QStringLiteral("·"));
+        QThread::msleep(30);
+        const QString paired = editorText();
+        const int pairedCursor =
+            editorStatus().value(QStringLiteral("cursorPosition")).toInt();
+        request(QStringLiteral("testUndo"));
+        QThread::msleep(30);
+        const QString pairedUndone = editorText();
+        const int pairedUndoneCursor =
+            editorStatus().value(QStringLiteral("cursorPosition")).toInt();
+        addCheck(checks, details, QStringLiteral("dotAliasDoubleUndoRestoresPosition"),
+                 paired == QStringLiteral("中 `` 文") && pairedCursor == 3
+                     && pairedUndone == QStringLiteral("中文") && pairedUndoneCursor == 1,
+                 QJsonObject{{QStringLiteral("paired"), paired},
+                             {QStringLiteral("pairedCursor"), pairedCursor},
+                             {QStringLiteral("undone"), pairedUndone},
+                             {QStringLiteral("undoneCursor"), pairedUndoneCursor}});
+
+        // IME 双 `·` 同样合并为一次撤销。
+        setTextAndSelection(QStringLiteral("中文"), 2, 2);
+        inputMethodCommit(QStringLiteral("·"));
+        inputMethodCommit(QStringLiteral("·"));
+        QThread::msleep(30);
+        const QString imePaired = editorText();
+        const int imePairedCursor =
+            editorStatus().value(QStringLiteral("cursorPosition")).toInt();
+        request(QStringLiteral("testUndo"));
+        QThread::msleep(30);
+        const QString imePairedUndone = editorText();
+        const int imePairedUndoneCursor =
+            editorStatus().value(QStringLiteral("cursorPosition")).toInt();
+        addCheck(checks, details, QStringLiteral("dotAliasImeDoubleUndoRestoresAll"),
+                 imePaired == QStringLiteral("中文 ``") && imePairedCursor == 4
+                     && imePairedUndone == QStringLiteral("中文")
+                     && imePairedUndoneCursor == 2,
+                 QJsonObject{{QStringLiteral("paired"), imePaired},
+                             {QStringLiteral("pairedCursor"), imePairedCursor},
+                             {QStringLiteral("undone"), imePairedUndone},
+                             {QStringLiteral("undoneCursor"), imePairedUndoneCursor}});
+
+        setTextAndSelection(QString(), 0, 0);
+        keyPress(QStringLiteral("·"), QStringLiteral("·"));
+        keyPress(QStringLiteral("·"), QStringLiteral("·"));
+        keyPress(QStringLiteral("·"), QStringLiteral("·"));
+        QThread::msleep(30);
+        const QString fenced = editorText();
+        const int fencedCursor =
+            editorStatus().value(QStringLiteral("cursorPosition")).toInt();
+        request(QStringLiteral("testUndo"));
+        QThread::msleep(30);
+        const QString fencedUndone = editorText();
+        const int fencedUndoneCursor =
+            editorStatus().value(QStringLiteral("cursorPosition")).toInt();
+        addCheck(checks, details, QStringLiteral("dotAliasTripleFenceUndoRestoresAll"),
+                 fenced == QStringLiteral("```\n```") && fencedCursor == 3
+                     && fencedUndone == QString() && fencedUndoneCursor == 0,
+                 QJsonObject{{QStringLiteral("fenced"), fenced},
+                             {QStringLiteral("fencedCursor"), fencedCursor},
+                             {QStringLiteral("undone"), fencedUndone},
+                             {QStringLiteral("undoneCursor"), fencedUndoneCursor}});
+
+        // IME 空行三连点围栏同样合并为一次撤销。
+        setTextAndSelection(QString(), 0, 0);
+        inputMethodCommit(QStringLiteral("·"));
+        inputMethodCommit(QStringLiteral("·"));
+        inputMethodCommit(QStringLiteral("·"));
+        QThread::msleep(30);
+        const QString imeFenced = editorText();
+        const int imeFencedCursor =
+            editorStatus().value(QStringLiteral("cursorPosition")).toInt();
+        request(QStringLiteral("testUndo"));
+        QThread::msleep(30);
+        const QString imeFencedUndone = editorText();
+        const int imeFencedUndoneCursor =
+            editorStatus().value(QStringLiteral("cursorPosition")).toInt();
+        addCheck(checks, details, QStringLiteral("dotAliasImeTripleFenceUndoRestoresAll"),
+                 imeFenced == QStringLiteral("```\n```") && imeFencedCursor == 3
+                     && imeFencedUndone == QString() && imeFencedUndoneCursor == 0,
+                 QJsonObject{{QStringLiteral("fenced"), imeFenced},
+                             {QStringLiteral("fencedCursor"), imeFencedCursor},
+                             {QStringLiteral("undone"), imeFencedUndone},
+                             {QStringLiteral("undoneCursor"), imeFencedUndoneCursor}});
+
+        setTextAndSelection(QStringLiteral("中文"), 1, 2);
+        keyPress(QStringLiteral("·"), QStringLiteral("·"));
+        QThread::msleep(30);
+        const QString wrapped = editorText();
+        request(QStringLiteral("testUndo"));
+        QThread::msleep(30);
+        const QString wrappedUndone = editorText();
+        const int wrappedUndoneCursor =
+            editorStatus().value(QStringLiteral("cursorPosition")).toInt();
+        addCheck(checks, details, QStringLiteral("dotAliasSelectionWrapUndoRestores"),
+                 wrapped == QStringLiteral("中 `文`") && wrappedUndone == QStringLiteral("中文")
+                     && wrappedUndoneCursor == 2,
+                 QJsonObject{{QStringLiteral("wrapped"), wrapped},
+                             {QStringLiteral("undone"), wrappedUndone},
+                             {QStringLiteral("undoneCursor"), wrappedUndoneCursor}});
     }
     {
         // 行中双反引号：光标位于两个反引号中间，两侧自动空格（BT-PAIR-001..002）。
