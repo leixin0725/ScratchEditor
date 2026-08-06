@@ -52,6 +52,10 @@ Window {
     property real scrollContentHeight: 0
     property bool replaceMode: false
     property string searchStatus: ""
+    property bool statusTextHovered: false
+    property bool statusPanelHovered: false
+    property bool statusPanelOpen: false
+    property bool statusCopyFeedback: false
 
     function scrollToBottom() {
         editorViewport.contentY = Math.max(0, editorViewport.contentHeight - editorViewport.height)
@@ -154,6 +158,29 @@ Window {
         }
     }
 
+    Timer {
+        id: statusPanelShowTimer
+        interval: controller.statusPanelShowDelayMs
+        repeat: false
+        onTriggered: {
+            if (root.statusTextHovered) {
+                root.statusPanelOpen = true
+            }
+        }
+    }
+
+    Timer {
+        id: statusPanelHideTimer
+        interval: controller.statusPanelHideDelayMs
+        repeat: false
+        onTriggered: {
+            if (!root.statusTextHovered && !root.statusPanelHovered) {
+                root.statusPanelOpen = false
+                root.statusCopyFeedback = false
+            }
+        }
+    }
+
     onClosing: function(close) {
         close.accepted = false
         controller.hideEditor()
@@ -223,6 +250,10 @@ Window {
                 root.openSettings()
             }
         }
+
+        function onStatusMessageChanged() {
+            root.statusCopyFeedback = false
+        }
     }
 
     Rectangle {
@@ -236,6 +267,7 @@ Window {
 
     Rectangle {
         id: header
+        z: 10
         x: root.resizeMargin
         y: root.resizeMargin
         width: root.width - root.resizeMargin * 2
@@ -262,16 +294,130 @@ Window {
         }
 
         Text {
+            id: statusText
             anchors.right: parent.right
             anchors.rightMargin: root.marginSize - root.resizeMargin
             anchors.verticalCenter: parent.verticalCenter
             width: Math.min(360, parent.width * 0.55)
             horizontalAlignment: Text.AlignRight
             elide: Text.ElideLeft
-            text: controller.statusMessage
+            text: controller.statusHealthy ? controller.statusPanelSummary : controller.statusMessage
             color: controller.statusHealthy ? root.themeMutedTextColor : root.themeDangerColor
             font.family: root.uiFontFamily
             font.pointSize: 9
+
+            HoverHandler {
+                onHoveredChanged: {
+                    root.statusTextHovered = hovered
+                    if (hovered) {
+                        statusPanelHideTimer.stop()
+                        statusPanelShowTimer.restart()
+                    } else {
+                        statusPanelShowTimer.stop()
+                        statusPanelHideTimer.restart()
+                    }
+                }
+            }
+        }
+
+        Rectangle {
+            id: statusPanel
+            z: 40
+            anchors.top: statusText.bottom
+            anchors.topMargin: 6
+            anchors.right: statusText.right
+            width: Math.min(controller.statusPanelMaxWidth,
+                            header.width - statusText.x - 6)
+            height: Math.min(contentHeight, root.height - y - 12)
+            radius: 5
+            color: root.themePanelColor
+            border.color: root.themeBorderColor
+            border.width: 1
+            visible: root.statusPanelOpen
+            opacity: root.statusPanelOpen ? 1 : 0
+            clip: true
+
+            property real contentHeight: (controller.statusHealthy
+                                          ? normalColumn.implicitHeight
+                                          : errorText.implicitHeight) + 20
+
+            Behavior on opacity {
+                NumberAnimation { duration: root.transitionDuration; easing.type: Easing.OutCubic }
+            }
+
+            Behavior on color {
+                ColorAnimation { duration: root.transitionDuration }
+            }
+
+            HoverHandler {
+                onHoveredChanged: {
+                    root.statusPanelHovered = hovered
+                    if (hovered) {
+                        statusPanelHideTimer.stop()
+                    } else {
+                        statusPanelHideTimer.restart()
+                    }
+                }
+            }
+
+            Column {
+                id: normalColumn
+                anchors.fill: parent
+                anchors.margins: 10
+                spacing: 5
+                visible: controller.statusHealthy
+
+                Repeater {
+                    model: controller.statusPanelHints
+
+                    delegate: Text {
+                        required property string modelData
+                        width: normalColumn.width
+                        text: modelData
+                        color: root.themeTextColor
+                        font.family: root.uiFontFamily
+                        font.pointSize: controller.statusPanelFontSize
+                        wrapMode: Text.Wrap
+                    }
+                }
+
+                Text {
+                    width: normalColumn.width
+                    text: controller.statusPanelSummary
+                    color: root.themeMutedTextColor
+                    font.family: root.uiFontFamily
+                    font.pointSize: controller.statusPanelFontSize
+                    wrapMode: Text.Wrap
+                }
+            }
+
+            Item {
+                id: errorColumn
+                anchors.fill: parent
+                visible: !controller.statusHealthy
+
+                Text {
+                    id: errorText
+                    anchors.fill: parent
+                    anchors.margins: 10
+                    text: root.statusCopyFeedback ? "已复制" : controller.statusMessage
+                    color: root.statusCopyFeedback ? root.themeAccentColor : root.themeDangerColor
+                    font.family: root.uiFontFamily
+                    font.pointSize: controller.statusPanelFontSize
+                    wrapMode: Text.Wrap
+                    verticalAlignment: Text.AlignVCenter
+                }
+
+                MouseArea {
+                    anchors.fill: parent
+                    cursorShape: Qt.PointingHandCursor
+                    onClicked: {
+                        if (controller.copyToClipboard(controller.statusMessage)) {
+                            root.statusCopyFeedback = true
+                        }
+                    }
+                }
+            }
         }
 
         MouseArea {
@@ -694,6 +840,10 @@ Window {
             property string draftFontFamily: ""
             property int draftFontPointSize: 13
             property bool draftAnimationsEnabled: true
+            property int draftStatusPanelFontSize: 10
+            property int draftStatusPanelShowDelayMs: 300
+            property int draftStatusPanelHideDelayMs: 250
+            property int draftStatusPanelMaxWidth: 360
             property string saveStatus: ""
 
             Behavior on opacity {
@@ -705,8 +855,16 @@ Window {
                 draftFontFamily = controller.editorFontFamily
                 draftFontPointSize = controller.editorFontPointSize
                 draftAnimationsEnabled = controller.animationsEnabled
+                draftStatusPanelFontSize = controller.statusPanelFontSize
+                draftStatusPanelShowDelayMs = controller.statusPanelShowDelayMs
+                draftStatusPanelHideDelayMs = controller.statusPanelHideDelayMs
+                draftStatusPanelMaxWidth = controller.statusPanelMaxWidth
                 fontFamilyInput.text = draftFontFamily
                 fontSizeInput.text = draftFontPointSize.toString()
+                statusPanelFontSizeInput.text = draftStatusPanelFontSize.toString()
+                statusPanelShowDelayInput.text = draftStatusPanelShowDelayMs.toString()
+                statusPanelHideDelayInput.text = draftStatusPanelHideDelayMs.toString()
+                statusPanelMaxWidthInput.text = draftStatusPanelMaxWidth.toString()
                 saveStatus = ""
                 opacity = 1
                 forceActiveFocus()
@@ -714,11 +872,21 @@ Window {
 
             function save() {
                 const requestedSize = Number(fontSizeInput.text)
+                const panelFontSize = Number(statusPanelFontSizeInput.text)
+                const panelShowDelayMs = Number(statusPanelShowDelayInput.text)
+                const panelHideDelayMs = Number(statusPanelHideDelayInput.text)
+                const panelMaxWidth = Number(statusPanelMaxWidthInput.text)
                 if (controller.applyAppearance(draftTheme, fontFamilyInput.text,
-                                               requestedSize, draftAnimationsEnabled)) {
+                                               requestedSize, draftAnimationsEnabled)
+                    && controller.applyStatusPanelSettings(panelFontSize, panelShowDelayMs,
+                                                           panelHideDelayMs, panelMaxWidth)) {
                     saveStatus = "设置已保存"
                     draftFontFamily = controller.editorFontFamily
                     draftFontPointSize = controller.editorFontPointSize
+                    draftStatusPanelFontSize = controller.statusPanelFontSize
+                    draftStatusPanelShowDelayMs = controller.statusPanelShowDelayMs
+                    draftStatusPanelHideDelayMs = controller.statusPanelHideDelayMs
+                    draftStatusPanelMaxWidth = controller.statusPanelMaxWidth
                 } else {
                     saveStatus = controller.settingsError
                 }
@@ -788,7 +956,7 @@ Window {
                     width: parent.width - 40
                     height: parent.height - 112
                     contentWidth: width
-                    contentHeight: 246
+                    contentHeight: 425
                     clip: true
                     boundsBehavior: Flickable.StopAtBounds
 
@@ -958,6 +1126,138 @@ Window {
                         Text {
                             x: 0
                             y: 195
+                            width: 118
+                            text: "面板字号（9–24）"
+                            color: root.themeTextColor
+                            font.family: root.uiFontFamily
+                            font.pointSize: 10
+                        }
+
+                        Rectangle {
+                            x: 126
+                            y: 186
+                            width: 110
+                            height: 34
+                            radius: 4
+                            color: root.themeFieldColor
+                            border.color: statusPanelFontSizeInput.activeFocus
+                                          ? root.panelAccentColor : root.themeBorderColor
+                            TextInput {
+                                id: statusPanelFontSizeInput
+                                anchors.fill: parent
+                                horizontalAlignment: TextInput.AlignHCenter
+                                verticalAlignment: TextInput.AlignVCenter
+                                color: root.themeTextColor
+                                selectionColor: root.panelAccentColor
+                                selectedTextColor: root.panelAccentTextColor
+                                font.family: root.uiFontFamily
+                                font.pointSize: 10
+                                validator: IntValidator { bottom: 9; top: 24 }
+                            }
+                        }
+
+                        Text {
+                            x: 0
+                            y: 243
+                            width: 118
+                            text: "显示延迟（毫秒）"
+                            color: root.themeTextColor
+                            font.family: root.uiFontFamily
+                            font.pointSize: 10
+                        }
+
+                        Rectangle {
+                            x: 126
+                            y: 234
+                            width: 110
+                            height: 34
+                            radius: 4
+                            color: root.themeFieldColor
+                            border.color: statusPanelShowDelayInput.activeFocus
+                                          ? root.panelAccentColor : root.themeBorderColor
+                            TextInput {
+                                id: statusPanelShowDelayInput
+                                anchors.fill: parent
+                                horizontalAlignment: TextInput.AlignHCenter
+                                verticalAlignment: TextInput.AlignVCenter
+                                color: root.themeTextColor
+                                selectionColor: root.panelAccentColor
+                                selectedTextColor: root.panelAccentTextColor
+                                font.family: root.uiFontFamily
+                                font.pointSize: 10
+                                validator: IntValidator { bottom: 0; top: 2000 }
+                            }
+                        }
+
+                        Text {
+                            x: 0
+                            y: 291
+                            width: 118
+                            text: "收起延迟（毫秒）"
+                            color: root.themeTextColor
+                            font.family: root.uiFontFamily
+                            font.pointSize: 10
+                        }
+
+                        Rectangle {
+                            x: 126
+                            y: 282
+                            width: 110
+                            height: 34
+                            radius: 4
+                            color: root.themeFieldColor
+                            border.color: statusPanelHideDelayInput.activeFocus
+                                          ? root.panelAccentColor : root.themeBorderColor
+                            TextInput {
+                                id: statusPanelHideDelayInput
+                                anchors.fill: parent
+                                horizontalAlignment: TextInput.AlignHCenter
+                                verticalAlignment: TextInput.AlignVCenter
+                                color: root.themeTextColor
+                                selectionColor: root.panelAccentColor
+                                selectedTextColor: root.panelAccentTextColor
+                                font.family: root.uiFontFamily
+                                font.pointSize: 10
+                                validator: IntValidator { bottom: 0; top: 3000 }
+                            }
+                        }
+
+                        Text {
+                            x: 0
+                            y: 339
+                            width: 118
+                            text: "最大宽度（像素）"
+                            color: root.themeTextColor
+                            font.family: root.uiFontFamily
+                            font.pointSize: 10
+                        }
+
+                        Rectangle {
+                            x: 126
+                            y: 330
+                            width: 110
+                            height: 34
+                            radius: 4
+                            color: root.themeFieldColor
+                            border.color: statusPanelMaxWidthInput.activeFocus
+                                          ? root.panelAccentColor : root.themeBorderColor
+                            TextInput {
+                                id: statusPanelMaxWidthInput
+                                anchors.fill: parent
+                                horizontalAlignment: TextInput.AlignHCenter
+                                verticalAlignment: TextInput.AlignVCenter
+                                color: root.themeTextColor
+                                selectionColor: root.panelAccentColor
+                                selectedTextColor: root.panelAccentTextColor
+                                font.family: root.uiFontFamily
+                                font.pointSize: 10
+                                validator: IntValidator { bottom: 200; top: 800 }
+                            }
+                        }
+
+                        Text {
+                            x: 0
+                            y: 384
                             text: "集中配置文件"
                             color: root.themeMutedTextColor
                             font.family: root.uiFontFamily
@@ -966,7 +1266,7 @@ Window {
 
                         Text {
                             x: 0
-                            y: 216
+                            y: 405
                             width: parent.width
                             text: controller.settingsFile
                             color: root.themeMutedTextColor
@@ -1011,6 +1311,7 @@ Window {
                         cursorShape: Qt.PointingHandCursor
                         onClicked: {
                             controller.resetAppearance()
+                            controller.resetStatusPanelSettings()
                             settingsRoot.activate()
                             settingsRoot.saveStatus = "已恢复默认设置"
                         }

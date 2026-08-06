@@ -11,6 +11,7 @@
 #include <QRect>
 #include <QObject>
 #include <QString>
+#include <QStringList>
 #include <QTimer>
 #include <QVariantList>
 #include <QVector>
@@ -38,6 +39,16 @@ class EditorController final : public QObject, public QAbstractNativeEventFilter
     Q_PROPERTY(QString externalCliType READ externalCliType CONSTANT)
     Q_PROPERTY(QString statusMessage READ statusMessage NOTIFY statusMessageChanged)
     Q_PROPERTY(bool statusHealthy READ statusHealthy NOTIFY statusMessageChanged)
+    Q_PROPERTY(int statusPanelFontSize READ statusPanelFontSize NOTIFY statusPanelSettingsChanged)
+    Q_PROPERTY(int statusPanelShowDelayMs READ statusPanelShowDelayMs
+                   NOTIFY statusPanelSettingsChanged)
+    Q_PROPERTY(int statusPanelHideDelayMs READ statusPanelHideDelayMs
+                   NOTIFY statusPanelSettingsChanged)
+    Q_PROPERTY(int statusPanelMaxWidth READ statusPanelMaxWidth
+                   NOTIFY statusPanelSettingsChanged)
+    Q_PROPERTY(QStringList statusPanelHints READ statusPanelHints CONSTANT)
+    Q_PROPERTY(QString statusPanelSummary READ statusPanelSummary
+                   NOTIFY statusPanelSummaryChanged)
     Q_PROPERTY(bool clipboardHealthy READ clipboardHealthy NOTIFY clipboardStateChanged)
     Q_PROPERTY(QVariantList commands READ commands NOTIFY commandsChanged)
     Q_PROPERTY(bool markdownHighlighting READ markdownHighlighting NOTIFY markdownHighlightingChanged)
@@ -76,6 +87,12 @@ public:
     bool completeExternalFileTest(const QString &text);
     QString statusMessage() const;
     bool statusHealthy() const;
+    int statusPanelFontSize() const;
+    int statusPanelShowDelayMs() const;
+    int statusPanelHideDelayMs() const;
+    int statusPanelMaxWidth() const;
+    QStringList statusPanelHints() const;
+    QString statusPanelSummary() const;
     bool clipboardHealthy() const;
     QVariantList commands() const;
     bool markdownHighlighting() const;
@@ -111,6 +128,10 @@ public:
     Q_INVOKABLE bool applyAppearance(const QString &theme, const QString &fontFamily,
                                      int fontPointSize, bool animationsEnabled);
     Q_INVOKABLE void resetAppearance();
+    Q_INVOKABLE bool applyStatusPanelSettings(int fontSize, int showDelayMs,
+                                              int hideDelayMs, int maxWidth);
+    Q_INVOKABLE void resetStatusPanelSettings();
+    Q_INVOKABLE bool copyToClipboard(const QString &text);
 
     void showEditor();
     void toggleEditor();
@@ -119,6 +140,8 @@ public:
 signals:
     void visibleChanged();
     void statusMessageChanged();
+    void statusPanelSettingsChanged();
+    void statusPanelSummaryChanged();
     void clipboardStateChanged();
     void commandsChanged();
     void markdownHighlightingChanged();
@@ -126,6 +149,9 @@ signals:
     void appearanceChanged();
     void settingsErrorChanged();
     void uiCommandRequested(const QString &commandId);
+
+private slots:
+    void updateStatusPanelSummary();
 
 protected:
     bool eventFilter(QObject *watched, QEvent *event) override;
@@ -212,6 +238,7 @@ private:
     QString m_firstFrameColor;
     QString m_statusMessage = QStringLiteral("Esc 关闭并复制 · Ctrl+S 关闭并输入 · Ctrl+W 关闭不保存");
     bool m_statusHealthy = true;
+    QString m_statusPanelSummary = QStringLiteral("共 0 字");
     bool m_clipboardHealthy = true;
     quintptr m_startupForegroundWindow = 0;
     quintptr m_previousForegroundWindow = 0;

@@ -4,6 +4,7 @@
 #include "externalfilesession.h"
 #include "markdownhighlighter.h"
 #include "markdownstyle.h"
+#include "statuspanelhints.h"
 #include "windowplacement.h"
 
 #include <QClipboard>
@@ -485,6 +486,81 @@ bool EditorController::statusHealthy() const
     return m_statusHealthy;
 }
 
+int EditorController::statusPanelFontSize() const
+{
+    return m_settings ? m_settings->statusPanel().fontSize : 10;
+}
+
+int EditorController::statusPanelShowDelayMs() const
+{
+    return m_settings ? m_settings->statusPanel().showDelayMs : 300;
+}
+
+int EditorController::statusPanelHideDelayMs() const
+{
+    return m_settings ? m_settings->statusPanel().hideDelayMs : 250;
+}
+
+int EditorController::statusPanelMaxWidth() const
+{
+    return m_settings ? m_settings->statusPanel().maxWidth : 360;
+}
+
+QStringList EditorController::statusPanelHints() const
+{
+    return StatusPanelHints::forMode(externalFileMode());
+}
+
+QString EditorController::statusPanelSummary() const
+{
+    return m_statusPanelSummary;
+}
+
+bool EditorController::applyStatusPanelSettings(int fontSize, int showDelayMs,
+                                                int hideDelayMs, int maxWidth)
+{
+    if (!m_settings) {
+        return false;
+    }
+    QString error;
+    if (!m_settings->setStatusPanel(fontSize, showDelayMs, hideDelayMs, maxWidth, &error)) {
+        if (m_settingsError != error) {
+            m_settingsError = error;
+            emit settingsErrorChanged();
+        }
+        return false;
+    }
+    if (!m_settingsError.isEmpty()) {
+        m_settingsError.clear();
+        emit settingsErrorChanged();
+    }
+    emit statusPanelSettingsChanged();
+    return true;
+}
+
+void EditorController::resetStatusPanelSettings()
+{
+    if (!m_settings) {
+        return;
+    }
+    m_settings->resetStatusPanel();
+    if (!m_settingsError.isEmpty()) {
+        m_settingsError.clear();
+        emit settingsErrorChanged();
+    }
+    emit statusPanelSettingsChanged();
+}
+
+bool EditorController::copyToClipboard(const QString &text)
+{
+    QString clipboardError;
+    if (writeClipboardText(text, &clipboardError)) {
+        return true;
+    }
+    setClipboardState(false, clipboardError);
+    return false;
+}
+
 bool EditorController::clipboardHealthy() const
 {
     return m_clipboardHealthy;
@@ -641,6 +717,15 @@ void EditorController::registerEditor(QObject *editor)
     }
     if (m_commands) {
         m_commands->setEditor(m_editor, document);
+    }
+    if (m_editor) {
+        QObject::connect(m_editor, SIGNAL(textChanged()),
+                         this, SLOT(updateStatusPanelSummary()));
+        QObject::connect(m_editor, SIGNAL(selectionStartChanged()),
+                         this, SLOT(updateStatusPanelSummary()));
+        QObject::connect(m_editor, SIGNAL(selectionEndChanged()),
+                         this, SLOT(updateStatusPanelSummary()));
+        updateStatusPanelSummary();
     }
     emit markdownHighlightingChanged();
     updateReadyState();
@@ -1280,6 +1365,21 @@ void EditorController::dispatchCommand(QLocalSocket *socket, const QJsonObject &
         sendResponse(socket, response, startedNs, requestId);
     } else if (command == QStringLiteral("testResetAppearance")) {
         resetAppearance();
+        QJsonObject response = statusObject();
+        response.insert(QStringLiteral("command"), command);
+        sendResponse(socket, response, startedNs, requestId);
+    } else if (command == QStringLiteral("testApplyStatusPanelSettings")) {
+        const bool applied = applyStatusPanelSettings(
+            request.value(QStringLiteral("fontSize")).toInt(),
+            request.value(QStringLiteral("showDelayMs")).toInt(),
+            request.value(QStringLiteral("hideDelayMs")).toInt(),
+            request.value(QStringLiteral("maxWidth")).toInt());
+        QJsonObject response = statusObject();
+        response.insert(QStringLiteral("command"), command);
+        response.insert(QStringLiteral("applied"), applied);
+        sendResponse(socket, response, startedNs, requestId);
+    } else if (command == QStringLiteral("testResetStatusPanelSettings")) {
+        resetStatusPanelSettings();
         QJsonObject response = statusObject();
         response.insert(QStringLiteral("command"), command);
         sendResponse(socket, response, startedNs, requestId);
@@ -1995,6 +2095,28 @@ void EditorController::setExternalFileState(bool healthy, const QString &message
     }
 }
 
+void EditorController::updateStatusPanelSummary()
+{
+    if (!m_editor) {
+        return;
+    }
+    int total = 0;
+    if (auto *quickDocument = qvariant_cast<QQuickTextDocument *>(
+            m_editor->property("textDocument"))) {
+        total = qMax(0, quickDocument->textDocument()->characterCount() - 1);
+    }
+    const int selectionStart = m_editor->property("selectionStart").toInt();
+    const int selectionEnd = m_editor->property("selectionEnd").toInt();
+    const QString summary =
+        selectionStart >= 0 && selectionEnd > selectionStart
+            ? QStringLiteral("%1 / %2 字").arg(selectionEnd - selectionStart).arg(total)
+            : QStringLiteral("共 %1 字").arg(total);
+    if (m_statusPanelSummary != summary) {
+        m_statusPanelSummary = summary;
+        emit statusPanelSummaryChanged();
+    }
+}
+
 QRect EditorController::validatedWindowGeometry(const QRect &requested) const
 {
     const QSize minimum = windowMinimumSize();
@@ -2395,6 +2517,13 @@ QJsonObject EditorController::statusObject() const
     status.insert(QStringLiteral("simpleAnimationDriver"),
                   qEnvironmentVariableIntValue("QSG_USE_SIMPLE_ANIMATION_DRIVER") != 0);
     status.insert(QStringLiteral("statusMessage"), m_statusMessage);
+    status.insert(QStringLiteral("statusPanelFontSize"), statusPanelFontSize());
+    status.insert(QStringLiteral("statusPanelShowDelayMs"), statusPanelShowDelayMs());
+    status.insert(QStringLiteral("statusPanelHideDelayMs"), statusPanelHideDelayMs());
+    status.insert(QStringLiteral("statusPanelMaxWidth"), statusPanelMaxWidth());
+    status.insert(QStringLiteral("statusPanelHints"),
+                  QJsonArray::fromStringList(statusPanelHints()));
+    status.insert(QStringLiteral("statusPanelSummary"), statusPanelSummary());
     status.insert(QStringLiteral("clipboardHealthy"), m_clipboardHealthy);
     status.insert(QStringLiteral("settingsFile"), m_settings ? m_settings->fileName() : QString());
     status.insert(QStringLiteral("settingsStatus"),

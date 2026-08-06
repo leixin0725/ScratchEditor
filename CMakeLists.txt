@@ -33,6 +33,7 @@ qt_add_executable(ScratchEditor WIN32
     src/markdownhighlighter.h
     src/markdownstyle.cpp
     src/markdownstyle.h
+    src/statuspanelhints.h
     src/windowplacement.cpp
     src/windowplacement.h
 )
@@ -151,6 +152,8 @@ qt_add_executable(ScratchEditorExternalFileTests
 qt_add_executable(ScratchEditorExternalProcessTests
     tests/externaleditorprocess_main.cpp
 )
+
+target_include_directories(ScratchEditorExternalProcessTests PRIVATE src)
 
 target_include_directories(ScratchEditorExternalFileTests PRIVATE src)
 
