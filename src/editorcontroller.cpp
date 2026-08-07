@@ -31,6 +31,7 @@
 #include <QQuickTextDocument>
 #include <QScreen>
 #include <QSignalBlocker>
+#include <QStyleHints>
 #include <QThread>
 #include <QTimer>
 #include <QTextDocument>
@@ -266,6 +267,27 @@ EditorController::EditorController(bool testMode, QElapsedTimer *startupTimer,
             this, &EditorController::commandsChanged);
     connect(m_commands.get(), &EditorCommandRegistry::uiCommandRequested,
             this, &EditorController::uiCommandRequested);
+    if (m_testMode) {
+        // 隔离验证使用虚拟剪贴板，任何测试都不触碰真实系统剪贴板。
+        m_commands->setClipboardAccess(
+            [this] { return m_testClipboardText; },
+            [this](const QString &text) {
+                m_testClipboardText = text;
+                return true;
+            });
+    } else {
+        m_commands->setClipboardAccess(
+            [this] {
+                QString clipboardText;
+                QString errorMessage;
+                return readClipboardText(&clipboardText, &errorMessage)
+                    ? clipboardText : QString();
+            },
+            [this](const QString &text) {
+                QString errorMessage;
+                return writeClipboardText(text, &errorMessage);
+            });
+    }
     m_monotonic.start();
     connect(&m_server, &QLocalServer::newConnection, this, &EditorController::acceptConnections);
     m_screenConfigurationTimer.setSingleShot(true);
@@ -1015,7 +1037,21 @@ void EditorController::dispatchCommand(QLocalSocket *socket, const QJsonObject &
         response.insert(QStringLiteral("command"), command);
         response.insert(QStringLiteral("invoked"), invoked);
         sendResponse(socket, response, startedNs, requestId);
+    } else if (command == QStringLiteral("testClipboard")) {
+        QJsonObject response = statusObject();
+        response.insert(QStringLiteral("command"), command);
+        response.insert(QStringLiteral("text"), m_testClipboardText);
+        sendResponse(socket, response, startedNs, requestId);
+    } else if (command == QStringLiteral("testSetClipboard")) {
+        m_testClipboardText = request.value(QStringLiteral("text")).toString();
+        QJsonObject response = statusObject();
+        response.insert(QStringLiteral("command"), command);
+        response.insert(QStringLiteral("ok"), true);
+        sendResponse(socket, response, startedNs, requestId);
     } else if (command == QStringLiteral("testDragSelection")) {
+        // 合成的拖拽按压事件视为一次全新的单击，避免与多重点击放行逻辑互相干扰。
+        m_lastMouseClickElapsedMs = -1;
+        m_multiClickPress = false;
         const int start = request.value(QStringLiteral("start")).toInt();
         const int end = request.value(QStringLiteral("end")).toInt();
         const int dropPosition = request.value(QStringLiteral("dropPosition")).toInt();
@@ -1068,6 +1104,66 @@ void EditorController::dispatchCommand(QLocalSocket *socket, const QJsonObject &
         response.insert(QStringLiteral("eventsAccepted"), eventsAccepted);
         response.insert(QStringLiteral("moved"),
                         m_editor->property("text").toString() != before);
+        response.insert(QStringLiteral("text"), m_editor->property("text").toString());
+        sendResponse(socket, response, startedNs, requestId);
+    } else if (command == QStringLiteral("testTripleClick")) {
+        // 合成 Press → DblClick → Press 序列模拟三击：时间戳统一为 0 使第三次
+        // Press 落在双击间隔内，坐标相同满足拖拽距离限制，交给 QML TextEdit
+        // 原生逻辑选中整行。开始时重置多重点击状态，避免与放行逻辑互相干扰。
+        m_lastMouseClickElapsedMs = -1;
+        m_multiClickPress = false;
+        const int position = request.value(QStringLiteral("position")).toInt();
+        QRectF clickRectangle;
+        const bool clickLocated = QMetaObject::invokeMethod(
+            m_editor, "positionToRectangle", Qt::DirectConnection,
+            Q_RETURN_ARG(QRectF, clickRectangle), Q_ARG(int, position));
+        QJsonObject response = statusObject();
+        bool eventsAccepted = false;
+        if (clickLocated) {
+            if (auto *item = qobject_cast<QQuickItem *>(m_editor.data())) {
+                const QPointF local = clickRectangle.center();
+                const QPointF scene = item->mapToScene(local);
+                const QPointF global = item->mapToGlobal(local);
+                QMouseEvent pressEvent(QEvent::MouseButtonPress, scene, scene,
+                                       global, Qt::LeftButton, Qt::LeftButton,
+                                       Qt::NoModifier);
+                QMouseEvent doubleClickEvent(QEvent::MouseButtonDblClick, local, scene,
+                                             global, Qt::LeftButton, Qt::LeftButton,
+                                             Qt::NoModifier);
+                QMouseEvent thirdPressEvent(QEvent::MouseButtonPress, scene, scene,
+                                            global, Qt::LeftButton, Qt::LeftButton,
+                                            Qt::NoModifier);
+                QMouseEvent releaseEvent(QEvent::MouseButtonRelease, scene, scene,
+                                         global, Qt::LeftButton, Qt::NoButton,
+                                         Qt::NoModifier);
+                pressEvent.setTimestamp(0);
+                doubleClickEvent.setTimestamp(0);
+                thirdPressEvent.setTimestamp(0);
+                releaseEvent.setTimestamp(0);
+                const bool pressAccepted = QCoreApplication::sendEvent(m_window,
+                                                                       &pressEvent);
+                // 隔离测试的窗口隐藏启动，Qt 6 的 MouseButtonDblClick 属于“更新
+                // 事件”，只投递给已有独占抓取者，而隐藏窗口下 Press 不会建立抓取。
+                // 因此把 DblClick 直接投递给编辑器 item（与 testKeyPress 同类），
+                // 让控件进入“双击”状态；第三次 Press 仍走完整窗口投递路径，用于
+                // 回归验证多重点击放行逻辑。
+                const bool doubleClickAccepted = QCoreApplication::sendEvent(
+                    m_editor, &doubleClickEvent);
+                const bool thirdPressAccepted = QCoreApplication::sendEvent(
+                    m_window, &thirdPressEvent);
+                const bool releaseAccepted = QCoreApplication::sendEvent(
+                    m_window, &releaseEvent);
+                eventsAccepted = pressAccepted && doubleClickAccepted
+                    && thirdPressAccepted && releaseAccepted;
+                item->ungrabMouse();
+            }
+        }
+        response.insert(QStringLiteral("command"), command);
+        response.insert(QStringLiteral("eventsAccepted"), eventsAccepted);
+        response.insert(QStringLiteral("selectionStart"),
+                        m_editor->property("selectionStart").toInt());
+        response.insert(QStringLiteral("selectionEnd"),
+                        m_editor->property("selectionEnd").toInt());
         response.insert(QStringLiteral("text"), m_editor->property("text").toString());
         sendResponse(socket, response, startedNs, requestId);
     } else if (command == QStringLiteral("testUndo")) {
@@ -2697,6 +2793,34 @@ bool EditorController::eventFilter(QObject *watched, QEvent *event)
         }
     }
 
+    // 多重点击跟踪：Windows 上第二次点击以 MouseButtonDblClick 到达，第三次仍是
+    // MouseButtonPress。识别多重点击后放行给 QML TextEdit 原生处理，避免选区拖拽
+    // 吞掉三击导致“三击选中整行”失效。
+    if (watched == m_window && m_editor
+        && (event->type() == QEvent::MouseButtonPress
+            || event->type() == QEvent::MouseButtonDblClick)) {
+        const auto *mouseEvent = static_cast<QMouseEvent *>(event);
+        if (mouseEvent->button() != Qt::LeftButton) {
+            m_lastMouseClickElapsedMs = -1;
+        } else {
+            const qint64 now = m_mouseClickTimer.isValid()
+                ? m_mouseClickTimer.elapsed() : 0;
+            if (!m_mouseClickTimer.isValid()) {
+                m_mouseClickTimer.start();
+            }
+            const bool withinDoubleClick = m_lastMouseClickElapsedMs >= 0
+                && (now - m_lastMouseClickElapsedMs)
+                    <= QGuiApplication::styleHints()->mouseDoubleClickInterval()
+                && (mouseEvent->position() - m_lastMouseClickScenePosition).manhattanLength()
+                    <= QGuiApplication::styleHints()->startDragDistance();
+            m_lastMouseClickElapsedMs = m_mouseClickTimer.elapsed();
+            m_lastMouseClickScenePosition = mouseEvent->position();
+            if (event->type() == QEvent::MouseButtonPress) {
+                m_multiClickPress = withinDoubleClick;
+            }
+        }
+    }
+
     if (watched == m_window && m_commands && m_editor
         && (event->type() == QEvent::MouseButtonPress
             || event->type() == QEvent::MouseMove
@@ -2715,7 +2839,8 @@ bool EditorController::eventFilter(QObject *watched, QEvent *event)
                     break;
                 }
             }
-            if (event->type() != QEvent::MouseButtonPress || insideViewport) {
+            if ((event->type() != QEvent::MouseButtonPress || insideViewport)
+                && !(event->type() == QEvent::MouseButtonPress && m_multiClickPress)) {
                 QMouseEvent editorEvent(
                     event->type(), editorPosition, scenePosition,
                     mouseEvent->globalPosition(), mouseEvent->button(),
@@ -2763,7 +2888,12 @@ bool EditorController::eventFilter(QObject *watched, QEvent *event)
                     }, Qt::ConnectionType(Qt::DirectConnection | Qt::SingleShotConnection));
         }
     }
-    if (watched == m_editor && m_commands && m_commands->handleEditorEvent(event)) {
+    // editor item 上也装有事件过滤器，第三次 Press 若在这里仍交给
+    // handleEditorEvent，会被选区拖拽吞掉导致三击选整行失效，因此与窗口层
+    // 一样对多重点击放行给 QML TextEdit 原生处理。
+    if (watched == m_editor && m_commands
+        && !(event->type() == QEvent::MouseButtonPress && m_multiClickPress)
+        && m_commands->handleEditorEvent(event)) {
         return true;
     }
     return QObject::eventFilter(watched, event);

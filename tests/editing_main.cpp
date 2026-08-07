@@ -87,6 +87,12 @@ QJsonObject dragSelection(int start, int end, int dropPosition)
                     {QStringLiteral("dropPosition"), dropPosition}});
 }
 
+QJsonObject tripleClick(int position)
+{
+    return request(QStringLiteral("testTripleClick"),
+                   {{QStringLiteral("position"), position}});
+}
+
 QJsonObject keyPress(const QString &text = {}, const QString &key = {}, bool shift = false,
                      const QString &modifiers = {})
 {
@@ -95,6 +101,17 @@ QJsonObject keyPress(const QString &text = {}, const QString &key = {}, bool shi
                     {QStringLiteral("key"), key},
                     {QStringLiteral("shift"), shift},
                     {QStringLiteral("modifiers"), modifiers}});
+}
+
+QJsonObject clipboardText()
+{
+    return request(QStringLiteral("testClipboard"));
+}
+
+QJsonObject setClipboard(const QString &text)
+{
+    return request(QStringLiteral("testSetClipboard"),
+                   {{QStringLiteral("text"), text}});
 }
 
 QJsonObject inputMethodCommit(const QString &text)
@@ -746,6 +763,214 @@ int main(int argc, char *argv[])
                  && deletedLastLine.value(QStringLiteral("text")).toString()
                     == QStringLiteral("a\nb"),
              deletedMiddleLine);
+
+    // --- 整行复制 / 剪切 / 智能粘贴 ---
+    setClipboard(QString());
+    setTextAndSelection(QStringLiteral("a\nb\nc"), 2, 2);
+    const QJsonObject copiedMiddleLine = execute(QStringLiteral("copyLine"));
+    const QJsonObject copyMiddleClipboard = clipboardText();
+    addCheck(checks, details, QStringLiteral("copyLineMiddle"),
+             copiedMiddleLine.value(QStringLiteral("text")).toString()
+                    == QStringLiteral("a\nb\nc")
+                 && copiedMiddleLine.value(QStringLiteral("cursorPosition")).toInt() == 2
+                 && copyMiddleClipboard.value(QStringLiteral("text")).toString()
+                    == QStringLiteral("b\n"),
+             copyMiddleClipboard);
+
+    setTextAndSelection(QStringLiteral("a\nb\nc"), 4, 4);
+    execute(QStringLiteral("copyLine"));
+    addCheck(checks, details, QStringLiteral("copyLineLastAddsNewline"),
+             editorText() == QStringLiteral("a\nb\nc")
+                 && clipboardText().value(QStringLiteral("text")).toString()
+                    == QStringLiteral("c\n"),
+             clipboardText());
+
+    setTextAndSelection(QStringLiteral("a"), 0, 0);
+    execute(QStringLiteral("copyLine"));
+    addCheck(checks, details, QStringLiteral("copyLineSingleAddsNewline"),
+             editorText() == QStringLiteral("a")
+                 && clipboardText().value(QStringLiteral("text")).toString()
+                    == QStringLiteral("a\n"),
+             clipboardText());
+
+    setTextAndSelection(QStringLiteral("a\n\nb"), 2, 2);
+    execute(QStringLiteral("copyLine"));
+    addCheck(checks, details, QStringLiteral("copyLineEmptyCopiesNewline"),
+             editorText() == QStringLiteral("a\n\nb")
+                 && clipboardText().value(QStringLiteral("text")).toString()
+                    == QStringLiteral("\n"),
+             clipboardText());
+
+    setTextAndSelection(QStringLiteral("a\nb\nc"), 2, 2);
+    const QJsonObject cutMiddleLine = execute(QStringLiteral("cutLine"));
+    addCheck(checks, details, QStringLiteral("cutLineMiddle"),
+             cutMiddleLine.value(QStringLiteral("text")).toString()
+                    == QStringLiteral("a\nc")
+                 && cutMiddleLine.value(QStringLiteral("cursorPosition")).toInt() == 2
+                 && clipboardText().value(QStringLiteral("text")).toString()
+                    == QStringLiteral("b\n"),
+             cutMiddleLine);
+
+    setTextAndSelection(QStringLiteral("a\nb\nc"), 0, 0);
+    const QJsonObject cutFirstLine = execute(QStringLiteral("cutLine"));
+    addCheck(checks, details, QStringLiteral("cutLineFirst"),
+             cutFirstLine.value(QStringLiteral("text")).toString()
+                    == QStringLiteral("b\nc")
+                 && cutFirstLine.value(QStringLiteral("cursorPosition")).toInt() == 0
+                 && clipboardText().value(QStringLiteral("text")).toString()
+                    == QStringLiteral("a\n"),
+             cutFirstLine);
+
+    setTextAndSelection(QStringLiteral("a\nb"), 2, 2);
+    const QJsonObject cutLastLine = execute(QStringLiteral("cutLine"));
+    addCheck(checks, details, QStringLiteral("cutLineLast"),
+             cutLastLine.value(QStringLiteral("text")).toString()
+                    == QStringLiteral("a\n")
+                 && cutLastLine.value(QStringLiteral("cursorPosition")).toInt() == 2
+                 && clipboardText().value(QStringLiteral("text")).toString()
+                    == QStringLiteral("b\n"),
+             cutLastLine);
+
+    setTextAndSelection(QStringLiteral("a"), 0, 0);
+    const QJsonObject cutSingleLine = execute(QStringLiteral("cutLine"));
+    addCheck(checks, details, QStringLiteral("cutLineSingle"),
+             cutSingleLine.value(QStringLiteral("text")).toString().isEmpty()
+                 && cutSingleLine.value(QStringLiteral("cursorPosition")).toInt() == 0
+                 && clipboardText().value(QStringLiteral("text")).toString()
+                    == QStringLiteral("a\n"),
+             cutSingleLine);
+
+    setTextAndSelection(QStringLiteral("a\n\nb"), 2, 2);
+    const QJsonObject cutEmptyLine = execute(QStringLiteral("cutLine"));
+    addCheck(checks, details, QStringLiteral("cutLineEmpty"),
+             cutEmptyLine.value(QStringLiteral("text")).toString()
+                    == QStringLiteral("a\nb")
+                 && cutEmptyLine.value(QStringLiteral("cursorPosition")).toInt() == 2
+                 && clipboardText().value(QStringLiteral("text")).toString()
+                    == QStringLiteral("\n"),
+             cutEmptyLine);
+
+    setClipboard(QString());
+    setTextAndSelection(QStringLiteral("a\nb\nc"), 2, 2);
+    keyPress({}, QStringLiteral("C"), false, QStringLiteral("ctrl"));
+    const QJsonObject copyPasteOnce = keyPress({}, QStringLiteral("V"), false,
+                                               QStringLiteral("ctrl"));
+    addCheck(checks, details, QStringLiteral("ctrlCPasteDuplicatesBelow"),
+             editorText() == QStringLiteral("a\nb\nb\nc")
+                 && copyPasteOnce.value(QStringLiteral("cursorPosition")).toInt() == 5,
+             copyPasteOnce);
+    const QJsonObject copyPasteTwice = keyPress({}, QStringLiteral("V"), false,
+                                                QStringLiteral("ctrl"));
+    addCheck(checks, details, QStringLiteral("ctrlCPasteRepeatStacks"),
+             editorText() == QStringLiteral("a\nb\nb\nb\nc")
+                 && copyPasteTwice.value(QStringLiteral("cursorPosition")).toInt() == 7,
+             copyPasteTwice);
+
+    setTextAndSelection(QStringLiteral("a\nb\nc"), 2, 2);
+    const QJsonObject cutWithCtrlX = keyPress({}, QStringLiteral("X"), false,
+                                              QStringLiteral("ctrl"));
+    addCheck(checks, details, QStringLiteral("ctrlXCutLine"),
+             editorText() == QStringLiteral("a\nc")
+                 && cutWithCtrlX.value(QStringLiteral("cursorPosition")).toInt() == 2
+                 && clipboardText().value(QStringLiteral("text")).toString()
+                    == QStringLiteral("b\n"),
+             cutWithCtrlX);
+    const QJsonObject pasteAfterCtrlX = keyPress({}, QStringLiteral("V"), false,
+                                                 QStringLiteral("ctrl"));
+    addCheck(checks, details, QStringLiteral("ctrlXPasteRestoresBelow"),
+             editorText() == QStringLiteral("a\nc\nb\n")
+                 && pasteAfterCtrlX.value(QStringLiteral("cursorPosition")).toInt() == 5,
+             pasteAfterCtrlX);
+
+    setClipboard(QStringLiteral("x\n"));
+    setTextAndSelection(QStringLiteral("abc"), 1, 1);
+    const QJsonObject pasteLineMidDocument = keyPress({}, QStringLiteral("V"), false,
+                                                      QStringLiteral("ctrl"));
+    addCheck(checks, details, QStringLiteral("pasteLineKeepsCurrentLine"),
+             editorText() == QStringLiteral("abc\nx\n")
+                 && pasteLineMidDocument.value(QStringLiteral("cursorPosition")).toInt() == 5,
+             pasteLineMidDocument);
+
+    setClipboard(QStringLiteral("xy"));
+    setTextAndSelection(QStringLiteral("abc"), 1, 1);
+    const QJsonObject pastePlainMidLine = keyPress({}, QStringLiteral("V"), false,
+                                                   QStringLiteral("ctrl"));
+    addCheck(checks, details, QStringLiteral("pastePlainInsertsAtCursor"),
+             editorText() == QStringLiteral("axybc")
+                 && pastePlainMidLine.value(QStringLiteral("cursorPosition")).toInt() == 3,
+             pastePlainMidLine);
+
+    // --- 智能粘贴边界：空文档 / 末尾空行不得产生前导空行 ---
+    setClipboard(QStringLiteral("a\nb\n"));
+    setTextAndSelection(QString(), 0, 0);
+    const QJsonObject pasteIntoEmptyDoc = keyPress({}, QStringLiteral("V"), false,
+                                                   QStringLiteral("ctrl"));
+    addCheck(checks, details, QStringLiteral("pasteClipboardEmptyDoc"),
+             editorText() == QStringLiteral("a\nb\n")
+                 && pasteIntoEmptyDoc.value(QStringLiteral("cursorPosition")).toInt() == 3,
+             pasteIntoEmptyDoc);
+
+    setClipboard(QStringLiteral("a\nb\n"));
+    setTextAndSelection(QStringLiteral("x\n"), 2, 2);
+    const QJsonObject pasteAtTrailingEmptyLine = keyPress({}, QStringLiteral("V"), false,
+                                                          QStringLiteral("ctrl"));
+    addCheck(checks, details, QStringLiteral("pasteClipboardTrailingEmptyLine"),
+             editorText() == QStringLiteral("x\na\nb\n")
+                 && pasteAtTrailingEmptyLine.value(
+                        QStringLiteral("cursorPosition")).toInt() == 5,
+             pasteAtTrailingEmptyLine);
+
+    setClipboard(QStringLiteral("\n"));
+    setTextAndSelection(QString(), 0, 0);
+    const QJsonObject pasteEmptyLineOnly = keyPress({}, QStringLiteral("V"), false,
+                                                    QStringLiteral("ctrl"));
+    addCheck(checks, details, QStringLiteral("pasteClipboardEmptyLineOnly"),
+             editorText() == QStringLiteral("\n")
+                 && pasteEmptyLineOnly.value(
+                        QStringLiteral("cursorPosition")).toInt() == 1,
+             pasteEmptyLineOnly);
+
+    // 用户复现链：Ctrl+A 全选 → Ctrl+X 原生剪切（文档变空）→ Ctrl+V 智能粘贴，
+    // 重复两轮，首行前不得累积空行。
+    setClipboard(QString());
+    setTextAndSelection(QStringLiteral("a\nb\n"), 0, 4);
+    keyPress({}, QStringLiteral("A"), false, QStringLiteral("ctrl"));
+    keyPress({}, QStringLiteral("X"), false, QStringLiteral("ctrl"));
+    setClipboard(QStringLiteral("a\nb\n"));
+    const QJsonObject loopPasteFirst = keyPress({}, QStringLiteral("V"), false,
+                                                QStringLiteral("ctrl"));
+    keyPress({}, QStringLiteral("A"), false, QStringLiteral("ctrl"));
+    keyPress({}, QStringLiteral("X"), false, QStringLiteral("ctrl"));
+    setClipboard(QStringLiteral("a\nb\n"));
+    const QJsonObject loopPasteSecond = keyPress({}, QStringLiteral("V"), false,
+                                                 QStringLiteral("ctrl"));
+    addCheck(checks, details, QStringLiteral("ctrlAXVPasteLoopStable"),
+             editorText() == QStringLiteral("a\nb\n")
+                 && loopPasteFirst.value(QStringLiteral("cursorPosition")).toInt() == 3
+                 && loopPasteSecond.value(QStringLiteral("cursorPosition")).toInt() == 3,
+             loopPasteSecond);
+
+    // --- 三击选中整行（Qt 原生：非末行含行尾换行符，末行不含） ---
+    setTextAndSelection(QStringLiteral("alpha\nbeta\ngamma"), 0, 0);
+    const QJsonObject tripleMiddle = tripleClick(8);
+    addCheck(checks, details, QStringLiteral("tripleClickSelectsWholeLine"),
+             tripleMiddle.value(QStringLiteral("selectionStart")).toInt() == 6
+                 && tripleMiddle.value(QStringLiteral("selectionEnd")).toInt() == 11
+                 && editorText() == QStringLiteral("alpha\nbeta\ngamma"),
+             tripleMiddle);
+
+    const QJsonObject tripleLast = tripleClick(13);
+    addCheck(checks, details, QStringLiteral("tripleClickLastLineNoTrailingNewline"),
+             tripleLast.value(QStringLiteral("selectionStart")).toInt() == 11
+                 && tripleLast.value(QStringLiteral("selectionEnd")).toInt() == 16,
+             tripleLast);
+
+    setTextAndSelection(QStringLiteral("a\n\nb"), 2, 2);
+    const QJsonObject tripleEmpty = tripleClick(2);
+    addCheck(checks, details, QStringLiteral("tripleClickEmptyLine"),
+             tripleEmpty.value(QStringLiteral("selectionStart")).toInt() == 2
+                 && tripleEmpty.value(QStringLiteral("selectionEnd")).toInt() == 3,
+             tripleEmpty);
 
     setTextAndSelection(QString(), 0, 0);
     const QJsonObject halfWidthPair = keyPress(QStringLiteral("("));

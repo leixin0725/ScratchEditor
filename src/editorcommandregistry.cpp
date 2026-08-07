@@ -21,6 +21,7 @@
 #include <algorithm>
 #include <limits>
 #include <optional>
+#include <utility>
 
 namespace {
 
@@ -728,6 +729,12 @@ EditorCommandRegistry::EditorCommandRegistry(AppSettings *settings, QObject *par
          QStringLiteral("Markdown"), QStringLiteral("Ctrl+Num++"), {}, false},
         {QStringLiteral("deleteLine"), QStringLiteral("删除整行"),
          QStringLiteral("编辑"), QStringLiteral("Ctrl+Shift+L"), {}, false},
+        {QStringLiteral("copyLine"), QStringLiteral("复制整行"),
+         QStringLiteral("编辑"), QString(), {}, false},
+        {QStringLiteral("cutLine"), QStringLiteral("剪切整行"),
+         QStringLiteral("编辑"), QString(), {}, false},
+        {QStringLiteral("pasteClipboard"), QStringLiteral("粘贴剪贴板"),
+         QStringLiteral("编辑"), QString(), {}, false},
         {QStringLiteral("toggleList"), QStringLiteral("切换项目列表"),
          QStringLiteral("Markdown"), QString(), {}, false},
         {QStringLiteral("toggleTask"), QStringLiteral("切换任务项"),
@@ -766,6 +773,12 @@ void EditorCommandRegistry::setEditor(QObject *editor, QTextDocument *document)
     resetSelectionDrag(true);
     m_editor = editor;
     m_document = document;
+}
+
+void EditorCommandRegistry::setClipboardAccess(ClipboardReader reader, ClipboardWriter writer)
+{
+    m_clipboardReader = std::move(reader);
+    m_clipboardWriter = std::move(writer);
 }
 
 QVariantList EditorCommandRegistry::commands() const
@@ -874,6 +887,15 @@ bool EditorCommandRegistry::execute(const QString &commandId)
     if (commandId == QStringLiteral("deleteLine")) {
         return deleteSelectedLines();
     }
+    if (commandId == QStringLiteral("copyLine")) {
+        return copyLine();
+    }
+    if (commandId == QStringLiteral("cutLine")) {
+        return cutLine();
+    }
+    if (commandId == QStringLiteral("pasteClipboard")) {
+        return pasteClipboard();
+    }
     if (commandId == QStringLiteral("toggleCheckbox")) {
         return toggleCurrentCheckbox();
     }
@@ -917,6 +939,27 @@ bool EditorCommandRegistry::handleEditorEvent(QEvent *event)
                 return true;
             }
             m_formatUndoSnapshot.reset();
+        }
+        // 无选区时拦截 Ctrl+C / Ctrl+X / Ctrl+V，执行整行复制、剪切与智能粘贴；
+        // 有选区时保持 TextEdit 标准行为（复制/剪切/替换选区）。
+        const bool plainCtrl = modifiers.testFlag(Qt::ControlModifier)
+            && !modifiers.testFlag(Qt::ShiftModifier)
+            && !modifiers.testFlag(Qt::AltModifier)
+            && !modifiers.testFlag(Qt::MetaModifier);
+        if (plainCtrl && !m_editor->property("inputMethodComposing").toBool()
+            && m_editor->property("selectionStart").toInt()
+                == m_editor->property("selectionEnd").toInt()) {
+            if (keyEvent->key() == Qt::Key_C) {
+                return copyLine();
+            }
+            if (keyEvent->key() == Qt::Key_X
+                && !m_editor->property("readOnly").toBool()) {
+                return cutLine();
+            }
+            if (keyEvent->key() == Qt::Key_V
+                && !m_editor->property("readOnly").toBool()) {
+                return pasteClipboard();
+            }
         }
         const bool tabPressed = keyEvent->key() == Qt::Key_Tab
             || keyEvent->key() == Qt::Key_Backtab;
@@ -1688,6 +1731,112 @@ bool EditorCommandRegistry::deleteSelectedLines()
     cursor.removeSelectedText();
     cursor.endEditBlock();
     m_editor->setProperty("cursorPosition", removeStart);
+    focusEditor();
+    return true;
+}
+
+bool EditorCommandRegistry::copyLine()
+{
+    if (!m_editor || !m_document || !m_clipboardWriter) {
+        return false;
+    }
+
+    const QString text = m_document->toPlainText();
+    const int cursor = m_editor->property("cursorPosition").toInt();
+    const int lineStart = text.lastIndexOf(QLatin1Char('\n'), qMax(0, cursor - 1)) + 1;
+    int lineEnd = text.indexOf(QLatin1Char('\n'), cursor);
+    if (lineEnd < 0) {
+        lineEnd = text.size();
+    }
+    // 整行复制统一携带行尾换行符（末行/单行文档也补上），保证粘贴语义一致。
+    m_clipboardWriter(text.mid(lineStart, lineEnd - lineStart) + QLatin1Char('\n'));
+    focusEditor();
+    return true;
+}
+
+bool EditorCommandRegistry::cutLine()
+{
+    if (!m_editor || !m_document || !m_clipboardWriter) {
+        return false;
+    }
+
+    const QString text = m_document->toPlainText();
+    const int cursor = m_editor->property("cursorPosition").toInt();
+    const int lineStart = text.lastIndexOf(QLatin1Char('\n'), qMax(0, cursor - 1)) + 1;
+    int lineEnd = text.indexOf(QLatin1Char('\n'), cursor);
+    const bool lastLine = lineEnd < 0;
+    if (lastLine) {
+        lineEnd = text.size();
+    }
+
+    m_clipboardWriter(text.mid(lineStart, lineEnd - lineStart) + QLatin1Char('\n'));
+
+    // 非末行删除整行含换行，后续行补位；末行只删行文本。
+    QTextCursor editCursor(m_document);
+    editCursor.beginEditBlock();
+    editCursor.setPosition(lineStart);
+    editCursor.setPosition(lastLine ? lineEnd : lineEnd + 1, QTextCursor::KeepAnchor);
+    editCursor.removeSelectedText();
+    editCursor.endEditBlock();
+    // 光标落在补位后一行的行首；剪切末行时落在上一行行尾。
+    m_editor->setProperty("cursorPosition", lineStart);
+    focusEditor();
+    return true;
+}
+
+bool EditorCommandRegistry::pasteClipboard()
+{
+    if (!m_editor || !m_document || !m_clipboardReader) {
+        return false;
+    }
+    if (m_editor->property("readOnly").toBool()) {
+        return false;
+    }
+
+    const QString clipboardText = m_clipboardReader();
+    const QString text = m_document->toPlainText();
+    const int selectionStart = m_editor->property("selectionStart").toInt();
+    const int selectionEnd = m_editor->property("selectionEnd").toInt();
+    const bool smartLinePaste = selectionStart == selectionEnd
+        && clipboardText.endsWith(QLatin1Char('\n'));
+
+    int insertionPoint = selectionStart;
+    QString insertion = clipboardText;
+    if (smartLinePaste) {
+        // 智能粘贴：剪贴板是“整行（以换行结尾）”时插入为当前行下方的新行，
+        // 当前行原样保留；仅当当前行仍有内容（末行非空）时才先补一个换行。
+        // 空文档、文档已以换行结尾（光标位于末尾空行）时直接插入，
+        // 避免每次粘贴都新增一个前导空行。
+        const int lineStart = text.lastIndexOf(
+            QLatin1Char('\n'), qMax(0, selectionStart - 1)) + 1;
+        int lineEnd = text.indexOf(QLatin1Char('\n'), selectionStart);
+        const bool lastLine = lineEnd < 0;
+        if (lastLine) {
+            lineEnd = text.size();
+            if (lineStart < lineEnd) {
+                insertion.prepend(QLatin1Char('\n'));
+            }
+        }
+        insertionPoint = lastLine ? lineEnd : lineEnd + 1;
+    }
+
+    QTextCursor editCursor(m_document);
+    editCursor.beginEditBlock();
+    editCursor.setPosition(insertionPoint);
+    if (selectionStart != selectionEnd) {
+        editCursor.setPosition(selectionEnd, QTextCursor::KeepAnchor);
+    }
+    editCursor.insertText(insertion);
+    editCursor.endEditBlock();
+
+    int cursorAfter = insertionPoint + insertion.size();
+    if (smartLinePaste) {
+        // 光标落在新粘贴行行尾（不含换行），连续 Ctrl+V 会在下方不断堆叠新行；
+        // 剪贴板恰为单个空行（"\n"）时，光标落在该空行上。
+        cursorAfter = insertionPoint + qMax(1, insertion.size() - 1);
+    }
+    m_editor->setProperty("cursorPosition", cursorAfter);
+    selectRange(cursorAfter, cursorAfter);
     focusEditor();
     return true;
 }

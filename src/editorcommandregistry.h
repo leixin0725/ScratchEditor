@@ -9,6 +9,7 @@
 #include <QVariantList>
 #include <QVector>
 
+#include <functional>
 #include <optional>
 
 class QTextDocument;
@@ -24,6 +25,9 @@ public:
     explicit EditorCommandRegistry(AppSettings *settings, QObject *parent = nullptr);
 
     void setEditor(QObject *editor, QTextDocument *document);
+    using ClipboardReader = std::function<QString()>;
+    using ClipboardWriter = std::function<bool(const QString &text)>;
+    void setClipboardAccess(ClipboardReader reader, ClipboardWriter writer);
     QVariantList commands() const;
     QString shortcut(const QString &commandId) const;
 
@@ -80,6 +84,9 @@ private:
     bool wrapSelection(const QString &opening, const QString &closing);
     bool transformSelectedLines(const QString &commandId);
     bool deleteSelectedLines();
+    bool copyLine();
+    bool cutLine();
+    bool pasteClipboard();
     bool toggleCurrentCheckbox();
     TypedEditResult handleTypedText(const QString &text);
     std::optional<EditFootprint> insertPair(const QString &opening, const QString &closing);
@@ -112,6 +119,8 @@ private:
     QPointer<QObject> m_editor;
     QPointer<QTextDocument> m_document;
     QVector<Definition> m_definitions;
+    ClipboardReader m_clipboardReader;
+    ClipboardWriter m_clipboardWriter;
     QTimer m_selectionDragScrollTimer;
     QPointF m_selectionDragPressScenePosition;
     QPointF m_selectionDragScenePosition;

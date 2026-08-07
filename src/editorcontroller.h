@@ -8,6 +8,7 @@
 #include <QLocalServer>
 #include <QMutex>
 #include <QPointer>
+#include <QPointF>
 #include <QRect>
 #include <QObject>
 #include <QString>
@@ -235,6 +236,11 @@ private:
     bool m_hideWhenAnimationFinishes = false;
     bool m_discardClose = false;
     bool m_windowTransitionPreparationStable = true;
+    QElapsedTimer m_mouseClickTimer;
+    qint64 m_lastMouseClickElapsedMs = -1;
+    QPointF m_lastMouseClickScenePosition;
+    bool m_multiClickPress = false;
+    QString m_testClipboardText;
     QString m_settingsError;
     QTimer m_screenConfigurationTimer;
     QTimer m_displayChangeSettleTimer;
