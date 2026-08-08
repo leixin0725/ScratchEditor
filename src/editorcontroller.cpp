@@ -351,6 +351,7 @@ EditorController::EditorController(bool testMode, QElapsedTimer *startupTimer,
     connect(qGuiApp, &QGuiApplication::primaryScreenChanged, this, [this](QScreen *) {
         scheduleScreenConfigurationUpdate();
     });
+    buildCommandHandlers();
 }
 
 EditorController::~EditorController() = default;
@@ -962,17 +963,61 @@ void EditorController::dispatchCommand(QLocalSocket *socket, const QJsonObject &
     const QString requestId = request.value(QStringLiteral("requestId")).toString();
     const bool noReply = request.value(QStringLiteral("noReply")).toBool();
 
-    if (command == QStringLiteral("ping") || command == QStringLiteral("status")
-        || command == QStringLiteral("getWindowGeometry")) {
-        if (noReply) {
+    const auto it = m_commandHandlers.constFind(command);
+    if (it == m_commandHandlers.constEnd()) {
+        if (!m_ready) {
+            sendError(socket, command, QStringLiteral("QML window is not ready"),
+                      startedNs, requestId);
+        } else {
+            sendError(socket, command,
+                      m_testMode ? QStringLiteral("unsupported test command")
+                                 : QStringLiteral("unsupported command"),
+                      startedNs, requestId);
+        }
+        return;
+    }
+
+    if (it->gate == CommandEntry::Gate::Ready || it->gate == CommandEntry::Gate::Test) {
+        if (!m_ready) {
+            sendError(socket, command, QStringLiteral("QML window is not ready"),
+                      startedNs, requestId);
             return;
         }
-        QJsonObject response;
-        if (command == QStringLiteral("getWindowGeometry")) {
+        if (it->gate == CommandEntry::Gate::Test && !m_testMode) {
+            sendError(socket, command, QStringLiteral("unsupported command"),
+                      startedNs, requestId);
+            return;
+        }
+    }
+
+    it->handler({socket, request, command, requestId, noReply, startedNs});
+}
+
+void EditorController::buildCommandHandlers()
+{
+    using Gate = CommandEntry::Gate;
+
+    const auto respondWithStatus = [this](const DispatchRequest &r) {
+        if (r.noReply) {
+            return;
+        }
+        QJsonObject response = statusObject();
+        response.insert(QStringLiteral("command"), r.command);
+        sendResponse(r.socket, response, r.startedNs, r.requestId);
+    };
+
+    m_commandHandlers = {
+        {QStringLiteral("ping"), {Gate::PreReady, respondWithStatus}},
+        {QStringLiteral("status"), {Gate::PreReady, respondWithStatus}},
+        {QStringLiteral("getWindowGeometry"), {Gate::PreReady, [this](const DispatchRequest &r) {
+            if (r.noReply) {
+                return;
+            }
             // 只读查询：供外部编辑进程获取常驻临时编辑器的 resting 几何，
             // 用于避免唤起时窗口重叠。
+            QJsonObject response;
             const bool positioned = m_positioned && m_window;
-            response.insert(QStringLiteral("command"), command);
+            response.insert(QStringLiteral("command"), r.command);
             response.insert(QStringLiteral("valid"), positioned);
             if (positioned) {
                 const QRect geometry = m_windowRestingGeometry.isValid()
@@ -983,532 +1028,543 @@ void EditorController::dispatchCommand(QLocalSocket *socket, const QJsonObject &
                 response.insert(QStringLiteral("width"), geometry.width());
                 response.insert(QStringLiteral("height"), geometry.height());
             }
-        } else {
-            response = statusObject();
-            response.insert(QStringLiteral("command"), command);
-        }
-        sendResponse(socket, response, startedNs, requestId);
-        return;
-    }
+            sendResponse(r.socket, response, r.startedNs, r.requestId);
+        }}},
 
-    if (!m_ready) {
-        sendError(socket, command, QStringLiteral("QML window is not ready"), startedNs, requestId);
-        return;
-    }
-
-    if (command == QStringLiteral("toggle")) {
-        if (noReply) {
-            toggleEditor();
-            return;
-        }
-        if (isVisible()) {
+        {QStringLiteral("toggle"), {Gate::Ready, [this](const DispatchRequest &r) {
+            if (r.noReply) {
+                toggleEditor();
+                return;
+            }
+            if (isVisible()) {
+                commitAndHide();
+                QJsonObject response = statusObject();
+                response.insert(QStringLiteral("command"), r.command);
+                sendResponse(r.socket, response, r.startedNs, r.requestId);
+            } else {
+                showForRequest(r.socket, r.command, r.startedNs, r.requestId, r.request);
+            }
+        }}},
+        {QStringLiteral("show"), {Gate::Ready, [this](const DispatchRequest &r) {
+            if (r.noReply) {
+                showEditor();
+                return;
+            }
+            if (isVisible()) {
+                m_window->raise();
+                m_window->requestActivate();
+                QJsonObject response = statusObject();
+                response.insert(QStringLiteral("command"), r.command);
+                sendResponse(r.socket, response, r.startedNs, r.requestId);
+            } else {
+                showForRequest(r.socket, r.command, r.startedNs, r.requestId, r.request);
+            }
+        }}},
+        {QStringLiteral("hide"), {Gate::Ready, [this](const DispatchRequest &r) {
+            if (r.noReply) {
+                commitAndHide();
+                return;
+            }
             commitAndHide();
             QJsonObject response = statusObject();
-            response.insert(QStringLiteral("command"), command);
-            sendResponse(socket, response, startedNs, requestId);
-        } else {
-            showForRequest(socket, command, startedNs, requestId, request);
-        }
-        return;
-    }
-
-    if (command == QStringLiteral("show")) {
-        if (noReply) {
-            showEditor();
-            return;
-        }
-        if (isVisible()) {
-            m_window->raise();
-            m_window->requestActivate();
-            QJsonObject response = statusObject();
-            response.insert(QStringLiteral("command"), command);
-            sendResponse(socket, response, startedNs, requestId);
-        } else {
-            showForRequest(socket, command, startedNs, requestId, request);
-        }
-        return;
-    }
-
-    if (command == QStringLiteral("hide")) {
-        if (noReply) {
+            response.insert(QStringLiteral("command"), r.command);
+            sendResponse(r.socket, response, r.startedNs, r.requestId);
+        }}},
+        {QStringLiteral("shutdownForUpdate"), {Gate::Ready, [this](const DispatchRequest &r) {
             commitAndHide();
-            return;
-        }
-        commitAndHide();
-        QJsonObject response = statusObject();
-        response.insert(QStringLiteral("command"), command);
-        sendResponse(socket, response, startedNs, requestId);
-        return;
-    }
+            QJsonObject response;
+            response.insert(QStringLiteral("command"), r.command);
+            sendResponse(r.socket, response, r.startedNs, r.requestId);
+            QTimer::singleShot(25, qApp, [] { QCoreApplication::exit(0); });
+        }}},
 
-    if (command == QStringLiteral("shutdownForUpdate")) {
-        commitAndHide();
-        QJsonObject response;
-        response.insert(QStringLiteral("command"), command);
-        sendResponse(socket, response, startedNs, requestId);
-        QTimer::singleShot(25, qApp, [] { QCoreApplication::exit(0); });
-        return;
-    }
-
-    if (!m_testMode) {
-        sendError(socket, command, QStringLiteral("unsupported command"), startedNs, requestId);
-        return;
-    }
-
-    if (command == QStringLiteral("quit")) {
-        QJsonObject response;
-        response.insert(QStringLiteral("command"), command);
-        sendResponse(socket, response, startedNs, requestId);
-        QTimer::singleShot(25, qApp, [] { QCoreApplication::exit(0); });
-    } else if (command == QStringLiteral("awaitInputFrame")) {
-        if (m_pendingInput.socket) {
-            sendError(socket, command, QStringLiteral("input benchmark already armed"), startedNs,
-                      requestId);
-        } else {
-            m_pendingInput = {socket, startedNs, requestId};
-        }
-    } else if (command == QStringLiteral("benchmarkLargeDocument")) {
-        runLargeDocumentBenchmark(socket, startedNs, requestId);
-    } else if (command == QStringLiteral("restoreTestDocument")) {
-        restoreTestDocument();
-        QJsonObject response = statusObject();
-        response.insert(QStringLiteral("command"), command);
-        sendResponse(socket, response, startedNs, requestId);
-    } else if (command == QStringLiteral("benchmarkIme")) {
-        runImeBenchmark(socket, startedNs, requestId);
-    } else if (command == QStringLiteral("benchmarkAnimation")) {
-        runAnimationBenchmark(socket, startedNs, requestId);
-    } else if (command == QStringLiteral("clearTestText")) {
-        m_editor->setProperty("text", QString());
-        m_editor->setProperty("cursorPosition", 0);
-        QJsonObject response;
-        response.insert(QStringLiteral("command"), command);
-        sendResponse(socket, response, startedNs, requestId);
-    } else if (command == QStringLiteral("testText")) {
-        QJsonObject response;
-        response.insert(QStringLiteral("command"), command);
-        response.insert(QStringLiteral("text"), m_editor->property("text").toString());
-        sendResponse(socket, response, startedNs, requestId);
-    } else if (command == QStringLiteral("testSetText")) {
-        const QString text = request.value(QStringLiteral("text")).toString();
-        m_editor->setProperty("text", text);
-        m_editor->setProperty("cursorPosition", text.size());
-        if (auto *quickDocument = qvariant_cast<QQuickTextDocument *>(
-                m_editor->property("textDocument"))) {
-            quickDocument->textDocument()->clearUndoRedoStacks();
-        }
-        QJsonObject response = statusObject();
-        response.insert(QStringLiteral("command"), command);
-        sendResponse(socket, response, startedNs, requestId);
-    } else if (command == QStringLiteral("testSetSelection")) {
-        const int start = request.value(QStringLiteral("start")).toInt();
-        const int end = request.value(QStringLiteral("end")).toInt();
-        const bool hasCursor = request.contains(QStringLiteral("cursor"));
-        const int cursor = request.value(QStringLiteral("cursor")).toInt();
-        bool invoked = false;
-        if (hasCursor && cursor < end) {
-            // 反向选区：先让光标落在 end，再移动 active end 到 start。
-            m_editor->setProperty("cursorPosition", end);
-            invoked = QMetaObject::invokeMethod(m_editor, "moveCursorSelection",
-                                                Q_ARG(int, start));
-        } else {
-            invoked = QMetaObject::invokeMethod(m_editor, "select",
-                                                Q_ARG(int, start), Q_ARG(int, end));
-            if (hasCursor && cursor != end) {
-                m_editor->setProperty("cursorPosition", cursor);
+        {QStringLiteral("quit"), {Gate::Test, [this](const DispatchRequest &r) {
+            QJsonObject response;
+            response.insert(QStringLiteral("command"), r.command);
+            sendResponse(r.socket, response, r.startedNs, r.requestId);
+            QTimer::singleShot(25, qApp, [] { QCoreApplication::exit(0); });
+        }}},
+        {QStringLiteral("awaitInputFrame"), {Gate::Test, [this](const DispatchRequest &r) {
+            if (m_pendingInput.socket) {
+                sendError(r.socket, r.command, QStringLiteral("input benchmark already armed"),
+                          r.startedNs, r.requestId);
+            } else {
+                m_pendingInput = {r.socket, r.startedNs, r.requestId};
             }
-        }
-        QJsonObject response = statusObject();
-        response.insert(QStringLiteral("command"), command);
-        response.insert(QStringLiteral("invoked"), invoked);
-        sendResponse(socket, response, startedNs, requestId);
-    } else if (command == QStringLiteral("testClipboard")) {
-        QJsonObject response = statusObject();
-        response.insert(QStringLiteral("command"), command);
-        response.insert(QStringLiteral("text"), m_testClipboardText);
-        sendResponse(socket, response, startedNs, requestId);
-    } else if (command == QStringLiteral("testSetClipboard")) {
-        m_testClipboardText = request.value(QStringLiteral("text")).toString();
-        QJsonObject response = statusObject();
-        response.insert(QStringLiteral("command"), command);
-        response.insert(QStringLiteral("ok"), true);
-        sendResponse(socket, response, startedNs, requestId);
-    } else if (command == QStringLiteral("testDragSelection")) {
-        // 合成的拖拽按压事件视为一次全新的单击，避免与多重点击放行逻辑互相干扰。
-        m_lastMouseClickElapsedMs = -1;
-        m_multiClickPress = false;
-        const int start = request.value(QStringLiteral("start")).toInt();
-        const int end = request.value(QStringLiteral("end")).toInt();
-        const int dropPosition = request.value(QStringLiteral("dropPosition")).toInt();
-        const QString before = m_editor->property("text").toString();
-        QRectF pressRectangle;
-        QRectF dropRectangle;
-        const int pressPosition = start + (end - start) / 2;
-        const bool pressLocated = QMetaObject::invokeMethod(
-            m_editor, "positionToRectangle", Qt::DirectConnection,
-            Q_RETURN_ARG(QRectF, pressRectangle), Q_ARG(int, pressPosition));
-        const bool dropLocated = QMetaObject::invokeMethod(
-            m_editor, "positionToRectangle", Qt::DirectConnection,
-            Q_RETURN_ARG(QRectF, dropRectangle), Q_ARG(int, dropPosition));
-        bool eventsAccepted = false;
-        if (pressLocated && dropLocated) {
-            if (auto *item = qobject_cast<QQuickItem *>(m_editor.data())) {
-                const QPointF pressLocal = pressRectangle.center();
-                const QPointF dropLocal = dropRectangle.center();
-                const QPointF activationLocal = pressLocal + QPointF(100.0, 100.0);
-                const QPointF pressScene = item->mapToScene(pressLocal);
-                const QPointF dropScene = item->mapToScene(dropLocal);
-                const QPointF activationScene = item->mapToScene(activationLocal);
-                const QPointF pressGlobal = item->mapToGlobal(pressLocal);
-                const QPointF dropGlobal = item->mapToGlobal(dropLocal);
-                const QPointF activationGlobal = item->mapToGlobal(activationLocal);
-                QMouseEvent pressEvent(QEvent::MouseButtonPress, pressScene, pressScene,
-                                       pressGlobal, Qt::LeftButton, Qt::LeftButton,
-                                       Qt::NoModifier);
-                QMouseEvent activationEvent(QEvent::MouseMove, activationScene,
-                                            activationScene, activationGlobal, Qt::NoButton,
-                                            Qt::LeftButton, Qt::NoModifier);
-                QMouseEvent moveEvent(QEvent::MouseMove, dropScene, dropScene, dropGlobal,
-                                      Qt::NoButton, Qt::LeftButton, Qt::NoModifier);
-                QMouseEvent releaseEvent(QEvent::MouseButtonRelease, dropScene, dropScene,
-                                         dropGlobal, Qt::LeftButton, Qt::NoButton,
-                                         Qt::NoModifier);
-                const bool pressAccepted = QCoreApplication::sendEvent(m_window, &pressEvent);
-                const bool activationAccepted = QCoreApplication::sendEvent(
-                    m_window, &activationEvent);
-                const bool moveAccepted = QCoreApplication::sendEvent(m_window, &moveEvent);
-                const bool releaseAccepted = QCoreApplication::sendEvent(
-                    m_window, &releaseEvent);
-                eventsAccepted = pressAccepted && activationAccepted
-                    && moveAccepted && releaseAccepted;
-                item->ungrabMouse();
+        }}},
+        {QStringLiteral("benchmarkLargeDocument"), {Gate::Test, [this](const DispatchRequest &r) {
+            runLargeDocumentBenchmark(r.socket, r.startedNs, r.requestId);
+        }}},
+        {QStringLiteral("restoreTestDocument"), {Gate::Test, [this](const DispatchRequest &r) {
+            restoreTestDocument();
+            QJsonObject response = statusObject();
+            response.insert(QStringLiteral("command"), r.command);
+            sendResponse(r.socket, response, r.startedNs, r.requestId);
+        }}},
+        {QStringLiteral("benchmarkIme"), {Gate::Test, [this](const DispatchRequest &r) {
+            runImeBenchmark(r.socket, r.startedNs, r.requestId);
+        }}},
+        {QStringLiteral("benchmarkAnimation"), {Gate::Test, [this](const DispatchRequest &r) {
+            runAnimationBenchmark(r.socket, r.startedNs, r.requestId);
+        }}},
+        {QStringLiteral("clearTestText"), {Gate::Test, [this](const DispatchRequest &r) {
+            m_editor->setProperty("text", QString());
+            m_editor->setProperty("cursorPosition", 0);
+            QJsonObject response;
+            response.insert(QStringLiteral("command"), r.command);
+            sendResponse(r.socket, response, r.startedNs, r.requestId);
+        }}},
+        {QStringLiteral("testText"), {Gate::Test, [this](const DispatchRequest &r) {
+            QJsonObject response;
+            response.insert(QStringLiteral("command"), r.command);
+            response.insert(QStringLiteral("text"), m_editor->property("text").toString());
+            sendResponse(r.socket, response, r.startedNs, r.requestId);
+        }}},
+        {QStringLiteral("testSetText"), {Gate::Test, [this](const DispatchRequest &r) {
+            const QString text = r.request.value(QStringLiteral("text")).toString();
+            m_editor->setProperty("text", text);
+            m_editor->setProperty("cursorPosition", text.size());
+            if (auto *quickDocument = qvariant_cast<QQuickTextDocument *>(
+                    m_editor->property("textDocument"))) {
+                quickDocument->textDocument()->clearUndoRedoStacks();
             }
-        }
-        QJsonObject response = statusObject();
-        response.insert(QStringLiteral("command"), command);
-        response.insert(QStringLiteral("eventsAccepted"), eventsAccepted);
-        response.insert(QStringLiteral("moved"),
-                        m_editor->property("text").toString() != before);
-        response.insert(QStringLiteral("text"), m_editor->property("text").toString());
-        sendResponse(socket, response, startedNs, requestId);
-    } else if (command == QStringLiteral("testTripleClick")) {
-        // 合成 Press → DblClick → Press 序列模拟三击：时间戳统一为 0 使第三次
-        // Press 落在双击间隔内，坐标相同满足拖拽距离限制，交给 QML TextEdit
-        // 原生逻辑选中整行。开始时重置多重点击状态，避免与放行逻辑互相干扰。
-        m_lastMouseClickElapsedMs = -1;
-        m_multiClickPress = false;
-        const int position = request.value(QStringLiteral("position")).toInt();
-        QRectF clickRectangle;
-        const bool clickLocated = QMetaObject::invokeMethod(
-            m_editor, "positionToRectangle", Qt::DirectConnection,
-            Q_RETURN_ARG(QRectF, clickRectangle), Q_ARG(int, position));
-        QJsonObject response = statusObject();
-        bool eventsAccepted = false;
-        if (clickLocated) {
-            if (auto *item = qobject_cast<QQuickItem *>(m_editor.data())) {
-                const QPointF local = clickRectangle.center();
-                const QPointF scene = item->mapToScene(local);
-                const QPointF global = item->mapToGlobal(local);
-                QMouseEvent pressEvent(QEvent::MouseButtonPress, scene, scene,
-                                       global, Qt::LeftButton, Qt::LeftButton,
-                                       Qt::NoModifier);
-                QMouseEvent doubleClickEvent(QEvent::MouseButtonDblClick, local, scene,
-                                             global, Qt::LeftButton, Qt::LeftButton,
+            QJsonObject response = statusObject();
+            response.insert(QStringLiteral("command"), r.command);
+            sendResponse(r.socket, response, r.startedNs, r.requestId);
+        }}},
+        {QStringLiteral("testSetSelection"), {Gate::Test, [this](const DispatchRequest &r) {
+            const int start = r.request.value(QStringLiteral("start")).toInt();
+            const int end = r.request.value(QStringLiteral("end")).toInt();
+            const bool hasCursor = r.request.contains(QStringLiteral("cursor"));
+            const int cursor = r.request.value(QStringLiteral("cursor")).toInt();
+            bool invoked = false;
+            if (hasCursor && cursor < end) {
+                // 反向选区：先让光标落在 end，再移动 active end 到 start。
+                m_editor->setProperty("cursorPosition", end);
+                invoked = QMetaObject::invokeMethod(m_editor, "moveCursorSelection",
+                                                    Q_ARG(int, start));
+            } else {
+                invoked = QMetaObject::invokeMethod(m_editor, "select",
+                                                    Q_ARG(int, start), Q_ARG(int, end));
+                if (hasCursor && cursor != end) {
+                    m_editor->setProperty("cursorPosition", cursor);
+                }
+            }
+            QJsonObject response = statusObject();
+            response.insert(QStringLiteral("command"), r.command);
+            response.insert(QStringLiteral("invoked"), invoked);
+            sendResponse(r.socket, response, r.startedNs, r.requestId);
+        }}},
+        {QStringLiteral("testClipboard"), {Gate::Test, [this](const DispatchRequest &r) {
+            QJsonObject response = statusObject();
+            response.insert(QStringLiteral("command"), r.command);
+            response.insert(QStringLiteral("text"), m_testClipboardText);
+            sendResponse(r.socket, response, r.startedNs, r.requestId);
+        }}},
+        {QStringLiteral("testSetClipboard"), {Gate::Test, [this](const DispatchRequest &r) {
+            m_testClipboardText = r.request.value(QStringLiteral("text")).toString();
+            QJsonObject response = statusObject();
+            response.insert(QStringLiteral("command"), r.command);
+            response.insert(QStringLiteral("ok"), true);
+            sendResponse(r.socket, response, r.startedNs, r.requestId);
+        }}},
+        {QStringLiteral("testDragSelection"), {Gate::Test, [this](const DispatchRequest &r) {
+            // 合成的拖拽按压事件视为一次全新的单击，避免与多重点击放行逻辑互相干扰。
+            m_lastMouseClickElapsedMs = -1;
+            m_multiClickPress = false;
+            const int start = r.request.value(QStringLiteral("start")).toInt();
+            const int end = r.request.value(QStringLiteral("end")).toInt();
+            const int dropPosition = r.request.value(QStringLiteral("dropPosition")).toInt();
+            const QString before = m_editor->property("text").toString();
+            QRectF pressRectangle;
+            QRectF dropRectangle;
+            const int pressPosition = start + (end - start) / 2;
+            const bool pressLocated = QMetaObject::invokeMethod(
+                m_editor, "positionToRectangle", Qt::DirectConnection,
+                Q_RETURN_ARG(QRectF, pressRectangle), Q_ARG(int, pressPosition));
+            const bool dropLocated = QMetaObject::invokeMethod(
+                m_editor, "positionToRectangle", Qt::DirectConnection,
+                Q_RETURN_ARG(QRectF, dropRectangle), Q_ARG(int, dropPosition));
+            bool eventsAccepted = false;
+            if (pressLocated && dropLocated) {
+                if (auto *item = qobject_cast<QQuickItem *>(m_editor.data())) {
+                    const QPointF pressLocal = pressRectangle.center();
+                    const QPointF dropLocal = dropRectangle.center();
+                    const QPointF activationLocal = pressLocal + QPointF(100.0, 100.0);
+                    const QPointF pressScene = item->mapToScene(pressLocal);
+                    const QPointF dropScene = item->mapToScene(dropLocal);
+                    const QPointF activationScene = item->mapToScene(activationLocal);
+                    const QPointF pressGlobal = item->mapToGlobal(pressLocal);
+                    const QPointF dropGlobal = item->mapToGlobal(dropLocal);
+                    const QPointF activationGlobal = item->mapToGlobal(activationLocal);
+                    QMouseEvent pressEvent(QEvent::MouseButtonPress, pressScene, pressScene,
+                                           pressGlobal, Qt::LeftButton, Qt::LeftButton,
+                                           Qt::NoModifier);
+                    QMouseEvent activationEvent(QEvent::MouseMove, activationScene,
+                                                activationScene, activationGlobal, Qt::NoButton,
+                                                Qt::LeftButton, Qt::NoModifier);
+                    QMouseEvent moveEvent(QEvent::MouseMove, dropScene, dropScene, dropGlobal,
+                                          Qt::NoButton, Qt::LeftButton, Qt::NoModifier);
+                    QMouseEvent releaseEvent(QEvent::MouseButtonRelease, dropScene, dropScene,
+                                             dropGlobal, Qt::LeftButton, Qt::NoButton,
                                              Qt::NoModifier);
-                QMouseEvent thirdPressEvent(QEvent::MouseButtonPress, scene, scene,
-                                            global, Qt::LeftButton, Qt::LeftButton,
-                                            Qt::NoModifier);
-                QMouseEvent releaseEvent(QEvent::MouseButtonRelease, scene, scene,
-                                         global, Qt::LeftButton, Qt::NoButton,
-                                         Qt::NoModifier);
-                pressEvent.setTimestamp(0);
-                doubleClickEvent.setTimestamp(0);
-                thirdPressEvent.setTimestamp(0);
-                releaseEvent.setTimestamp(0);
-                const bool pressAccepted = QCoreApplication::sendEvent(m_window,
-                                                                       &pressEvent);
-                // 隔离测试的窗口隐藏启动，Qt 6 的 MouseButtonDblClick 属于“更新
-                // 事件”，只投递给已有独占抓取者，而隐藏窗口下 Press 不会建立抓取。
-                // 因此把 DblClick 直接投递给编辑器 item（与 testKeyPress 同类），
-                // 让控件进入“双击”状态；第三次 Press 仍走完整窗口投递路径，用于
-                // 回归验证多重点击放行逻辑。
-                const bool doubleClickAccepted = QCoreApplication::sendEvent(
-                    m_editor, &doubleClickEvent);
-                const bool thirdPressAccepted = QCoreApplication::sendEvent(
-                    m_window, &thirdPressEvent);
-                const bool releaseAccepted = QCoreApplication::sendEvent(
-                    m_window, &releaseEvent);
-                eventsAccepted = pressAccepted && doubleClickAccepted
-                    && thirdPressAccepted && releaseAccepted;
-                item->ungrabMouse();
+                    const bool pressAccepted = QCoreApplication::sendEvent(m_window, &pressEvent);
+                    const bool activationAccepted = QCoreApplication::sendEvent(
+                        m_window, &activationEvent);
+                    const bool moveAccepted = QCoreApplication::sendEvent(m_window, &moveEvent);
+                    const bool releaseAccepted = QCoreApplication::sendEvent(
+                        m_window, &releaseEvent);
+                    eventsAccepted = pressAccepted && activationAccepted
+                        && moveAccepted && releaseAccepted;
+                    item->ungrabMouse();
+                }
             }
-        }
-        response.insert(QStringLiteral("command"), command);
-        response.insert(QStringLiteral("eventsAccepted"), eventsAccepted);
-        response.insert(QStringLiteral("selectionStart"),
-                        m_editor->property("selectionStart").toInt());
-        response.insert(QStringLiteral("selectionEnd"),
-                        m_editor->property("selectionEnd").toInt());
-        response.insert(QStringLiteral("text"), m_editor->property("text").toString());
-        sendResponse(socket, response, startedNs, requestId);
-    } else if (command == QStringLiteral("testUndo")) {
-        const bool invoked = QMetaObject::invokeMethod(m_editor, "undo");
-        QJsonObject response = statusObject();
-        response.insert(QStringLiteral("command"), command);
-        response.insert(QStringLiteral("invoked"), invoked);
-        response.insert(QStringLiteral("text"), m_editor->property("text").toString());
-        sendResponse(socket, response, startedNs, requestId);
-    } else if (command == QStringLiteral("testRedo")) {
-        const bool invoked = QMetaObject::invokeMethod(m_editor, "redo");
-        QJsonObject response = statusObject();
-        response.insert(QStringLiteral("command"), command);
-        response.insert(QStringLiteral("invoked"), invoked);
-        response.insert(QStringLiteral("text"), m_editor->property("text").toString());
-        sendResponse(socket, response, startedNs, requestId);
-    } else if (command == QStringLiteral("testKeyPress")) {
-        const QString text = request.value(QStringLiteral("text")).toString();
-        const QString keyName = request.value(QStringLiteral("key")).toString();
-        const bool shift = request.value(QStringLiteral("shift")).toBool();
-        const QString modifierText = request.value(QStringLiteral("modifiers")).toString();
-        int key = Qt::Key_unknown;
-        if (keyName == QStringLiteral("Tab")) {
-            key = shift ? Qt::Key_Backtab : Qt::Key_Tab;
-        } else if (keyName == QStringLiteral("Down")) {
-            key = Qt::Key_Down;
-        } else if (keyName == QStringLiteral("Up")) {
-            key = Qt::Key_Up;
-        } else if (keyName == QStringLiteral("Backspace")) {
-            key = Qt::Key_Backspace;
-        } else if (keyName == QStringLiteral("Enter")) {
-            key = Qt::Key_Return;
-        } else if (keyName.size() == 1) {
-            key = keyName.front().unicode();
-        } else if (!text.isEmpty()) {
-            key = text.front().unicode();
-        }
-        Qt::KeyboardModifiers modifiers = shift ? Qt::ShiftModifier
-                                                : Qt::NoModifier;
-        const QStringList modifierParts = modifierText.split(
-            QLatin1Char('+'), Qt::SkipEmptyParts);
-        for (const QString &part : modifierParts) {
-            if (part == QStringLiteral("ctrl")) {
-                modifiers |= Qt::ControlModifier;
-            } else if (part == QStringLiteral("shift")) {
-                modifiers |= Qt::ShiftModifier;
-            } else if (part == QStringLiteral("alt")) {
-                modifiers |= Qt::AltModifier;
-            } else if (part == QStringLiteral("meta")) {
-                modifiers |= Qt::MetaModifier;
-            }
-        }
-        QKeyEvent keyEvent(QEvent::KeyPress, key, modifiers, text);
-        const bool accepted = QCoreApplication::sendEvent(m_editor, &keyEvent);
-        QJsonObject response = statusObject();
-        response.insert(QStringLiteral("command"), command);
-        response.insert(QStringLiteral("accepted"), accepted);
-        response.insert(QStringLiteral("text"), m_editor->property("text").toString());
-        sendResponse(socket, response, startedNs, requestId);
-    } else if (command == QStringLiteral("testInputMethodCommit")) {
-        QInputMethodEvent inputEvent;
-        inputEvent.setCommitString(request.value(QStringLiteral("text")).toString());
-        const bool accepted = QCoreApplication::sendEvent(m_editor, &inputEvent);
-        QPointer<QLocalSocket> guardedSocket = socket;
-        QTimer::singleShot(0, this, [this, guardedSocket, accepted, startedNs, requestId,
-                                     command] {
             QJsonObject response = statusObject();
-            response.insert(QStringLiteral("command"), command);
+            response.insert(QStringLiteral("command"), r.command);
+            response.insert(QStringLiteral("eventsAccepted"), eventsAccepted);
+            response.insert(QStringLiteral("moved"),
+                            m_editor->property("text").toString() != before);
+            response.insert(QStringLiteral("text"), m_editor->property("text").toString());
+            sendResponse(r.socket, response, r.startedNs, r.requestId);
+        }}},
+        {QStringLiteral("testTripleClick"), {Gate::Test, [this](const DispatchRequest &r) {
+            // 合成 Press → DblClick → Press 序列模拟三击：时间戳统一为 0 使第三次
+            // Press 落在双击间隔内，坐标相同满足拖拽距离限制，交给 QML TextEdit
+            // 原生逻辑选中整行。开始时重置多重点击状态，避免与放行逻辑互相干扰。
+            m_lastMouseClickElapsedMs = -1;
+            m_multiClickPress = false;
+            const int position = r.request.value(QStringLiteral("position")).toInt();
+            QRectF clickRectangle;
+            const bool clickLocated = QMetaObject::invokeMethod(
+                m_editor, "positionToRectangle", Qt::DirectConnection,
+                Q_RETURN_ARG(QRectF, clickRectangle), Q_ARG(int, position));
+            QJsonObject response = statusObject();
+            bool eventsAccepted = false;
+            if (clickLocated) {
+                if (auto *item = qobject_cast<QQuickItem *>(m_editor.data())) {
+                    const QPointF local = clickRectangle.center();
+                    const QPointF scene = item->mapToScene(local);
+                    const QPointF global = item->mapToGlobal(local);
+                    QMouseEvent pressEvent(QEvent::MouseButtonPress, scene, scene,
+                                           global, Qt::LeftButton, Qt::LeftButton,
+                                           Qt::NoModifier);
+                    QMouseEvent doubleClickEvent(QEvent::MouseButtonDblClick, local, scene,
+                                                 global, Qt::LeftButton, Qt::LeftButton,
+                                                 Qt::NoModifier);
+                    QMouseEvent thirdPressEvent(QEvent::MouseButtonPress, scene, scene,
+                                                global, Qt::LeftButton, Qt::LeftButton,
+                                                Qt::NoModifier);
+                    QMouseEvent releaseEvent(QEvent::MouseButtonRelease, scene, scene,
+                                             global, Qt::LeftButton, Qt::NoButton,
+                                             Qt::NoModifier);
+                    pressEvent.setTimestamp(0);
+                    doubleClickEvent.setTimestamp(0);
+                    thirdPressEvent.setTimestamp(0);
+                    releaseEvent.setTimestamp(0);
+                    const bool pressAccepted = QCoreApplication::sendEvent(m_window,
+                                                                           &pressEvent);
+                    // 隔离测试的窗口隐藏启动，Qt 6 的 MouseButtonDblClick 属于“更新
+                    // 事件”，只投递给已有独占抓取者，而隐藏窗口下 Press 不会建立抓取。
+                    // 因此把 DblClick 直接投递给编辑器 item（与 testKeyPress 同类），
+                    // 让控件进入“双击”状态；第三次 Press 仍走完整窗口投递路径，用于
+                    // 回归验证多重点击放行逻辑。
+                    const bool doubleClickAccepted = QCoreApplication::sendEvent(
+                        m_editor, &doubleClickEvent);
+                    const bool thirdPressAccepted = QCoreApplication::sendEvent(
+                        m_window, &thirdPressEvent);
+                    const bool releaseAccepted = QCoreApplication::sendEvent(
+                        m_window, &releaseEvent);
+                    eventsAccepted = pressAccepted && doubleClickAccepted
+                        && thirdPressAccepted && releaseAccepted;
+                    item->ungrabMouse();
+                }
+            }
+            response.insert(QStringLiteral("command"), r.command);
+            response.insert(QStringLiteral("eventsAccepted"), eventsAccepted);
+            response.insert(QStringLiteral("selectionStart"),
+                            m_editor->property("selectionStart").toInt());
+            response.insert(QStringLiteral("selectionEnd"),
+                            m_editor->property("selectionEnd").toInt());
+            response.insert(QStringLiteral("text"), m_editor->property("text").toString());
+            sendResponse(r.socket, response, r.startedNs, r.requestId);
+        }}},
+        {QStringLiteral("testUndo"), {Gate::Test, [this](const DispatchRequest &r) {
+            const bool invoked = QMetaObject::invokeMethod(m_editor, "undo");
+            QJsonObject response = statusObject();
+            response.insert(QStringLiteral("command"), r.command);
+            response.insert(QStringLiteral("invoked"), invoked);
+            response.insert(QStringLiteral("text"), m_editor->property("text").toString());
+            sendResponse(r.socket, response, r.startedNs, r.requestId);
+        }}},
+        {QStringLiteral("testRedo"), {Gate::Test, [this](const DispatchRequest &r) {
+            const bool invoked = QMetaObject::invokeMethod(m_editor, "redo");
+            QJsonObject response = statusObject();
+            response.insert(QStringLiteral("command"), r.command);
+            response.insert(QStringLiteral("invoked"), invoked);
+            response.insert(QStringLiteral("text"), m_editor->property("text").toString());
+            sendResponse(r.socket, response, r.startedNs, r.requestId);
+        }}},
+        {QStringLiteral("testKeyPress"), {Gate::Test, [this](const DispatchRequest &r) {
+            const QString text = r.request.value(QStringLiteral("text")).toString();
+            const QString keyName = r.request.value(QStringLiteral("key")).toString();
+            const bool shift = r.request.value(QStringLiteral("shift")).toBool();
+            const QString modifierText = r.request.value(QStringLiteral("modifiers")).toString();
+            int key = Qt::Key_unknown;
+            if (keyName == QStringLiteral("Tab")) {
+                key = shift ? Qt::Key_Backtab : Qt::Key_Tab;
+            } else if (keyName == QStringLiteral("Down")) {
+                key = Qt::Key_Down;
+            } else if (keyName == QStringLiteral("Up")) {
+                key = Qt::Key_Up;
+            } else if (keyName == QStringLiteral("Backspace")) {
+                key = Qt::Key_Backspace;
+            } else if (keyName == QStringLiteral("Enter")) {
+                key = Qt::Key_Return;
+            } else if (keyName.size() == 1) {
+                key = keyName.front().unicode();
+            } else if (!text.isEmpty()) {
+                key = text.front().unicode();
+            }
+            Qt::KeyboardModifiers modifiers = shift ? Qt::ShiftModifier
+                                                    : Qt::NoModifier;
+            const QStringList modifierParts = modifierText.split(
+                QLatin1Char('+'), Qt::SkipEmptyParts);
+            for (const QString &part : modifierParts) {
+                if (part == QStringLiteral("ctrl")) {
+                    modifiers |= Qt::ControlModifier;
+                } else if (part == QStringLiteral("shift")) {
+                    modifiers |= Qt::ShiftModifier;
+                } else if (part == QStringLiteral("alt")) {
+                    modifiers |= Qt::AltModifier;
+                } else if (part == QStringLiteral("meta")) {
+                    modifiers |= Qt::MetaModifier;
+                }
+            }
+            QKeyEvent keyEvent(QEvent::KeyPress, key, modifiers, text);
+            const bool accepted = QCoreApplication::sendEvent(m_editor, &keyEvent);
+            QJsonObject response = statusObject();
+            response.insert(QStringLiteral("command"), r.command);
             response.insert(QStringLiteral("accepted"), accepted);
             response.insert(QStringLiteral("text"), m_editor->property("text").toString());
-            sendResponse(guardedSocket, response, startedNs, requestId);
-        });
-    } else if (command == QStringLiteral("testExecuteCommand")) {
-        const QString commandId = request.value(QStringLiteral("commandId")).toString();
-        const bool executed = executeCommand(commandId);
-        QJsonObject response = statusObject();
-        response.insert(QStringLiteral("command"), command);
-        response.insert(QStringLiteral("commandId"), commandId);
-        response.insert(QStringLiteral("executed"), executed);
-        response.insert(QStringLiteral("text"), m_editor->property("text").toString());
-        sendResponse(socket, response, startedNs, requestId);
-    } else if (command == QStringLiteral("testFindNext")) {
-        const bool found = findNext(request.value(QStringLiteral("query")).toString(),
-                                    request.value(QStringLiteral("caseSensitive")).toBool(),
-                                    request.value(QStringLiteral("backwards")).toBool());
-        QJsonObject response = statusObject();
-        response.insert(QStringLiteral("command"), command);
-        response.insert(QStringLiteral("found"), found);
-        sendResponse(socket, response, startedNs, requestId);
-    } else if (command == QStringLiteral("testReplaceCurrent")) {
-        const bool replaced = replaceCurrent(
-            request.value(QStringLiteral("query")).toString(),
-            request.value(QStringLiteral("replacement")).toString(),
-            request.value(QStringLiteral("caseSensitive")).toBool());
-        QJsonObject response = statusObject();
-        response.insert(QStringLiteral("command"), command);
-        response.insert(QStringLiteral("replaced"), replaced);
-        response.insert(QStringLiteral("text"), m_editor->property("text").toString());
-        sendResponse(socket, response, startedNs, requestId);
-    } else if (command == QStringLiteral("testReplaceAll")) {
-        const int count = replaceAll(request.value(QStringLiteral("query")).toString(),
-                                     request.value(QStringLiteral("replacement")).toString(),
-                                     request.value(QStringLiteral("caseSensitive")).toBool());
-        QJsonObject response = statusObject();
-        response.insert(QStringLiteral("command"), command);
-        response.insert(QStringLiteral("replacementCount"), count);
-        response.insert(QStringLiteral("text"), m_editor->property("text").toString());
-        sendResponse(socket, response, startedNs, requestId);
-    } else if (command == QStringLiteral("testSetShortcut")) {
-        const QString commandId = request.value(QStringLiteral("commandId")).toString();
-        const QString sequence = request.value(QStringLiteral("sequence")).toString();
-        const bool configured = setShortcut(commandId, sequence);
-        QJsonObject response = statusObject();
-        response.insert(QStringLiteral("command"), command);
-        response.insert(QStringLiteral("configured"), configured);
-        response.insert(QStringLiteral("commandId"), commandId);
-        response.insert(QStringLiteral("shortcut"), shortcutFor(commandId));
-        sendResponse(socket, response, startedNs, requestId);
-    } else if (command == QStringLiteral("testShortcut")) {
-        const QString commandId = request.value(QStringLiteral("commandId")).toString();
-        QJsonObject response = statusObject();
-        response.insert(QStringLiteral("command"), command);
-        response.insert(QStringLiteral("commandId"), commandId);
-        response.insert(QStringLiteral("shortcut"), shortcutFor(commandId));
-        sendResponse(socket, response, startedNs, requestId);
-    } else if (command == QStringLiteral("testHighlightSummary")) {
-        int blocks = 0;
-        int formattedRanges = 0;
-        int fencedBlocks = 0;
-        if (auto *quickDocument = qvariant_cast<QQuickTextDocument *>(
-                m_editor->property("textDocument"))) {
-            for (QTextBlock block = quickDocument->textDocument()->begin();
-                 block.isValid(); block = block.next()) {
-                ++blocks;
-                if (block.layout()) {
-                    formattedRanges += block.layout()->formats().size();
-                }
-                if (block.userState() == 1) {
-                    ++fencedBlocks;
-                }
-            }
-        }
-        QJsonObject response = statusObject();
-        response.insert(QStringLiteral("command"), command);
-        response.insert(QStringLiteral("blocks"), blocks);
-        response.insert(QStringLiteral("formattedRanges"), formattedRanges);
-        response.insert(QStringLiteral("fencedBlocks"), fencedBlocks);
-        sendResponse(socket, response, startedNs, requestId);
-    } else if (command == QStringLiteral("testFormatAt")) {
-        const int position = request.value(QStringLiteral("position")).toInt();
-        QJsonObject response = statusObject();
-        response.insert(QStringLiteral("command"), command);
-        if (auto *quickDocument = qvariant_cast<QQuickTextDocument *>(
-                m_editor->property("textDocument"))) {
-            const QTextBlock block = quickDocument->textDocument()->findBlock(position);
-            const int positionInBlock = position - block.position();
-            if (block.isValid() && block.layout()) {
-                for (const QTextLayout::FormatRange &range : block.layout()->formats()) {
-                    if (positionInBlock < range.start
-                        || positionInBlock >= range.start + range.length) {
-                        continue;
+            sendResponse(r.socket, response, r.startedNs, r.requestId);
+        }}},
+        {QStringLiteral("testInputMethodCommit"), {Gate::Test, [this](const DispatchRequest &r) {
+            QInputMethodEvent inputEvent;
+            inputEvent.setCommitString(r.request.value(QStringLiteral("text")).toString());
+            const bool accepted = QCoreApplication::sendEvent(m_editor, &inputEvent);
+            QPointer<QLocalSocket> guardedSocket = r.socket;
+            QTimer::singleShot(0, this, [this, guardedSocket, accepted, r] {
+                QJsonObject response = statusObject();
+                response.insert(QStringLiteral("command"), r.command);
+                response.insert(QStringLiteral("accepted"), accepted);
+                response.insert(QStringLiteral("text"), m_editor->property("text").toString());
+                sendResponse(guardedSocket, response, r.startedNs, r.requestId);
+            });
+        }}},
+        {QStringLiteral("testExecuteCommand"), {Gate::Test, [this](const DispatchRequest &r) {
+            const QString commandId = r.request.value(QStringLiteral("commandId")).toString();
+            const bool executed = executeCommand(commandId);
+            QJsonObject response = statusObject();
+            response.insert(QStringLiteral("command"), r.command);
+            response.insert(QStringLiteral("commandId"), commandId);
+            response.insert(QStringLiteral("executed"), executed);
+            response.insert(QStringLiteral("text"), m_editor->property("text").toString());
+            sendResponse(r.socket, response, r.startedNs, r.requestId);
+        }}},
+        {QStringLiteral("testFindNext"), {Gate::Test, [this](const DispatchRequest &r) {
+            const bool found = findNext(r.request.value(QStringLiteral("query")).toString(),
+                                        r.request.value(QStringLiteral("caseSensitive")).toBool(),
+                                        r.request.value(QStringLiteral("backwards")).toBool());
+            QJsonObject response = statusObject();
+            response.insert(QStringLiteral("command"), r.command);
+            response.insert(QStringLiteral("found"), found);
+            sendResponse(r.socket, response, r.startedNs, r.requestId);
+        }}},
+        {QStringLiteral("testReplaceCurrent"), {Gate::Test, [this](const DispatchRequest &r) {
+            const bool replaced = replaceCurrent(
+                r.request.value(QStringLiteral("query")).toString(),
+                r.request.value(QStringLiteral("replacement")).toString(),
+                r.request.value(QStringLiteral("caseSensitive")).toBool());
+            QJsonObject response = statusObject();
+            response.insert(QStringLiteral("command"), r.command);
+            response.insert(QStringLiteral("replaced"), replaced);
+            response.insert(QStringLiteral("text"), m_editor->property("text").toString());
+            sendResponse(r.socket, response, r.startedNs, r.requestId);
+        }}},
+        {QStringLiteral("testReplaceAll"), {Gate::Test, [this](const DispatchRequest &r) {
+            const int count = replaceAll(r.request.value(QStringLiteral("query")).toString(),
+                                         r.request.value(QStringLiteral("replacement")).toString(),
+                                         r.request.value(QStringLiteral("caseSensitive")).toBool());
+            QJsonObject response = statusObject();
+            response.insert(QStringLiteral("command"), r.command);
+            response.insert(QStringLiteral("replacementCount"), count);
+            response.insert(QStringLiteral("text"), m_editor->property("text").toString());
+            sendResponse(r.socket, response, r.startedNs, r.requestId);
+        }}},
+        {QStringLiteral("testSetShortcut"), {Gate::Test, [this](const DispatchRequest &r) {
+            const QString commandId = r.request.value(QStringLiteral("commandId")).toString();
+            const QString sequence = r.request.value(QStringLiteral("sequence")).toString();
+            const bool configured = setShortcut(commandId, sequence);
+            QJsonObject response = statusObject();
+            response.insert(QStringLiteral("command"), r.command);
+            response.insert(QStringLiteral("configured"), configured);
+            response.insert(QStringLiteral("commandId"), commandId);
+            response.insert(QStringLiteral("shortcut"), shortcutFor(commandId));
+            sendResponse(r.socket, response, r.startedNs, r.requestId);
+        }}},
+        {QStringLiteral("testShortcut"), {Gate::Test, [this](const DispatchRequest &r) {
+            const QString commandId = r.request.value(QStringLiteral("commandId")).toString();
+            QJsonObject response = statusObject();
+            response.insert(QStringLiteral("command"), r.command);
+            response.insert(QStringLiteral("commandId"), commandId);
+            response.insert(QStringLiteral("shortcut"), shortcutFor(commandId));
+            sendResponse(r.socket, response, r.startedNs, r.requestId);
+        }}},
+        {QStringLiteral("testHighlightSummary"), {Gate::Test, [this](const DispatchRequest &r) {
+            int blocks = 0;
+            int formattedRanges = 0;
+            int fencedBlocks = 0;
+            if (auto *quickDocument = qvariant_cast<QQuickTextDocument *>(
+                    m_editor->property("textDocument"))) {
+                for (QTextBlock block = quickDocument->textDocument()->begin();
+                     block.isValid(); block = block.next()) {
+                    ++blocks;
+                    if (block.layout()) {
+                        formattedRanges += block.layout()->formats().size();
                     }
-                    const QTextCharFormat &format = range.format;
-                    response.insert(QStringLiteral("formatted"), true);
-                    response.insert(QStringLiteral("foreground"),
-                                    format.foreground().color().name(QColor::HexRgb));
-                    response.insert(QStringLiteral("background"),
-                                    format.background().color().name(QColor::HexRgb));
-                    response.insert(QStringLiteral("bold"),
-                                    format.fontWeight() >= QFont::Bold);
-                    response.insert(QStringLiteral("italic"), format.fontItalic());
-                    response.insert(QStringLiteral("strikeThrough"),
-                                    format.fontStrikeOut());
-                    response.insert(QStringLiteral("underline"), format.fontUnderline());
-                    break;
+                    if (block.userState() == 1) {
+                        ++fencedBlocks;
+                    }
                 }
             }
-        }
-        sendResponse(socket, response, startedNs, requestId);
-    } else if (command == QStringLiteral("testCloseOverlays")) {
-        const bool paletteClosed = QMetaObject::invokeMethod(m_window, "closeCommandPalette");
-        const bool findClosed = QMetaObject::invokeMethod(m_window, "hideFindPanel");
-        const bool settingsClosed = QMetaObject::invokeMethod(m_window, "closeSettings");
-        QJsonObject response = statusObject();
-        response.insert(QStringLiteral("command"), command);
-        response.insert(QStringLiteral("paletteClosed"), paletteClosed);
-        response.insert(QStringLiteral("findClosed"), findClosed);
-        response.insert(QStringLiteral("settingsClosed"), settingsClosed);
-        sendResponse(socket, response, startedNs, requestId);
-    } else if (command == QStringLiteral("testDiscardClose")) {
-        discardAndHide();
-        QJsonObject response = statusObject();
-        response.insert(QStringLiteral("command"), command);
-        sendResponse(socket, response, startedNs, requestId);
-    } else if (command == QStringLiteral("testResetShortcuts")) {
-        resetShortcuts();
-        QJsonObject response = statusObject();
-        response.insert(QStringLiteral("command"), command);
-        response.insert(QStringLiteral("boldShortcut"), shortcutFor(QStringLiteral("toggleBold")));
-        sendResponse(socket, response, startedNs, requestId);
-    } else if (command == QStringLiteral("testApplyAppearance")) {
-        const bool applied = applyAppearance(
-            request.value(QStringLiteral("theme")).toString(),
-            request.value(QStringLiteral("fontFamily")).toString(),
-            request.value(QStringLiteral("fontPointSize")).toInt(),
-            request.value(QStringLiteral("animationsEnabled")).toBool());
-        QJsonObject response = statusObject();
-        response.insert(QStringLiteral("command"), command);
-        response.insert(QStringLiteral("applied"), applied);
-        sendResponse(socket, response, startedNs, requestId);
-    } else if (command == QStringLiteral("testResetAppearance")) {
-        resetAppearance();
-        QJsonObject response = statusObject();
-        response.insert(QStringLiteral("command"), command);
-        sendResponse(socket, response, startedNs, requestId);
-    } else if (command == QStringLiteral("testApplyStatusPanelSettings")) {
-        const bool applied = applyStatusPanelSettings(
-            request.value(QStringLiteral("fontSize")).toInt(),
-            request.value(QStringLiteral("showDelayMs")).toInt(),
-            request.value(QStringLiteral("hideDelayMs")).toInt(),
-            request.value(QStringLiteral("maxWidth")).toInt());
-        QJsonObject response = statusObject();
-        response.insert(QStringLiteral("command"), command);
-        response.insert(QStringLiteral("applied"), applied);
-        sendResponse(socket, response, startedNs, requestId);
-    } else if (command == QStringLiteral("testResetStatusPanelSettings")) {
-        resetStatusPanelSettings();
-        QJsonObject response = statusObject();
-        response.insert(QStringLiteral("command"), command);
-        sendResponse(socket, response, startedNs, requestId);
-    } else if (command == QStringLiteral("testConfigKeys")) {
-        QJsonObject response = statusObject();
-        response.insert(QStringLiteral("command"), command);
-        response.insert(QStringLiteral("keys"),
-                        QJsonArray::fromStringList(m_settings ? m_settings->allKeys()
-                                                             : QStringList{}));
-        sendResponse(socket, response, startedNs, requestId);
-    } else if (command == QStringLiteral("testSetGeometry")) {
-        const QRect requested(request.value(QStringLiteral("x")).toInt(),
-                              request.value(QStringLiteral("y")).toInt(),
-                              request.value(QStringLiteral("width")).toInt(),
-                              request.value(QStringLiteral("height")).toInt());
-        m_window->setGeometry(validatedWindowGeometry(requested));
-        m_windowRestingGeometry = m_window->geometry();
-        m_positioned = true;
-        QJsonObject response = statusObject();
-        response.insert(QStringLiteral("command"), command);
-        sendResponse(socket, response, startedNs, requestId);
-    } else if (command == QStringLiteral("testResetSettings")) {
-        m_settings->resetAll();
-        resetShortcuts();
-        reloadAppearance();
-        m_windowRestingGeometry = {};
-        m_positioned = false;
-        QJsonObject response = statusObject();
-        response.insert(QStringLiteral("command"), command);
-        sendResponse(socket, response, startedNs, requestId);
-    } else {
-        sendError(socket, command, QStringLiteral("unsupported test command"), startedNs, requestId);
-    }
+            QJsonObject response = statusObject();
+            response.insert(QStringLiteral("command"), r.command);
+            response.insert(QStringLiteral("blocks"), blocks);
+            response.insert(QStringLiteral("formattedRanges"), formattedRanges);
+            response.insert(QStringLiteral("fencedBlocks"), fencedBlocks);
+            sendResponse(r.socket, response, r.startedNs, r.requestId);
+        }}},
+        {QStringLiteral("testFormatAt"), {Gate::Test, [this](const DispatchRequest &r) {
+            const int position = r.request.value(QStringLiteral("position")).toInt();
+            QJsonObject response = statusObject();
+            response.insert(QStringLiteral("command"), r.command);
+            if (auto *quickDocument = qvariant_cast<QQuickTextDocument *>(
+                    m_editor->property("textDocument"))) {
+                const QTextBlock block = quickDocument->textDocument()->findBlock(position);
+                const int positionInBlock = position - block.position();
+                if (block.isValid() && block.layout()) {
+                    for (const QTextLayout::FormatRange &range : block.layout()->formats()) {
+                        if (positionInBlock < range.start
+                            || positionInBlock >= range.start + range.length) {
+                            continue;
+                        }
+                        const QTextCharFormat &format = range.format;
+                        response.insert(QStringLiteral("formatted"), true);
+                        response.insert(QStringLiteral("foreground"),
+                                        format.foreground().color().name(QColor::HexRgb));
+                        response.insert(QStringLiteral("background"),
+                                        format.background().color().name(QColor::HexRgb));
+                        response.insert(QStringLiteral("bold"),
+                                        format.fontWeight() >= QFont::Bold);
+                        response.insert(QStringLiteral("italic"), format.fontItalic());
+                        response.insert(QStringLiteral("strikeThrough"),
+                                        format.fontStrikeOut());
+                        response.insert(QStringLiteral("underline"), format.fontUnderline());
+                        break;
+                    }
+                }
+            }
+            sendResponse(r.socket, response, r.startedNs, r.requestId);
+        }}},
+        {QStringLiteral("testCloseOverlays"), {Gate::Test, [this](const DispatchRequest &r) {
+            const bool paletteClosed = QMetaObject::invokeMethod(m_window, "closeCommandPalette");
+            const bool findClosed = QMetaObject::invokeMethod(m_window, "hideFindPanel");
+            const bool settingsClosed = QMetaObject::invokeMethod(m_window, "closeSettings");
+            QJsonObject response = statusObject();
+            response.insert(QStringLiteral("command"), r.command);
+            response.insert(QStringLiteral("paletteClosed"), paletteClosed);
+            response.insert(QStringLiteral("findClosed"), findClosed);
+            response.insert(QStringLiteral("settingsClosed"), settingsClosed);
+            sendResponse(r.socket, response, r.startedNs, r.requestId);
+        }}},
+        {QStringLiteral("testDiscardClose"), {Gate::Test, [this](const DispatchRequest &r) {
+            discardAndHide();
+            QJsonObject response = statusObject();
+            response.insert(QStringLiteral("command"), r.command);
+            sendResponse(r.socket, response, r.startedNs, r.requestId);
+        }}},
+        {QStringLiteral("testResetShortcuts"), {Gate::Test, [this](const DispatchRequest &r) {
+            resetShortcuts();
+            QJsonObject response = statusObject();
+            response.insert(QStringLiteral("command"), r.command);
+            response.insert(QStringLiteral("boldShortcut"), shortcutFor(QStringLiteral("toggleBold")));
+            sendResponse(r.socket, response, r.startedNs, r.requestId);
+        }}},
+        {QStringLiteral("testApplyAppearance"), {Gate::Test, [this](const DispatchRequest &r) {
+            const bool applied = applyAppearance(
+                r.request.value(QStringLiteral("theme")).toString(),
+                r.request.value(QStringLiteral("fontFamily")).toString(),
+                r.request.value(QStringLiteral("fontPointSize")).toInt(),
+                r.request.value(QStringLiteral("animationsEnabled")).toBool());
+            QJsonObject response = statusObject();
+            response.insert(QStringLiteral("command"), r.command);
+            response.insert(QStringLiteral("applied"), applied);
+            sendResponse(r.socket, response, r.startedNs, r.requestId);
+        }}},
+        {QStringLiteral("testResetAppearance"), {Gate::Test, [this](const DispatchRequest &r) {
+            resetAppearance();
+            QJsonObject response = statusObject();
+            response.insert(QStringLiteral("command"), r.command);
+            sendResponse(r.socket, response, r.startedNs, r.requestId);
+        }}},
+        {QStringLiteral("testApplyStatusPanelSettings"), {Gate::Test, [this](const DispatchRequest &r) {
+            const bool applied = applyStatusPanelSettings(
+                r.request.value(QStringLiteral("fontSize")).toInt(),
+                r.request.value(QStringLiteral("showDelayMs")).toInt(),
+                r.request.value(QStringLiteral("hideDelayMs")).toInt(),
+                r.request.value(QStringLiteral("maxWidth")).toInt());
+            QJsonObject response = statusObject();
+            response.insert(QStringLiteral("command"), r.command);
+            response.insert(QStringLiteral("applied"), applied);
+            sendResponse(r.socket, response, r.startedNs, r.requestId);
+        }}},
+        {QStringLiteral("testResetStatusPanelSettings"), {Gate::Test, [this](const DispatchRequest &r) {
+            resetStatusPanelSettings();
+            QJsonObject response = statusObject();
+            response.insert(QStringLiteral("command"), r.command);
+            sendResponse(r.socket, response, r.startedNs, r.requestId);
+        }}},
+        {QStringLiteral("testConfigKeys"), {Gate::Test, [this](const DispatchRequest &r) {
+            QJsonObject response = statusObject();
+            response.insert(QStringLiteral("command"), r.command);
+            response.insert(QStringLiteral("keys"),
+                            QJsonArray::fromStringList(m_settings ? m_settings->allKeys()
+                                                                 : QStringList{}));
+            sendResponse(r.socket, response, r.startedNs, r.requestId);
+        }}},
+        {QStringLiteral("testSetGeometry"), {Gate::Test, [this](const DispatchRequest &r) {
+            const QRect requested(r.request.value(QStringLiteral("x")).toInt(),
+                                  r.request.value(QStringLiteral("y")).toInt(),
+                                  r.request.value(QStringLiteral("width")).toInt(),
+                                  r.request.value(QStringLiteral("height")).toInt());
+            m_window->setGeometry(validatedWindowGeometry(requested));
+            m_windowRestingGeometry = m_window->geometry();
+            m_positioned = true;
+            QJsonObject response = statusObject();
+            response.insert(QStringLiteral("command"), r.command);
+            sendResponse(r.socket, response, r.startedNs, r.requestId);
+        }}},
+        {QStringLiteral("testResetSettings"), {Gate::Test, [this](const DispatchRequest &r) {
+            m_settings->resetAll();
+            resetShortcuts();
+            reloadAppearance();
+            m_windowRestingGeometry = {};
+            m_positioned = false;
+            QJsonObject response = statusObject();
+            response.insert(QStringLiteral("command"), r.command);
+            sendResponse(r.socket, response, r.startedNs, r.requestId);
+        }}},
+    };
 }
 
 void EditorController::sendResponse(QLocalSocket *socket, QJsonObject response, qint64 startedNs,

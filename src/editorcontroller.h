@@ -17,6 +17,7 @@
 #include <QVariantList>
 #include <QVector>
 
+#include <functional>
 #include <memory>
 
 class QLocalSocket;
@@ -164,9 +165,29 @@ private:
         QString requestId;
     };
 
+    struct DispatchRequest {
+        QLocalSocket *socket = nullptr;
+        QJsonObject request;
+        QString command;
+        QString requestId;
+        bool noReply = false;
+        qint64 startedNs = 0;
+    };
+
+    struct CommandEntry {
+        enum class Gate {
+            PreReady,
+            Ready,
+            Test,
+        };
+        Gate gate = Gate::Test;
+        std::function<void(const DispatchRequest &)> handler;
+    };
+
     void acceptConnections();
     void readSocket(QLocalSocket *socket);
     void dispatchCommand(QLocalSocket *socket, const QJsonObject &request, qint64 startedNs);
+    void buildCommandHandlers();
     void sendResponse(QLocalSocket *socket, QJsonObject response, qint64 startedNs,
                       const QString &requestId = {});
     void sendError(QLocalSocket *socket, const QString &command, const QString &message,
@@ -214,6 +235,7 @@ private:
 
     QLocalServer m_server;
     QHash<QLocalSocket *, QByteArray> m_buffers;
+    QHash<QString, CommandEntry> m_commandHandlers;
     QPointer<QQuickWindow> m_window;
     QPointer<QObject> m_editor;
     std::unique_ptr<AppSettings> m_settings;
