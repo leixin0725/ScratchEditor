@@ -1702,6 +1702,48 @@ int main(int argc, char *argv[])
     cjkExpect(checks, details, QStringLiteral("cjkKeyChainPeriod"),
               QStringLiteral("中文。"), 3, 3, QStringLiteral("key ."),
               keyAction(QStringLiteral(".")), QStringLiteral("中文。。"), 4);
+    cjkExpect(checks, details, QStringLiteral("cjkKeyChainColon"),
+              QStringLiteral("中文："), 3, 3, QStringLiteral("key :"),
+              keyAction(QStringLiteral(":")), QStringLiteral("中文：："), 4);
+    cjkExpect(checks, details, QStringLiteral("cjkKeyChainSemicolon"),
+              QStringLiteral("中文；"), 3, 3, QStringLiteral("key ;"),
+              keyAction(QStringLiteral(";")), QStringLiteral("中文；；"), 4);
+    cjkExpect(checks, details, QStringLiteral("cjkKeyChainQuestion"),
+              QStringLiteral("中文？"), 3, 3, QStringLiteral("key ?"),
+              keyAction(QStringLiteral("?")), QStringLiteral("中文？？"), 4);
+    cjkExpect(checks, details, QStringLiteral("cjkKeyChainExclaim"),
+              QStringLiteral("中文！"), 3, 3, QStringLiteral("key !"),
+              keyAction(QStringLiteral("!")), QStringLiteral("中文！！"), 4);
+    cjkExpect(checks, details, QStringLiteral("cjkKeyChainAsciiPrevNegative"),
+              QStringLiteral("a:"), 2, 2, QStringLiteral("key : after ASCII"),
+              keyAction(QStringLiteral(":")), QStringLiteral("a::"), 3);
+    cjkExpect(checks, details, QStringLiteral("cjkKeyCrossColonAfterQuestion"),
+              QStringLiteral("中文？"), 3, 3, QStringLiteral("key : after ？"),
+              keyAction(QStringLiteral(":")), QStringLiteral("中文？："), 4);
+    cjkExpect(checks, details, QStringLiteral("cjkKeyCrossCommaAfterColon"),
+              QStringLiteral("中文："), 3, 3, QStringLiteral("key , after ："),
+              keyAction(QStringLiteral(",")), QStringLiteral("中文：，"), 4);
+    cjkExpect(checks, details, QStringLiteral("cjkKeyCrossQuestionAfterPeriod"),
+              QStringLiteral("中文。"), 3, 3, QStringLiteral("key ? after 。"),
+              keyAction(QStringLiteral("?")), QStringLiteral("中文。？"), 4);
+    cjkExpect(checks, details, QStringLiteral("cjkKeyCrossExclaimAfterSemi"),
+              QStringLiteral("中文；"), 3, 3, QStringLiteral("key ! after ；"),
+              keyAction(QStringLiteral("!")), QStringLiteral("中文；！"), 4);
+    cjkExpect(checks, details, QStringLiteral("cjkKeyCrossPeriodAfterExclaim"),
+              QStringLiteral("中文！"), 3, 3, QStringLiteral("key . after ！"),
+              keyAction(QStringLiteral(".")), QStringLiteral("中文！。"), 4);
+    cjkExpect(checks, details, QStringLiteral("cjkKeyCrossCloseParen"),
+              QStringLiteral("中文？"), 3, 3, QStringLiteral("key ) after ？"),
+              keyAction(QStringLiteral(")")), QStringLiteral("中文？）"), 4);
+    cjkExpect(checks, details, QStringLiteral("cjkKeyCrossCloseParenSkip"),
+              QStringLiteral("中文？）"), 3, 3, QStringLiteral("key ) skips existing ）"),
+              keyAction(QStringLiteral(")")), QStringLiteral("中文？）"), 4);
+    cjkExpect(checks, details, QStringLiteral("cjkKeyCrossOpenParenPair"),
+              QStringLiteral("中文？"), 3, 3, QStringLiteral("key ( after ？"),
+              keyAction(QStringLiteral("(")), QStringLiteral("中文？（）"), 4);
+    cjkExpect(checks, details, QStringLiteral("cjkKeyCrossOpenBracketPair"),
+              QStringLiteral("中文？"), 3, 3, QStringLiteral("key [ after ？"),
+              keyAction(QStringLiteral("[")), QStringLiteral("中文？【】"), 4);
     cjkExpect(checks, details, QStringLiteral("cjkKeyEllipsisAscii"),
               QStringLiteral("中文.."), 4, 4, QStringLiteral("key ."),
               keyAction(QStringLiteral(".")), QStringLiteral("中文……"), 4);
@@ -1734,6 +1776,9 @@ int main(int argc, char *argv[])
     cjkExpect(checks, details, QStringLiteral("protectKeyInlineQuote"),
               QStringLiteral("`中文`"), 3, 3, QStringLiteral("key \" inside inline code"),
               keyAction(QStringLiteral("\"")), QStringLiteral("`中文\"`"), 4);
+    cjkExpect(checks, details, QStringLiteral("protectKeyChainColon"),
+              QStringLiteral("`中文：`"), 4, 4, QStringLiteral("key : inside inline code"),
+              keyAction(QStringLiteral(":")), QStringLiteral("`中文：:`"), 5);
 
     // --- 行中引号：单开符 + 闭合收尾（MID-QUOTE-001..011） ---
     cjkExpect(checks, details, QStringLiteral("midQuoteAsciiSingleOpen"),
@@ -2524,6 +2569,9 @@ int main(int argc, char *argv[])
     cjkExpect(checks, details, QStringLiteral("imePunctuationNoConvert"),
               QStringLiteral("中文"), 2, 2, QStringLiteral("IME commit ,"),
               imeAction(QStringLiteral(",")), QStringLiteral("中文,"), 3);
+    cjkExpect(checks, details, QStringLiteral("imeChainNotConverted"),
+              QStringLiteral("中文："), 3, 3, QStringLiteral("IME commit : after ："),
+              imeAction(QStringLiteral(":")), QStringLiteral("中文：:"), 4);
 
     // --- CJK Fix: Pure Parser Tests (PARSE-001..019) ---
     using CjkText::ProtectedKind;

@@ -232,6 +232,20 @@ std::optional<MidlineQuotePlan> buildMidlineQuotePlan(const QString &text,
     return plan;
 }
 
+bool isCjkOrFullwidthPunctuationTrigger(const QChar &ch)
+{
+    // 全角 `，。：；？！` 在标点转换规则中视同 CJK 字符。
+    static const QSet<char16_t> fullwidthTriggers = {
+        u'\uFF0C', // ，
+        u'\u3002', // 。
+        u'\uFF1A', // ：
+        u'\uFF1B', // ；
+        u'\uFF1F', // ？
+        u'\uFF01', // ！
+    };
+    return CjkText::isCjk(ch) || fullwidthTriggers.contains(ch.unicode());
+}
+
 std::optional<std::pair<QChar, QChar>> fullwidthQuotesFor(const QChar &opening,
                                                           const QChar &closing)
 {
@@ -2195,8 +2209,8 @@ EditorCommandRegistry::TypedEditResult EditorCommandRegistry::handleTypedText(co
             }
         }
 
-        // 3. ASCII Punctuation after CJK → Fullwidth
-        if (start > 0 && CjkText::isCjk(documentText.at(start - 1))) {
+        // 3. ASCII Punctuation after CJK / fullwidth punctuation → Fullwidth
+        if (start > 0 && isCjkOrFullwidthPunctuationTrigger(documentText.at(start - 1))) {
             if (ch == u'(' || ch == u'[' || ch == u'"' || ch == u'\'') {
                 static const QHash<char16_t, std::pair<QString, QString>> cjkPairs = {
                     {u'(', {QStringLiteral("（"), QStringLiteral("）")}},
@@ -2228,7 +2242,12 @@ EditorCommandRegistry::TypedEditResult EditorCommandRegistry::handleTypedText(co
                 {u')', QStringLiteral("）")},
             };
             auto it = asciiToFull.find(ch.unicode());
-            if (it != asciiToFull.end()) {
+            // 前一个字符是 `。` 且再前一个是 `.` 的混合点序列（如 `.。.`）不转换，
+            // 避免破坏省略号规则。
+            const bool mixedDotSequence = ch == u'.' && start >= 2
+                && documentText.at(start - 1) == u'\u3002'
+                && documentText.at(start - 2) == u'.';
+            if (it != asciiToFull.end() && !mixedDotSequence) {
                 if (ch == u')' && (documentText.mid(start, 1) == QStringLiteral("）")
                                   || documentText.mid(start, 1) == QStringLiteral(")"))) {
                     m_editor->setProperty("cursorPosition", start + 1);
@@ -2238,25 +2257,6 @@ EditorCommandRegistry::TypedEditResult EditorCommandRegistry::handleTypedText(co
                 QTextCursor cursor(m_document);
                 cursor.setPosition(start);
                 cursor.insertText(it.value());
-                m_editor->setProperty("cursorPosition", start + 1);
-                focusEditor();
-                result.consumed = true;
-                result.textChanged = true;
-                return result;
-            }
-        }
-
-        // 4. Chained Fullwidth: ，, → ，，   。. → 。。
-        if (start > 0) {
-            const QChar prev = documentText.at(start - 1);
-            if ((prev == u'\uFF0C' && ch == u',')
-                || (prev == u'\u3002' && ch == u'.'
-                    && (start < 2 || documentText.at(start - 2) != u'.'))) {
-                const QString full =
-                    (ch == u',') ? QStringLiteral("，") : QStringLiteral("。");
-                QTextCursor cursor(m_document);
-                cursor.setPosition(start);
-                cursor.insertText(full);
                 m_editor->setProperty("cursorPosition", start + 1);
                 focusEditor();
                 result.consumed = true;
