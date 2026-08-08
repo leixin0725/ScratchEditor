@@ -6,7 +6,11 @@
 - 分支：`main`
 - 基线提交：`2c7630182a9762d69723cf769fc501dd6ff2442a`（短哈希 `2c76301`）
 - 最终提交：`ac2ed61`（编辑核心重构提交，含本记录的前置版本）
+- 后续补充提交：`e41c667`（第 8 项 视口查找去重）、`91ab5f2`（第 9 项 IPC 命令查表）
 - 验证产物：`artifacts/editing-results-20260808-155200.json`（editing 回归全部通过）
+- 后续补充验证产物：`artifacts/editing-results-20260808-161517.json`、
+  `artifacts/window-ui-results-20260808-161604.json`（第 8、9 项落地后 editing/window-ui
+  回归全部通过）
 
 ## 背景与目标
 
@@ -14,7 +18,7 @@
 成对包裹、引号收尾与行变换逻辑，重复度较高。本次按用户要求做行为等价的复用重构，仅一处
 （键盘/IME 引号收尾）按用户确认统一行为。范围严格限定在编辑命令核心
 （`EditorCommandRegistry` 及其匿名命名空间辅助函数），`CjkText`、`EditorController`、
-`qml/Main.qml` 均未改动。
+`qml/Main.qml` 均未改动（后续第 8、9 项补充改动另涉及 `EditorController`，见下）。
 
 ## 已落地改动
 
@@ -45,15 +49,20 @@
    满足性能章程“每次编辑最多一次全文读取、一次分析”，行为不变。
 7. **复选框状态检测共享**：抽取 `taskCheckboxStatePosition(line)`，
    `toggleCurrentCheckbox` 改用它做状态切换。
+8. **跨文件视口查找去重**：`EditorCommandRegistry::editorViewport()` 改为公开查询，
+   `EditorController::eventFilter` 的窗口级鼠标转发不再内联沿父链嗅探
+   `contentY`/`contentHeight`，直接复用该查询后做视口 `contains` 判定；原“编辑器 item
+   与可滚动祖先视口同时包含坐标”的语义逐分支保持。
+9. **IPC 命令查表**：`EditorController::dispatchCommand`（原约 555 行 if/else 链）改为
+   构造函数内 `buildCommandHandlers()` 构建的 `QHash<QString, CommandEntry>` 查表；
+   `CommandEntry` 携带 PreReady/Ready/Test 门禁，保持 ping/status/getWindowGeometry
+   绕过 ready 门禁、生产命令 ready 门禁、测试命令 test-mode 门禁以及未知命令错误消息
+   （"QML window is not ready" / "unsupported command" / "unsupported test command"）
+   的原有语义；43 个命令处理体逐字迁移，含 `awaitInputFrame`、`testInputMethodCommit`
+   等异步路径。
 
 ## 未落地 / 后续建议
 
-- **跨文件视口查找去重（第 8 项）**：`EditorController::eventFilter` 的窗口级鼠标转发
-  与 `EditorCommandRegistry::editorViewport()` 都在沿父链查找可滚动视口
-  （`contentY`/`contentHeight`）。合并需跨文件共享 API，超出本次“仅编辑命令核心”
-  范围，建议后续评估为小型静态工具或控制器回调。
-- **`EditorController::dispatchCommand`（约 500+ 行 IPC 分发）**：命令分支密集，
-  可参照本次 `execute()` 查表方式拆分，属独立重构议题。
 - **`qml/Main.qml`（1700+ 行）**：设置页、命令面板、查找面板与主窗口混杂，后续可考虑
   按面板拆分文件；注意产品边界不引入组件库框架。
 - **toggleTask 与 toggleCheckbox 的语义差异**：toggleTask 添加模式会先
@@ -72,3 +81,16 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\run-editing-te
 
 2026-08-08 15:52 的完整 editing 回归（`editing-results-20260808-155200.json`）全部通过，
 包括新增的 IME 引号收尾用例与既有全部编辑行为检查。
+
+第 8、9 项落地后的验证：
+
+```powershell
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\build.ps1 -Preset window-ui -SkipLocalInstall
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\run-window-ui-tests.ps1
+```
+
+editing（`editing-results-20260808-161517.json`）与 window-ui
+（`window-ui-results-20260808-161604.json`）回归均全部通过。生产 IPC 的
+show/hide/toggle、几何持久化与 ready/test 门禁另经隔离 test-mode 实例手工验证通过；
+`ScratchEditorSystemTests.exe` 的焦点/剪贴板检查依赖真实前台窗口，当前会话无前台窗口
+且 release 构建会同步稳定安装副本，故未作为本次验收依据。
