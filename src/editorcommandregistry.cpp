@@ -2094,9 +2094,27 @@ bool EditorCommandRegistry::toggleCurrentCheckbox()
 EditorCommandRegistry::TypedEditResult EditorCommandRegistry::handleTypedText(const QString &text)
 {
     TypedEditResult result;
+    const int start = m_editor->property("selectionStart").toInt();
+    const int end = m_editor->property("selectionEnd").toInt();
+    const bool hasSelection = start != end;
+
     if (text == QStringLiteral("```")) {
+        QString closing = QStringLiteral("\n```");
+        if (!hasSelection) {
+            const QString documentText = m_document->toPlainText();
+            const int lineStart = lineRangeAt(documentText, start).start;
+            // 围栏自动补全仅在列 0 行首触发；行中、行末、带缩进行首保持字面。
+            if (start != lineStart) {
+                return result;
+            }
+            // 光标后本行还有非空白内容时，闭合围栏后补一个换行，
+            // 把后续文字移到闭合围栏下一行，避免闭合边界后紧跟文字。
+            if (hasNonBlankCharacterAfter(documentText, start)) {
+                closing += QLatin1Char('\n');
+            }
+        }
         if (const auto footprint =
-                insertWrapped(QStringLiteral("```"), QStringLiteral("\n```"))) {
+                insertWrapped(QStringLiteral("```"), closing)) {
             result.consumed = true;
             result.textChanged = true;
             result.footprint = *footprint;
@@ -2110,9 +2128,6 @@ EditorCommandRegistry::TypedEditResult EditorCommandRegistry::handleTypedText(co
     }
 
     const QString documentText = m_document->toPlainText();
-    const int start = m_editor->property("selectionStart").toInt();
-    const int end = m_editor->property("selectionEnd").toInt();
-    const bool hasSelection = start != end;
 
     if (text == QStringLiteral("-") && !hasSelection) {
         const LineRange line = lineRangeAt(documentText, start);
@@ -2162,11 +2177,17 @@ EditorCommandRegistry::TypedEditResult EditorCommandRegistry::handleTypedText(co
 
     if (text == QStringLiteral("`") && !hasSelection) {
         if (start >= 2 && start < documentText.size()
-            && documentText.mid(start - 2, 3) == QStringLiteral("```")) {
+            && documentText.mid(start - 2, 3) == QStringLiteral("```")
+            && lineRangeAt(documentText, start - 2).start == start - 2) {
             QTextCursor cursor(m_document);
             cursor.setPosition(start - 2);
             cursor.setPosition(start + 1, QTextCursor::KeepAnchor);
-            cursor.insertText(QStringLiteral("```\n```"));
+            // 光标后本行还有非空白内容时，闭合围栏后补一个换行，
+            // 把后续文字移到闭合围栏下一行，避免闭合边界后紧跟文字。
+            const QString replacement = hasNonBlankCharacterAfter(documentText, start + 1)
+                ? QStringLiteral("```\n```\n")
+                : QStringLiteral("```\n```");
+            cursor.insertText(replacement);
             m_editor->setProperty("cursorPosition", start + 1);
             result.consumed = true;
             result.textChanged = true;
@@ -3132,7 +3153,21 @@ EditorCommandRegistry::completeInputMethodCommit(const QString &committedText,
     QString replacement;
     int contentOffset = 0;
     if (committedText == QStringLiteral("```")) {
-        replacement = QStringLiteral("```") + selection + QStringLiteral("\n```");
+        if (selectionStart == selectionEnd) {
+            const int lineStart = lineRangeAt(beforeText, selectionStart).start;
+            // 围栏自动补全仅在列 0 行首触发；行中、行末、带缩进行首保持字面。
+            if (selectionStart != lineStart) {
+                return std::nullopt;
+            }
+            // 光标后本行还有非空白内容时，闭合围栏后补一个换行，
+            // 把后续文字移到闭合围栏下一行，避免闭合边界后紧跟文字。
+            replacement = QStringLiteral("```") + selection
+                + (hasNonBlankCharacterAfter(beforeText, selectionStart)
+                       ? QStringLiteral("\n```\n")
+                       : QStringLiteral("\n```"));
+        } else {
+            replacement = QStringLiteral("```") + selection + QStringLiteral("\n```");
+        }
         contentOffset = 3;
     } else if (openingPair) {
         const CjkText::DocumentAnalysis analysis =

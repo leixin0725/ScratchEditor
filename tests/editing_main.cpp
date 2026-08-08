@@ -2237,6 +2237,120 @@ int main(int argc, char *argv[])
                  QJsonObject{{QStringLiteral("text"), fenceText}});
     }
     {
+        // 行首围栏自动补全：光标后本行有文字时，闭合围栏必须单独成行，
+        // 后续文字移到闭合围栏下一行，避免闭合边界后紧跟文字
+        // （FENCE-SUFFIX-001..003：键盘三次 / IME / 单次整串）。
+        cjkExpect(checks, details, QStringLiteral("fenceSuffixOwnLineKeyboard"),
+                  QStringLiteral("测试文字"), 0, 0,
+                  QStringLiteral("key ` three times at line start before text"),
+                  [] {
+                      keyPress(QStringLiteral("`"), QStringLiteral("`"));
+                      keyPress(QStringLiteral("`"), QStringLiteral("`"));
+                      return keyPress(QStringLiteral("`"), QStringLiteral("`"));
+                  },
+                  QStringLiteral("```\n```\n测试文字"), 3);
+        cjkExpect(checks, details, QStringLiteral("fenceSuffixOwnLineIme"),
+                  QStringLiteral("测试文字"), 0, 0,
+                  QStringLiteral("IME commit ``` at line start before text"),
+                  [] { return inputMethodCommit(QStringLiteral("```")); },
+                  QStringLiteral("```\n```\n测试文字"), 3);
+        cjkExpect(checks, details, QStringLiteral("fenceSuffixOwnLineSingleEvent"),
+                  QStringLiteral("测试文字"), 0, 0,
+                  QStringLiteral("single key ``` at line start before text"),
+                  [] { return keyPress(QStringLiteral("```"), QStringLiteral("```")); },
+                  QStringLiteral("```\n```\n测试文字"), 3);
+        // 行首围栏自动补全：光标后无文字时不补多余换行（FENCE-EMPTY-001..002）。
+        cjkExpect(checks, details, QStringLiteral("fenceEmptyLineNoExtraNewlineIme"),
+                  QString(), 0, 0,
+                  QStringLiteral("IME commit ``` on empty line"),
+                  [] { return inputMethodCommit(QStringLiteral("```")); },
+                  QStringLiteral("```\n```"), 3);
+        cjkExpect(checks, details, QStringLiteral("fenceNextLineTextStays"),
+                  QStringLiteral("\n测试文字"), 0, 0,
+                  QStringLiteral("key ` three times on empty line above text"),
+                  [] {
+                      keyPress(QStringLiteral("`"), QStringLiteral("`"));
+                      keyPress(QStringLiteral("`"), QStringLiteral("`"));
+                      return keyPress(QStringLiteral("`"), QStringLiteral("`"));
+                  },
+                  QStringLiteral("```\n```\n测试文字"), 3);
+        cjkExpect(checks, details, QStringLiteral("fenceTrailingEmptyLineStays"),
+                  QStringLiteral("测试文字\n"), 5, 5,
+                  QStringLiteral("key ` three times on trailing empty line"),
+                  [] {
+                      keyPress(QStringLiteral("`"), QStringLiteral("`"));
+                      keyPress(QStringLiteral("`"), QStringLiteral("`"));
+                      return keyPress(QStringLiteral("`"), QStringLiteral("`"));
+                  },
+                  QStringLiteral("测试文字\n```\n```"), 8);
+        // 光标后只有空白：空白不算文字，不加换行（FENCE-WHITESPACE-001）。
+        cjkExpect(checks, details, QStringLiteral("fenceWhitespaceSuffixNoNewline"),
+                  QStringLiteral("  "), 0, 0,
+                  QStringLiteral("key ` three times before spaces only"),
+                  [] {
+                      keyPress(QStringLiteral("`"), QStringLiteral("`"));
+                      keyPress(QStringLiteral("`"), QStringLiteral("`"));
+                      return keyPress(QStringLiteral("`"), QStringLiteral("`"));
+                  },
+                  QStringLiteral("```\n```  "), 3);
+        // 仅列 0 行首触发：行中、行末、带缩进行首均不自动补全围栏，
+        // IME 提交保持字面（FENCE-SCOPE-001..003）。
+        cjkExpect(checks, details, QStringLiteral("fenceMidLineNoCompletionIme"),
+                  QStringLiteral("中文字"), 1, 1,
+                  QStringLiteral("IME commit ``` in line middle"),
+                  [] { return inputMethodCommit(QStringLiteral("```")); },
+                  QStringLiteral("中```文字"), 4);
+        cjkExpect(checks, details, QStringLiteral("fenceLineEndNoCompletionIme"),
+                  QStringLiteral("测试文字"), 4, 4,
+                  QStringLiteral("IME commit ``` at line end"),
+                  [] { return inputMethodCommit(QStringLiteral("```")); },
+                  QStringLiteral("测试文字```"), 7);
+        cjkExpect(checks, details, QStringLiteral("fenceIndentedLineStartNoCompletionIme"),
+                  QStringLiteral("  测试文字"), 2, 2,
+                  QStringLiteral("IME commit ``` on indented line start"),
+                  [] { return inputMethodCommit(QStringLiteral("```")); },
+                  QStringLiteral("  ```测试文字"), 5);
+        // 键盘三次单独输入在行中、行末、带缩进行首同样不产生围栏（回归保护）。
+        const auto keyTriple = [] {
+            keyPress(QStringLiteral("`"), QStringLiteral("`"));
+            keyPress(QStringLiteral("`"), QStringLiteral("`"));
+            return keyPress(QStringLiteral("`"), QStringLiteral("`"));
+        };
+        setTextAndSelection(QStringLiteral("中文字"), 1, 1);
+        keyTriple();
+        QThread::msleep(30);
+        const QString midLineText = editorText();
+        setTextAndSelection(QStringLiteral("测试文字"), 4, 4);
+        keyTriple();
+        QThread::msleep(30);
+        const QString lineEndText = editorText();
+        setTextAndSelection(QStringLiteral("  测试文字"), 2, 2);
+        keyTriple();
+        QThread::msleep(30);
+        const QString indentedText = editorText();
+        addCheck(checks, details,
+                 QStringLiteral("fenceNoCompletionOutsideLineStartKeyboard"),
+                 !midLineText.contains(QStringLiteral("\n```"))
+                     && !lineEndText.contains(QStringLiteral("\n```"))
+                     && !indentedText.contains(QStringLiteral("\n```")),
+                 QJsonObject{{QStringLiteral("midLine"), midLineText},
+                             {QStringLiteral("lineEnd"), lineEndText},
+                             {QStringLiteral("indented"), indentedText}});
+        // 行首带字围栏补全后一次撤销恢复原文（FENCE-UNDO-001）。
+        setTextAndSelection(QStringLiteral("测试文字"), 0, 0);
+        inputMethodCommit(QStringLiteral("```"));
+        QThread::msleep(30);
+        request(QStringLiteral("testUndo"));
+        QThread::msleep(30);
+        const QString undoneText = editorText();
+        const int undoneCursor =
+            editorStatus().value(QStringLiteral("cursorPosition")).toInt();
+        addCheck(checks, details, QStringLiteral("fenceSuffixOwnLineImeUndo"),
+                 undoneText == QStringLiteral("测试文字") && undoneCursor == 0,
+                 QJsonObject{{QStringLiteral("undoneText"), undoneText},
+                             {QStringLiteral("undoneCursor"), undoneCursor}});
+    }
+    {
         // 先输后引号、再输前引号也必须与先前后后一样触发两侧自动空格
         // （BT-REVERSE-001..004：键盘/IME × CJK/ASCII，引号全角转换）。
         const auto moveCursor = [](int position) {
