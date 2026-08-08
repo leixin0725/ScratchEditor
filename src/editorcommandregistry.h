@@ -40,6 +40,7 @@ public:
     bool findNext(const QString &query, bool caseSensitive, bool backwards);
     bool replaceCurrent(const QString &query, const QString &replacement, bool caseSensitive);
     int replaceAll(const QString &query, const QString &replacement, bool caseSensitive);
+    QQuickItem *editorViewport() const;
 
 signals:
     void commandsChanged();
@@ -119,7 +120,6 @@ private:
     bool moveSelection(int selectionStart, int selectionEnd, int dropPosition);
     int editorPositionAt(const QPointF &localPosition) const;
     QQuickItem *editorItem() const;
-    QQuickItem *editorViewport() const;
     void beginSelectionDrag(int selectionStart, int selectionEnd,
                             const QPointF &scenePosition);
     void updateSelectionDrag(const QPointF &scenePosition, bool scrollViewport);

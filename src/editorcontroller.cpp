@@ -2959,13 +2959,10 @@ bool EditorController::eventFilter(QObject *watched, QEvent *event)
             const QPointF scenePosition = mouseEvent->position();
             const QPointF editorPosition = item->mapFromScene(scenePosition);
             bool insideViewport = item->contains(editorPosition);
-            for (QQuickItem *candidate = item->parentItem(); insideViewport && candidate;
-                 candidate = candidate->parentItem()) {
-                if (candidate->property("contentY").isValid()
-                    && candidate->property("contentHeight").isValid()) {
-                    insideViewport = candidate->contains(
-                        candidate->mapFromScene(scenePosition));
-                    break;
+            if (insideViewport) {
+                if (QQuickItem *viewport = m_commands->editorViewport()) {
+                    insideViewport = viewport->contains(
+                        viewport->mapFromScene(scenePosition));
                 }
             }
             if ((event->type() != QEvent::MouseButtonPress || insideViewport)
