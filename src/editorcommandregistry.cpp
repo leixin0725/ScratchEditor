@@ -149,6 +149,20 @@ bool hasNonBlankCharacterAfter(const QString &text, int position)
     return false;
 }
 
+int nextSameQuoteOnLine(const QString &text, int from, QChar quote)
+{
+    if (from < 0 || from >= text.size()) {
+        return -1;
+    }
+    const int lineEnd = lineRangeAt(text, from).end;
+    for (int i = from; i < lineEnd; ++i) {
+        if (text.at(i) == quote) {
+            return i;
+        }
+    }
+    return -1;
+}
+
 struct MidlineQuotePlan {
     QChar opening;
     QChar closing;
@@ -2192,6 +2206,20 @@ EditorCommandRegistry::TypedEditResult EditorCommandRegistry::handleTypedText(co
                 QTextCursor cursor(m_document);
                 cursor.setPosition(start);
                 cursor.insertText(QString(midlinePlan->opening));
+                // 后输入开符号：若行内其后已有同号闭符号，视为先闭后开的
+                // 包裹收尾，与先开后闭一样补两侧自动空格。
+                const QString updatedText = m_document->toPlainText();
+                const int existingCloser = nextSameQuoteOnLine(
+                    updatedText, start + 1, midlinePlan->opening);
+                if (existingCloser >= 0) {
+                    const CompletionResult completion = finishMidlineQuoteOpening(
+                        start, existingCloser, midlinePlan->opening);
+                    result.consumed = true;
+                    result.textChanged = true;
+                    result.runAutoSpacing = completion.autoSpace;
+                    result.footprint = completion.footprint;
+                    return result;
+                }
                 m_editor->setProperty("cursorPosition", start + 1);
                 focusEditor();
                 result.consumed = true;
@@ -2456,6 +2484,20 @@ EditorCommandRegistry::CompletionResult EditorCommandRegistry::finishMidlineQuot
     m_editor->setProperty("cursorPosition", cursorAfter);
     focusEditor();
     return CompletionResult{{openerPosition, closurePosition + 1}};
+}
+
+EditorCommandRegistry::CompletionResult EditorCommandRegistry::finishMidlineQuoteOpening(
+    int openerPosition, int closerPosition, QChar opening)
+{
+    convertAsciiQuoteWrap(m_document, openerPosition, closerPosition);
+    const int leftSpaces =
+        spaceBacktickPairBoundaries(m_document, openerPosition, closerPosition);
+    // 反引号对：光标停在刚输入的开符号之后（含其左侧自动空格）；
+    // 引号对：转换后由 applyAutoSpacing 统一补边界空格并微调光标。
+    const int cursorAfter = openerPosition + 1 + leftSpaces;
+    m_editor->setProperty("cursorPosition", cursorAfter);
+    focusEditor();
+    return CompletionResult{{openerPosition, closerPosition + 1}};
 }
 
 bool EditorCommandRegistry::handleSpecialBackspace()
@@ -3040,6 +3082,14 @@ EditorCommandRegistry::completeInputMethodCommit(const QString &committedText,
             currentText, selectionStart, committedText.at(0));
         if (midlinePlan) {
             if (!midlinePlan->closer) {
+                // 后提交开符号：若行内其后已有同号闭符号，视为先闭后开的
+                // 包裹收尾，与先开后闭一样补两侧自动空格。
+                const int existingCloser = nextSameQuoteOnLine(
+                    currentText, selectionStart + 1, midlinePlan->opening);
+                if (existingCloser >= 0) {
+                    return finishMidlineQuoteOpening(
+                        selectionStart, existingCloser, midlinePlan->opening);
+                }
                 return CompletionResult{
                     {selectionStart, selectionStart + 1},
                     /*autoSpace=*/false};

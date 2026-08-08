@@ -102,6 +102,8 @@ private:
     std::optional<EditFootprint> insertWrapped(const QString &opening, const QString &closing);
     CompletionResult finishMidlineQuoteClosure(int openerPosition, int closurePosition,
                                                QChar opening, bool closingAlreadyAtCursor);
+    CompletionResult finishMidlineQuoteOpening(int openerPosition, int closerPosition,
+                                               QChar opening);
     bool handleSpecialBackspace();
     bool handleListEnter();
     bool jumpOutOfPair();

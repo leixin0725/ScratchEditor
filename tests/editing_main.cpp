@@ -2236,6 +2236,67 @@ int main(int argc, char *argv[])
                  fenceText == QStringLiteral("```\n```"),
                  QJsonObject{{QStringLiteral("text"), fenceText}});
     }
+    {
+        // 先输后引号、再输前引号也必须与先前后后一样触发两侧自动空格
+        // （BT-REVERSE-001..004：键盘/IME × CJK/ASCII，引号全角转换）。
+        const auto moveCursor = [](int position) {
+            return request(QStringLiteral("testSetSelection"),
+                           {{QStringLiteral("start"), position},
+                            {QStringLiteral("end"), position}});
+        };
+
+        setTextAndSelection(QStringLiteral("前中文后"), 3, 3);
+        keyPress(QStringLiteral("`"), QStringLiteral("`"));
+        QThread::msleep(30);
+        moveCursor(1);
+        keyPress(QStringLiteral("`"), QStringLiteral("`"));
+        QThread::msleep(30);
+        const QString reverseKeyboardText = editorText();
+        const int reverseKeyboardCursor =
+            editorStatus().value(QStringLiteral("cursorPosition")).toInt();
+        addCheck(checks, details, QStringLiteral("backtickReverseOrderKeyboardSpacing"),
+                 reverseKeyboardText == QStringLiteral("前 `中文` 后")
+                     && reverseKeyboardCursor == 3,
+                 QJsonObject{{QStringLiteral("text"), reverseKeyboardText},
+                             {QStringLiteral("cursor"), reverseKeyboardCursor}});
+
+        setTextAndSelection(QStringLiteral("前中文后"), 3, 3);
+        inputMethodCommit(QStringLiteral("`"));
+        QThread::msleep(30);
+        moveCursor(1);
+        inputMethodCommit(QStringLiteral("`"));
+        QThread::msleep(30);
+        const QString reverseImeText = editorText();
+        const int reverseImeCursor =
+            editorStatus().value(QStringLiteral("cursorPosition")).toInt();
+        addCheck(checks, details, QStringLiteral("backtickReverseOrderImeSpacing"),
+                 reverseImeText == QStringLiteral("前 `中文` 后")
+                     && reverseImeCursor == 3,
+                 QJsonObject{{QStringLiteral("text"), reverseImeText},
+                             {QStringLiteral("cursor"), reverseImeCursor}});
+
+        setTextAndSelection(QStringLiteral("abcd"), 3, 3);
+        keyPress(QStringLiteral("`"), QStringLiteral("`"));
+        QThread::msleep(30);
+        moveCursor(1);
+        keyPress(QStringLiteral("`"), QStringLiteral("`"));
+        QThread::msleep(30);
+        const QString reverseAsciiText = editorText();
+        addCheck(checks, details, QStringLiteral("backtickReverseOrderAsciiSpacing"),
+                 reverseAsciiText == QStringLiteral("a `bc` d"),
+                 QJsonObject{{QStringLiteral("text"), reverseAsciiText}});
+
+        setTextAndSelection(QStringLiteral("前中文后"), 3, 3);
+        keyPress(QStringLiteral("\""), QStringLiteral("\""));
+        QThread::msleep(30);
+        moveCursor(1);
+        keyPress(QStringLiteral("\""), QStringLiteral("\""));
+        QThread::msleep(30);
+        const QString reverseQuoteText = editorText();
+        addCheck(checks, details, QStringLiteral("quoteReverseOrderFullwidthSpacing"),
+                 reverseQuoteText == QStringLiteral("前 “中文” 后"),
+                 QJsonObject{{QStringLiteral("text"), reverseQuoteText}});
+    }
     cjkExpect(checks, details, QStringLiteral("protectKeyInlineFormula"),
               QStringLiteral("$中文..$"), 5, 5, QStringLiteral("key . inside inline formula"),
               keyAction(QStringLiteral(".")), QStringLiteral("$中文...$"), 6);
