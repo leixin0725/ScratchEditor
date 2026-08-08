@@ -234,7 +234,7 @@ std::optional<MidlineQuotePlan> buildMidlineQuotePlan(const QString &text,
 
 bool isCjkOrFullwidthPunctuationTrigger(const QChar &ch)
 {
-    // 全角 `，。：；？！` 在标点转换规则中视同 CJK 字符。
+    // 全角 `，。：；？！）` 在标点转换规则中视同 CJK 字符。
     static const QSet<char16_t> fullwidthTriggers = {
         u'\uFF0C', // ，
         u'\u3002', // 。
@@ -242,6 +242,7 @@ bool isCjkOrFullwidthPunctuationTrigger(const QChar &ch)
         u'\uFF1B', // ；
         u'\uFF1F', // ？
         u'\uFF01', // ！
+        u'\uFF09', // ）
     };
     return CjkText::isCjk(ch) || fullwidthTriggers.contains(ch.unicode());
 }
