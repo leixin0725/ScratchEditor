@@ -44,3 +44,4 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\run-editing-te
 4. **性能约束**：编辑核心改动保持线性复杂度；每次编辑最多一次全文读取、一次分析；先收集插入点再倒序写入；禁止在候选循环中重复 `toPlainText()` 或全文扫描。
 5. **测试纪律**：关键边界使用独立 check 名并输出 actual/expected 细节；先补能稳定失败的测试再实现；回归失败不得通过删除或放宽断言掩盖；偶发超时最多重跑一次并单独记录。
 6. **提交、部署和文档维护**：重要改动完成后检查并更新 `docs/README.md` 索引；已完结的功能需求移入 `docs/archive/`；用户要求提交后，若最新版尚未部署，主动询问是否需要部署。
+7. **文件编码**：项目内所有含中文的文本文件统一为 UTF-8（无 BOM）编码，不得混用 GBK/ANSI、UTF-16 或带 BOM 的 UTF-8；新增或编辑文件时保持该约定。
