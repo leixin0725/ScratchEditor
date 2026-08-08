@@ -1905,6 +1905,19 @@ int main(int argc, char *argv[])
               QStringLiteral("a\"中文x"), 4, 4, QStringLiteral("IME commit \" closes CJK wrap"),
               [] { return inputMethodCommit(QStringLiteral("\"")); },
               QStringLiteral("a “中文” x"), 6);
+    cjkExpect(checks, details, QStringLiteral("midQuoteImeBacktickSingleOpen"),
+              QStringLiteral("abc"), 1, 1, QStringLiteral("IME commit ` at midline"),
+              [] { return inputMethodCommit(QStringLiteral("`")); },
+              QStringLiteral("a`bc"), 2);
+    cjkExpect(checks, details, QStringLiteral("midQuoteKeyBacktickCloseCjkSpacing"),
+              QStringLiteral("a`中文x"), 4, 4,
+              QStringLiteral("key ` closes wrap with boundary spacing"),
+              keyAction(QStringLiteral("`")), QStringLiteral("a `中文` x"), 5);
+    cjkExpect(checks, details, QStringLiteral("midQuoteImeBacktickCloseCjkSpacing"),
+              QStringLiteral("a`中文x"), 4, 4,
+              QStringLiteral("IME commit ` closes wrap with boundary spacing"),
+              [] { return inputMethodCommit(QStringLiteral("`")); },
+              QStringLiteral("a `中文` x"), 5);
 
     // --- `·`（U+00B7）反引号别名（DOT-ALIAS-001..012） ---
     // 紧贴字符输入单个 `·` 保持字面；连续两个 `·` 生成反引号对（光标居中）。

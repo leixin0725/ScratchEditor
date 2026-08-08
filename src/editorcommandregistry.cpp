@@ -41,6 +41,21 @@ QTextDocument::FindFlags findFlags(bool caseSensitive, bool backwards = false)
     return flags;
 }
 
+struct LineRange {
+    int start = 0;
+    int end = 0;
+};
+
+LineRange lineRangeAt(const QString &text, int position)
+{
+    const int start = text.lastIndexOf(QLatin1Char('\n'), qMax(0, position - 1)) + 1;
+    int end = text.indexOf(QLatin1Char('\n'), position);
+    if (end < 0) {
+        end = text.size();
+    }
+    return {start, end};
+}
+
 struct DelimiterPair {
     QString opening;
     QString closing;
@@ -146,7 +161,7 @@ std::optional<MidlineQuotePlan> buildMidlineQuotePlan(const QString &text,
                                                       int position,
                                                       const QChar &typed)
 {
-    const int lineStart = text.lastIndexOf(QLatin1Char('\n'), qMax(0, position - 1)) + 1;
+    const int lineStart = lineRangeAt(text, position).start;
     if (position <= lineStart) {
         return std::nullopt;
     }
@@ -773,6 +788,140 @@ TextRange inferredWordRange(QTextDocument *document, const QString &text, int po
     return {start, end};
 }
 
+const QRegularExpression &listPrefixPattern()
+{
+    static const QRegularExpression pattern(QStringLiteral(R"(^\s*(?:[-+*]|\d+\.)\s+)"));
+    return pattern;
+}
+
+const QRegularExpression &taskPrefixPattern()
+{
+    static const QRegularExpression pattern(QStringLiteral(R"(^\s*[-+*]\s+\[[ xX]\]\s+)"));
+    return pattern;
+}
+
+const QRegularExpression &quotePrefixPattern()
+{
+    static const QRegularExpression pattern(QStringLiteral(R"(^\s*>\s?)"));
+    return pattern;
+}
+
+const QRegularExpression &headingPrefixPattern()
+{
+    static const QRegularExpression pattern(QStringLiteral(R"(^\s*(#{1,6})\s+)"));
+    return pattern;
+}
+
+enum class HeadingAction {
+    Set,
+    Cycle,
+    Increase,
+    Decrease,
+};
+
+struct HeadingCommand {
+    HeadingAction action = HeadingAction::Cycle;
+    int targetLevel = 1;
+    bool adjustOnly = false;
+    bool createFromEmpty = false;
+};
+
+int targetHeadingLevel(const HeadingCommand &command, int currentLevel)
+{
+    if (command.action == HeadingAction::Set) {
+        return command.targetLevel;
+    }
+    if (command.action == HeadingAction::Increase) {
+        return currentLevel == 0 ? 0 : qMin(6, currentLevel + 1);
+    }
+    if (command.action == HeadingAction::Decrease) {
+        return currentLevel == 0 ? 0 : qMax(1, currentLevel - 1);
+    }
+    if (currentLevel == 0) {
+        return 1;
+    }
+    return currentLevel < 6 ? currentLevel + 1 : 0;
+}
+
+QString transformHeadingLine(const QString &line, const HeadingCommand &command)
+{
+    if (line.trimmed().isEmpty()) {
+        return command.createFromEmpty
+            ? QString(targetHeadingLevel(command, 0), QLatin1Char('#')) + QLatin1Char(' ')
+            : line;
+    }
+
+    const QRegularExpressionMatch match = headingPrefixPattern().match(line);
+    if (command.adjustOnly && !match.hasMatch()) {
+        // Ctrl+Num+- / Ctrl+Num++ 只推进或回退已经存在的标题行。
+        return line;
+    }
+    const int currentLevel = match.hasMatch() ? match.captured(1).size() : 0;
+    int targetLevel = targetHeadingLevel(command, currentLevel);
+    const bool togglesMatchingHeading = command.action == HeadingAction::Set
+        && match.hasMatch() && currentLevel == command.targetLevel;
+    if (togglesMatchingHeading) {
+        targetLevel = 0;
+    }
+
+    QString result = line;
+    if (match.hasMatch()) {
+        result.remove(match.capturedStart(), match.capturedLength());
+    }
+    if (targetLevel > 0) {
+        result.prepend(QString(targetLevel, QLatin1Char('#')) + QLatin1Char(' '));
+    }
+    return result;
+}
+
+QString transformListLine(QString line, bool remove)
+{
+    if (line.trimmed().isEmpty()) {
+        return line;
+    }
+    if (remove) {
+        line.remove(listPrefixPattern());
+    } else if (!listPrefixPattern().match(line).hasMatch()) {
+        line.prepend(QStringLiteral("- "));
+    }
+    return line;
+}
+
+QString transformTaskLine(QString line, bool remove)
+{
+    if (line.trimmed().isEmpty()) {
+        return line;
+    }
+    if (remove) {
+        line.remove(taskPrefixPattern());
+    } else {
+        line.remove(listPrefixPattern());
+        line.prepend(QStringLiteral("- [ ] "));
+    }
+    return line;
+}
+
+QString transformQuoteLine(QString line, bool remove)
+{
+    if (line.trimmed().isEmpty()) {
+        return remove ? line : QStringLiteral("> ");
+    }
+    if (remove) {
+        line.remove(quotePrefixPattern());
+    } else if (!quotePrefixPattern().match(line).hasMatch()) {
+        line.prepend(QStringLiteral("> "));
+    }
+    return line;
+}
+
+std::optional<int> taskCheckboxStatePosition(const QString &line)
+{
+    static const QRegularExpression checkboxPattern(QStringLiteral(
+        R"(^([\t ]*(?:>[\t ]*)*(?:(?:[-+*]|\d+[.)])[\t ]+)?)\[([ xX])\])"));
+    const QRegularExpressionMatch match = checkboxPattern.match(line);
+    return match.hasMatch() ? std::optional<int>(match.capturedStart(2)) : std::nullopt;
+}
+
 } // namespace
 
 EditorCommandRegistry::EditorCommandRegistry(AppSettings *settings, QObject *parent)
@@ -836,6 +985,26 @@ EditorCommandRegistry::EditorCommandRegistry(AppSettings *settings, QObject *par
         item.shortcut = m_settings ? m_settings->shortcut(item.id, item.defaultShortcut)
                                    : item.defaultShortcut;
     }
+
+    m_commandHandlers = {
+        {QStringLiteral("formatSpacing"), [this] { return formatSpacing(); }},
+        {QStringLiteral("toggleBold"),
+         [this] { return wrapSelection(QStringLiteral("**"), QStringLiteral("**")); }},
+        {QStringLiteral("toggleItalic"),
+         [this] { return wrapSelection(QStringLiteral("*"), QStringLiteral("*")); }},
+        {QStringLiteral("wrapCode"), [this] {
+             const QString selection = selectedText();
+             if (selection.contains(QLatin1Char('\n'))) {
+                 return wrapSelection(QStringLiteral("```\n"), QStringLiteral("\n```"));
+             }
+             return wrapSelection(QStringLiteral("`"), QStringLiteral("`"));
+         }},
+        {QStringLiteral("deleteLine"), [this] { return deleteSelectedLines(); }},
+        {QStringLiteral("copyLine"), [this] { return copyLine(); }},
+        {QStringLiteral("cutLine"), [this] { return cutLine(); }},
+        {QStringLiteral("pasteClipboard"), [this] { return pasteClipboard(); }},
+        {QStringLiteral("toggleCheckbox"), [this] { return toggleCurrentCheckbox(); }},
+    };
 
     m_selectionDragScrollTimer.setInterval(30);
     connect(&m_selectionDragScrollTimer, &QTimer::timeout, this, [this] {
@@ -943,37 +1112,11 @@ bool EditorCommandRegistry::execute(const QString &commandId)
         return false;
     }
 
-    if (commandId == QStringLiteral("formatSpacing")) {
-        return formatSpacing();
+    const auto handler = m_commandHandlers.constFind(commandId);
+    if (handler != m_commandHandlers.cend()) {
+        return handler.value()();
     }
-    if (commandId == QStringLiteral("toggleBold")) {
-        return wrapSelection(QStringLiteral("**"), QStringLiteral("**"));
-    }
-    if (commandId == QStringLiteral("toggleItalic")) {
-        return wrapSelection(QStringLiteral("*"), QStringLiteral("*"));
-    }
-    if (commandId == QStringLiteral("wrapCode")) {
-        const QString selection = selectedText();
-        if (selection.contains(QLatin1Char('\n'))) {
-            return wrapSelection(QStringLiteral("```\n"), QStringLiteral("\n```"));
-        }
-        return wrapSelection(QStringLiteral("`"), QStringLiteral("`"));
-    }
-    if (commandId == QStringLiteral("deleteLine")) {
-        return deleteSelectedLines();
-    }
-    if (commandId == QStringLiteral("copyLine")) {
-        return copyLine();
-    }
-    if (commandId == QStringLiteral("cutLine")) {
-        return cutLine();
-    }
-    if (commandId == QStringLiteral("pasteClipboard")) {
-        return pasteClipboard();
-    }
-    if (commandId == QStringLiteral("toggleCheckbox")) {
-        return toggleCurrentCheckbox();
-    }
+    // 标题、列表、任务与引用命令共用同一行变换管线。
     return transformSelectedLines(commandId);
 }
 
@@ -1666,7 +1809,7 @@ bool EditorCommandRegistry::transformSelectedLines(const QString &commandId)
     const QString documentText = m_document->toPlainText();
     const int originalStart = m_editor->property("selectionStart").toInt();
     const int originalEnd = m_editor->property("selectionEnd").toInt();
-    const int lineStart = documentText.lastIndexOf(QLatin1Char('\n'), qMax(0, originalStart - 1)) + 1;
+    const int lineStart = lineRangeAt(documentText, originalStart).start;
     int lineEnd = documentText.indexOf(QLatin1Char('\n'), originalEnd);
     if (lineEnd < 0) {
         lineEnd = documentText.size();
@@ -1674,30 +1817,28 @@ bool EditorCommandRegistry::transformSelectedLines(const QString &commandId)
     const QString segment = documentText.mid(lineStart, lineEnd - lineStart);
     QStringList lines = segment.split(QLatin1Char('\n'), Qt::KeepEmptyParts);
 
-    static const QRegularExpression listPrefix(QStringLiteral(R"(^\s*(?:[-+*]|\d+\.)\s+)"));
-    static const QRegularExpression taskPrefix(QStringLiteral(R"(^\s*[-+*]\s+\[[ xX]\]\s+)"));
-    static const QRegularExpression quotePrefix(QStringLiteral(R"(^\s*>\s?)"));
-    static const QRegularExpression headingPrefix(QStringLiteral(R"(^\s*(#{1,6})\s+)"));
+    HeadingCommand heading;
+    if (headingCommand) {
+        const bool createFromEmpty = !adjustHeading && originalStart == originalEnd
+            && lines.size() == 1;
+        if (setHeading) {
+            heading = {HeadingAction::Set, commandId.back().digitValue(), false,
+                       createFromEmpty};
+        } else if (commandId == QStringLiteral("increaseHeadingLevel")) {
+            heading = {HeadingAction::Increase, 1, true, false};
+        } else if (commandId == QStringLiteral("decreaseHeadingLevel")) {
+            heading = {HeadingAction::Decrease, 1, true, false};
+        } else {
+            heading = {HeadingAction::Cycle, 1, false, createFromEmpty};
+        }
+    }
+
     const QRegularExpressionMatch originalHeadingMatch = headingCommand
-        && originalStart == originalEnd ? headingPrefix.match(segment)
-                                        : QRegularExpressionMatch();
+        && originalStart == originalEnd
+        ? headingPrefixPattern().match(segment)
+        : QRegularExpressionMatch();
     const int originalHeadingPrefixLength = originalHeadingMatch.hasMatch()
         ? originalHeadingMatch.capturedLength() : 0;
-    const auto targetHeadingLevel = [&commandId, setHeading](int currentLevel) {
-        if (setHeading) {
-            return commandId.back().digitValue();
-        }
-        if (commandId == QStringLiteral("increaseHeadingLevel")) {
-            return currentLevel == 0 ? 0 : qMin(6, currentLevel + 1);
-        }
-        if (commandId == QStringLiteral("decreaseHeadingLevel")) {
-            return currentLevel == 0 ? 0 : qMax(1, currentLevel - 1);
-        }
-        if (currentLevel == 0) {
-            return 1;
-        }
-        return currentLevel < 6 ? currentLevel + 1 : 0;
-    };
 
     const auto allNonEmptyMatch = [&lines](const QRegularExpression &expression) {
         bool sawContent = false;
@@ -1714,62 +1855,21 @@ bool EditorCommandRegistry::transformSelectedLines(const QString &commandId)
     };
 
     const bool removeList = commandId == QStringLiteral("toggleList")
-        && allNonEmptyMatch(listPrefix);
+        && allNonEmptyMatch(listPrefixPattern());
     const bool removeTask = commandId == QStringLiteral("toggleTask")
-        && allNonEmptyMatch(taskPrefix);
+        && allNonEmptyMatch(taskPrefixPattern());
     const bool removeQuote = commandId == QStringLiteral("toggleQuote")
-        && allNonEmptyMatch(quotePrefix);
+        && allNonEmptyMatch(quotePrefixPattern());
 
     for (QString &line : lines) {
-        if (line.trimmed().isEmpty()) {
-            if (headingCommand && !adjustHeading && originalStart == originalEnd
-                && lines.size() == 1) {
-                const int targetLevel = targetHeadingLevel(0);
-                line = QString(targetLevel, QLatin1Char('#')) + QLatin1Char(' ');
-            } else if (commandId == QStringLiteral("toggleQuote") && !removeQuote) {
-                line = QStringLiteral("> ");
-            }
-            continue;
-        }
         if (headingCommand) {
-            const QRegularExpressionMatch match = headingPrefix.match(line);
-            if (adjustHeading && !match.hasMatch()) {
-                // Ctrl+Num+- / Ctrl+Num++ 只推进或回退已经存在的标题行。
-                continue;
-            }
-            const int currentLevel = match.hasMatch() ? match.captured(1).size() : 0;
-            int targetLevel = targetHeadingLevel(currentLevel);
-            const bool togglesMatchingHeading = setHeading && match.hasMatch()
-                && currentLevel == commandId.back().digitValue();
-            if (togglesMatchingHeading) {
-                targetLevel = 0;
-            }
-
-            if (match.hasMatch()) {
-                line.remove(match.capturedStart(), match.capturedLength());
-            }
-            if (targetLevel > 0) {
-                line.prepend(QString(targetLevel, QLatin1Char('#')) + QLatin1Char(' '));
-            }
+            line = transformHeadingLine(line, heading);
         } else if (commandId == QStringLiteral("toggleList")) {
-            if (removeList) {
-                line.remove(listPrefix);
-            } else if (!listPrefix.match(line).hasMatch()) {
-                line.prepend(QStringLiteral("- "));
-            }
+            line = transformListLine(line, removeList);
         } else if (commandId == QStringLiteral("toggleTask")) {
-            if (removeTask) {
-                line.remove(taskPrefix);
-            } else {
-                line.remove(listPrefix);
-                line.prepend(QStringLiteral("- [ ] "));
-            }
+            line = transformTaskLine(line, removeTask);
         } else if (commandId == QStringLiteral("toggleQuote")) {
-            if (removeQuote) {
-                line.remove(quotePrefix);
-            } else if (!quotePrefix.match(line).hasMatch()) {
-                line.prepend(QStringLiteral("> "));
-            }
+            line = transformQuoteLine(line, removeQuote);
         }
     }
 
@@ -1787,7 +1887,8 @@ bool EditorCommandRegistry::transformSelectedLines(const QString &commandId)
     cursor.insertText(transformed);
     cursor.endEditBlock();
     if (headingCommand && originalStart == originalEnd) {
-        const QRegularExpressionMatch transformedHeadingMatch = headingPrefix.match(transformed);
+        const QRegularExpressionMatch transformedHeadingMatch =
+            headingPrefixPattern().match(transformed);
         const int transformedHeadingPrefixLength = transformedHeadingMatch.hasMatch()
             ? transformedHeadingMatch.capturedLength() : 0;
         const int originalColumn = originalStart - lineStart;
@@ -1812,7 +1913,7 @@ bool EditorCommandRegistry::deleteSelectedLines()
     const QString text = m_document->toPlainText();
     const int start = m_editor->property("selectionStart").toInt();
     const int end = m_editor->property("selectionEnd").toInt();
-    const int lineStart = text.lastIndexOf(QLatin1Char('\n'), qMax(0, start - 1)) + 1;
+    const int lineStart = lineRangeAt(text, start).start;
     const int effectiveEnd = end > start ? end - 1 : end;
     const int followingNewline = text.indexOf(QLatin1Char('\n'), effectiveEnd);
 
@@ -1841,13 +1942,9 @@ bool EditorCommandRegistry::copyLine()
 
     const QString text = m_document->toPlainText();
     const int cursor = m_editor->property("cursorPosition").toInt();
-    const int lineStart = text.lastIndexOf(QLatin1Char('\n'), qMax(0, cursor - 1)) + 1;
-    int lineEnd = text.indexOf(QLatin1Char('\n'), cursor);
-    if (lineEnd < 0) {
-        lineEnd = text.size();
-    }
+    const LineRange line = lineRangeAt(text, cursor);
     // 整行复制统一携带行尾换行符（末行/单行文档也补上），保证粘贴语义一致。
-    m_clipboardWriter(text.mid(lineStart, lineEnd - lineStart) + QLatin1Char('\n'));
+    m_clipboardWriter(text.mid(line.start, line.end - line.start) + QLatin1Char('\n'));
     focusEditor();
     return true;
 }
@@ -1860,24 +1957,20 @@ bool EditorCommandRegistry::cutLine()
 
     const QString text = m_document->toPlainText();
     const int cursor = m_editor->property("cursorPosition").toInt();
-    const int lineStart = text.lastIndexOf(QLatin1Char('\n'), qMax(0, cursor - 1)) + 1;
-    int lineEnd = text.indexOf(QLatin1Char('\n'), cursor);
-    const bool lastLine = lineEnd < 0;
-    if (lastLine) {
-        lineEnd = text.size();
-    }
+    const LineRange line = lineRangeAt(text, cursor);
+    const bool lastLine = line.end == text.size();
 
-    m_clipboardWriter(text.mid(lineStart, lineEnd - lineStart) + QLatin1Char('\n'));
+    m_clipboardWriter(text.mid(line.start, line.end - line.start) + QLatin1Char('\n'));
 
     // 非末行删除整行含换行，后续行补位；末行只删行文本。
     QTextCursor editCursor(m_document);
     editCursor.beginEditBlock();
-    editCursor.setPosition(lineStart);
-    editCursor.setPosition(lastLine ? lineEnd : lineEnd + 1, QTextCursor::KeepAnchor);
+    editCursor.setPosition(line.start);
+    editCursor.setPosition(lastLine ? line.end : line.end + 1, QTextCursor::KeepAnchor);
     editCursor.removeSelectedText();
     editCursor.endEditBlock();
     // 光标落在补位后一行的行首；剪切末行时落在上一行行尾。
-    m_editor->setProperty("cursorPosition", lineStart);
+    m_editor->setProperty("cursorPosition", line.start);
     focusEditor();
     return true;
 }
@@ -1905,17 +1998,14 @@ bool EditorCommandRegistry::pasteClipboard()
         // 当前行原样保留；仅当当前行仍有内容（末行非空）时才先补一个换行。
         // 空文档、文档已以换行结尾（光标位于末尾空行）时直接插入，
         // 避免每次粘贴都新增一个前导空行。
-        const int lineStart = text.lastIndexOf(
-            QLatin1Char('\n'), qMax(0, selectionStart - 1)) + 1;
-        int lineEnd = text.indexOf(QLatin1Char('\n'), selectionStart);
-        const bool lastLine = lineEnd < 0;
+        const LineRange line = lineRangeAt(text, selectionStart);
+        const bool lastLine = line.end == text.size();
         if (lastLine) {
-            lineEnd = text.size();
-            if (lineStart < lineEnd) {
+            if (line.start < line.end) {
                 insertion.prepend(QLatin1Char('\n'));
             }
         }
-        insertionPoint = lastLine ? lineEnd : lineEnd + 1;
+        insertionPoint = lastLine ? line.end : line.end + 1;
     }
 
     QTextCursor editCursor(m_document);
@@ -1943,27 +2033,20 @@ bool EditorCommandRegistry::toggleCurrentCheckbox()
 {
     const QString text = m_document->toPlainText();
     const int cursorPosition = m_editor->property("cursorPosition").toInt();
-    const int lineStart = text.lastIndexOf(
-        QLatin1Char('\n'), qMax(0, cursorPosition - 1)) + 1;
-    int lineEnd = text.indexOf(QLatin1Char('\n'), cursorPosition);
-    if (lineEnd < 0) {
-        lineEnd = text.size();
-    }
-    const QString line = text.mid(lineStart, lineEnd - lineStart);
-    const int positionInLine = cursorPosition - lineStart;
+    const LineRange lineRange = lineRangeAt(text, cursorPosition);
+    const QString line = text.mid(lineRange.start, lineRange.end - lineRange.start);
+    const int positionInLine = cursorPosition - lineRange.start;
 
-    static const QRegularExpression checkboxPattern(QStringLiteral(
-        R"(^([\t ]*(?:>[\t ]*)*(?:(?:[-+*]|\d+[.)])[\t ]+)?)\[([ xX])\])"));
-    const QRegularExpressionMatch checkboxMatch = checkboxPattern.match(line);
+    const auto statePosition = taskCheckboxStatePosition(line);
     QTextCursor editCursor(m_document);
     editCursor.beginEditBlock();
     int updatedCursorPosition = cursorPosition;
-    if (checkboxMatch.hasMatch()) {
-        const int statePosition = lineStart + checkboxMatch.capturedStart(2);
+    if (statePosition) {
+        const int statePositionInDocument = lineRange.start + *statePosition;
         QTextCursor stateCursor(m_document);
-        stateCursor.setPosition(statePosition);
-        stateCursor.setPosition(statePosition + 1, QTextCursor::KeepAnchor);
-        stateCursor.insertText(checkboxMatch.captured(2) == QStringLiteral(" ")
+        stateCursor.setPosition(statePositionInDocument);
+        stateCursor.setPosition(statePositionInDocument + 1, QTextCursor::KeepAnchor);
+        stateCursor.insertText(line.at(*statePosition) == QLatin1Char(' ')
                                    ? QStringLiteral("x") : QStringLiteral(" "));
     } else {
         const MarkdownListItem listItem = parseMarkdownListItem(line);
@@ -1981,7 +2064,7 @@ bool EditorCommandRegistry::toggleCurrentCheckbox()
         }
 
         QTextCursor insertionCursor(m_document);
-        insertionCursor.setPosition(lineStart + insertionOffset);
+        insertionCursor.setPosition(lineRange.start + insertionOffset);
         insertionCursor.insertText(insertion);
         if (positionInLine >= insertionOffset) {
             updatedCursorPosition += insertion.size();
@@ -1998,7 +2081,8 @@ EditorCommandRegistry::TypedEditResult EditorCommandRegistry::handleTypedText(co
 {
     TypedEditResult result;
     if (text == QStringLiteral("```")) {
-        if (const auto footprint = insertFenceBlock()) {
+        if (const auto footprint =
+                insertWrapped(QStringLiteral("```"), QStringLiteral("\n```"))) {
             result.consumed = true;
             result.textChanged = true;
             result.footprint = *footprint;
@@ -2017,13 +2101,8 @@ EditorCommandRegistry::TypedEditResult EditorCommandRegistry::handleTypedText(co
     const bool hasSelection = start != end;
 
     if (text == QStringLiteral("-") && !hasSelection) {
-        const int lineStart =
-            documentText.lastIndexOf(QLatin1Char('\n'), qMax(0, start - 1)) + 1;
-        int lineEnd = documentText.indexOf(QLatin1Char('\n'), start);
-        if (lineEnd < 0) {
-            lineEnd = documentText.size();
-        }
-        if (start == lineStart && start == lineEnd) {
+        const LineRange line = lineRangeAt(documentText, start);
+        if (start == line.start && start == line.end) {
             QTextCursor cursor(m_document);
             cursor.setPosition(start);
             cursor.insertText(QStringLiteral("- "));
@@ -2041,7 +2120,7 @@ EditorCommandRegistry::TypedEditResult EditorCommandRegistry::handleTypedText(co
     if (text == QStringLiteral("·")) {
         if (hasSelection) {
             // 与输入 `` ` `` 一致：用反引号对包裹选区并触发自动空格。
-            if (const auto footprint = insertPair(QStringLiteral("`"), QStringLiteral("`"))) {
+            if (const auto footprint = insertWrapped(QStringLiteral("`"), QStringLiteral("`"))) {
                 result.consumed = true;
                 result.textChanged = true;
                 result.runAutoSpacing = true;
@@ -2124,15 +2203,13 @@ EditorCommandRegistry::TypedEditResult EditorCommandRegistry::handleTypedText(co
             const bool closingAtCursor =
                 documentText.mid(start, 1) == QString(midlinePlan->closing);
             if (closingAtCursor) {
-                convertAsciiQuoteWrap(m_document, openerPosition, start);
-                const int leftSpaces =
-                    spaceBacktickPairBoundaries(m_document, openerPosition, start);
-                m_editor->setProperty("cursorPosition", start + 1 + leftSpaces);
-                result.consumed = true;
                 // 包裹闭合（即使只是跳过已有闭符号）也要重新执行自动空格判断。
+                const CompletionResult completion = finishMidlineQuoteClosure(
+                    openerPosition, start, midlinePlan->opening, true);
+                result.consumed = true;
                 result.textChanged = true;
-                result.runAutoSpacing = true;
-                result.footprint = {openerPosition, start + 1};
+                result.runAutoSpacing = completion.autoSpace;
+                result.footprint = completion.footprint;
                 return result;
             }
 
@@ -2141,20 +2218,14 @@ EditorCommandRegistry::TypedEditResult EditorCommandRegistry::handleTypedText(co
             cursor.beginEditBlock();
             cursor.insertText(QString(midlinePlan->closing));
             cursor.endEditBlock();
-            convertAsciiQuoteWrap(m_document, openerPosition, start);
-            const int leftSpaces =
-                spaceBacktickPairBoundaries(m_document, openerPosition, start);
             // 反引号对：光标停在两个反引号中间；引号对：光标在刚插入的闭符号之后。
-            const int cursorAfter = midlinePlan->opening == QLatin1Char('`')
-                ? start + leftSpaces
-                : start + 1 + leftSpaces;
-            m_editor->setProperty("cursorPosition", cursorAfter);
-            focusEditor();
+            const CompletionResult completion = finishMidlineQuoteClosure(
+                openerPosition, start, midlinePlan->opening, false);
             result.consumed = true;
             // 闭合引号已插入，必须执行自动空格判断（无论是否发生全角转换）。
             result.textChanged = true;
-            result.runAutoSpacing = true;
-            result.footprint = {openerPosition, start + 1};
+            result.runAutoSpacing = completion.autoSpace;
+            result.footprint = completion.footprint;
             return result;
         }
     }
@@ -2174,11 +2245,16 @@ EditorCommandRegistry::TypedEditResult EditorCommandRegistry::handleTypedText(co
             || text == QStringLiteral("'")
             || text == QStringLiteral(")")
             || text == QStringLiteral("-"));
-    const CjkText::DocumentAnalysis analysis = conversionCandidate
-        ? CjkText::analyzeDocument(documentText)
-        : CjkText::DocumentAnalysis{};
+    // 同一按键内的多处保护区判定共享一次惰性全文分析，避免重复扫描。
+    std::optional<CjkText::DocumentAnalysis> lazyAnalysis;
+    const auto analysis = [&lazyAnalysis, &documentText]() -> const CjkText::DocumentAnalysis & {
+        if (!lazyAnalysis) {
+            lazyAnalysis = CjkText::analyzeDocument(documentText);
+        }
+        return *lazyAnalysis;
+    };
     const bool protectedPosition =
-        conversionCandidate && CjkText::isPositionProtected(analysis, start);
+        conversionCandidate && CjkText::isPositionProtected(analysis(), start);
 
     // --- CJK Punctuation, Ellipsis & Em-dash Conversions ---
     if (!hasSelection && !protectedPosition) {
@@ -2240,7 +2316,7 @@ EditorCommandRegistry::TypedEditResult EditorCommandRegistry::handleTypedText(co
                 auto pairIt = cjkPairs.find(ch.unicode());
                 if (pairIt != cjkPairs.end()) {
                     if (const auto footprint =
-                            insertPair(pairIt->first, pairIt->second)) {
+                            insertWrapped(pairIt->first, pairIt->second)) {
                         result.consumed = true;
                         result.textChanged = true;
                         result.runAutoSpacing = true;
@@ -2289,9 +2365,7 @@ EditorCommandRegistry::TypedEditResult EditorCommandRegistry::handleTypedText(co
             && documentText.at(start - 1) == QLatin1Char(' ')) {
             const auto full = fullwidthPunctuationFor(documentText.at(start - 2));
             if (full) {
-                const CjkText::DocumentAnalysis spaceAnalysis =
-                    CjkText::analyzeDocument(documentText);
-                if (!CjkText::isPositionProtected(spaceAnalysis, start - 2)) {
+                if (!CjkText::isPositionProtected(analysis(), start - 2)) {
                     QTextCursor cursor(m_document);
                     cursor.setPosition(start - 2);
                     cursor.setPosition(start, QTextCursor::KeepAnchor);
@@ -2315,16 +2389,14 @@ EditorCommandRegistry::TypedEditResult EditorCommandRegistry::handleTypedText(co
         }
 
         const QString selection = documentText.mid(start, end - start);
-        const CjkText::DocumentAnalysis selectionAnalysis = hasSelection
-            ? CjkText::analyzeDocument(documentText)
-            : CjkText::DocumentAnalysis{};
         const bool selectionProtected = hasSelection
-            && (CjkText::isPositionProtected(selectionAnalysis, start)
-                || CjkText::isPositionProtected(selectionAnalysis, end));
+            && (CjkText::isPositionProtected(analysis(), start)
+                || CjkText::isPositionProtected(analysis(), end));
         const auto resolvedPair = selectionProtected
             ? std::pair<QString, QString>{pair->opening, pair->closing}
             : CjkText::resolveSelectionPair(pair->opening, pair->closing, selection);
-        if (const auto footprint = insertPair(resolvedPair.first, resolvedPair.second)) {
+        if (const auto footprint =
+                insertWrapped(resolvedPair.first, resolvedPair.second)) {
             result.consumed = true;
             result.textChanged = true;
             result.runAutoSpacing = true;
@@ -2345,7 +2417,7 @@ EditorCommandRegistry::TypedEditResult EditorCommandRegistry::handleTypedText(co
     return result;
 }
 
-std::optional<EditorCommandRegistry::EditFootprint> EditorCommandRegistry::insertPair(
+std::optional<EditorCommandRegistry::EditFootprint> EditorCommandRegistry::insertWrapped(
     const QString &opening, const QString &closing)
 {
     if (!m_editor || !m_document) {
@@ -2371,31 +2443,19 @@ std::optional<EditorCommandRegistry::EditFootprint> EditorCommandRegistry::inser
         opening.size() + selection.size() + closing.size())};
 }
 
-std::optional<EditorCommandRegistry::EditFootprint> EditorCommandRegistry::insertFenceBlock()
+EditorCommandRegistry::CompletionResult EditorCommandRegistry::finishMidlineQuoteClosure(
+    int openerPosition, int closurePosition, QChar opening, bool closingAlreadyAtCursor)
 {
-    if (!m_editor || !m_document) {
-        return std::nullopt;
-    }
-    const int start = m_editor->property("selectionStart").toInt();
-    const int end = m_editor->property("selectionEnd").toInt();
-    QTextCursor cursor(m_document);
-    cursor.setPosition(start);
-    cursor.setPosition(end, QTextCursor::KeepAnchor);
-    const QString selection = normalizeSelectedText(cursor.selectedText());
-    const QString opening = QStringLiteral("```");
-    const QString closing = QStringLiteral("\n```");
-
-    cursor.beginEditBlock();
-    cursor.insertText(opening + selection + closing);
-    cursor.endEditBlock();
-    if (selection.isEmpty()) {
-        m_editor->setProperty("cursorPosition", start + opening.size());
-    } else {
-        selectRange(start + opening.size(), start + opening.size() + selection.size());
-    }
+    convertAsciiQuoteWrap(m_document, openerPosition, closurePosition);
+    const int leftSpaces =
+        spaceBacktickPairBoundaries(m_document, openerPosition, closurePosition);
+    // 反引号对：光标停在两个反引号中间（closingAlreadyAtCursor 时闭符号已存在，
+    // 光标直接越过它）；引号对：光标在刚插入/提交的闭符号之后。
+    const int offset = (closingAlreadyAtCursor || opening != QLatin1Char('`')) ? 1 : 0;
+    const int cursorAfter = closurePosition + offset + leftSpaces;
+    m_editor->setProperty("cursorPosition", cursorAfter);
     focusEditor();
-    return EditFootprint{start, start + static_cast<int>(
-        opening.size() + selection.size() + closing.size())};
+    return CompletionResult{{openerPosition, closurePosition + 1}};
 }
 
 bool EditorCommandRegistry::handleSpecialBackspace()
@@ -2407,11 +2467,9 @@ bool EditorCommandRegistry::handleSpecialBackspace()
     }
 
     const QString text = m_document->toPlainText();
-    const int lineStart = text.lastIndexOf(QLatin1Char('\n'), qMax(0, start - 1)) + 1;
-    int lineEnd = text.indexOf(QLatin1Char('\n'), start);
-    if (lineEnd < 0) {
-        lineEnd = text.size();
-    }
+    const LineRange line = lineRangeAt(text, start);
+    const int lineStart = line.start;
+    const int lineEnd = line.end;
     const MarkdownListItem emptyListItem = parseMarkdownListItem(
         text.mid(lineStart, lineEnd - lineStart));
     if (emptyListItem.valid && emptyListItem.isEmpty()
@@ -2537,11 +2595,9 @@ bool EditorCommandRegistry::handleListEnter()
     }
 
     const QString text = m_document->toPlainText();
-    const int lineStart = text.lastIndexOf(QLatin1Char('\n'), qMax(0, start - 1)) + 1;
-    int lineEnd = text.indexOf(QLatin1Char('\n'), start);
-    if (lineEnd < 0) {
-        lineEnd = text.size();
-    }
+    const LineRange line = lineRangeAt(text, start);
+    const int lineStart = line.start;
+    const int lineEnd = line.end;
     if (isInsideFencedBlock(lineStart)) {
         return false;
     }
@@ -2697,12 +2753,9 @@ EditorCommandRegistry::handleEmptyLineFenceUpgrade(int removeStart, int removeEn
     if (removeEnd > documentText.size()) {
         return std::nullopt;
     }
-    const int lineStart =
-        documentText.lastIndexOf(QLatin1Char('\n'), qMax(0, removeStart - 1)) + 1;
-    int lineEnd = documentText.indexOf(QLatin1Char('\n'), removeStart);
-    if (lineEnd < 0) {
-        lineEnd = documentText.size();
-    }
+    const LineRange line = lineRangeAt(documentText, removeStart);
+    const int lineStart = line.start;
+    const int lineEnd = line.end;
     // 仅限完全空行：该行除 `` 对（键盘路径）或 `·` 形态（IME 路径）外无任何字符。
     const QString pattern = documentText.mid(removeStart, removeEnd - removeStart);
     const bool validState = (pattern == QStringLiteral("``")
@@ -2793,11 +2846,9 @@ bool EditorCommandRegistry::jumpOutOfPair()
     }
 
     const QString text = m_document->toPlainText();
-    const int lineStart = text.lastIndexOf(QLatin1Char('\n'), qMax(0, start - 1)) + 1;
-    int lineEnd = text.indexOf(QLatin1Char('\n'), start);
-    if (lineEnd < 0) {
-        lineEnd = text.size();
-    }
+    const LineRange line = lineRangeAt(text, start);
+    const int lineStart = line.start;
+    const int lineEnd = line.end;
     int jumpPosition = -1;
     const QStringList markers{
         QStringLiteral("***"), QStringLiteral("___"), QStringLiteral("**"),
@@ -2874,7 +2925,7 @@ bool EditorCommandRegistry::changeIndent(bool outdent)
     const QString text = m_document->toPlainText();
     const int start = m_editor->property("selectionStart").toInt();
     const int end = m_editor->property("selectionEnd").toInt();
-    const int lineStart = text.lastIndexOf(QLatin1Char('\n'), qMax(0, start - 1)) + 1;
+    const int lineStart = lineRangeAt(text, start).start;
 
     const int effectiveEnd = end > start ? end - 1 : end;
     int lineEnd = text.indexOf(QLatin1Char('\n'), effectiveEnd);
@@ -2995,25 +3046,19 @@ EditorCommandRegistry::completeInputMethodCommit(const QString &committedText,
             }
 
             const int openerPosition = midlinePlan->openerPosition;
-            const bool closingAtCursor =
-                currentText.mid(selectionStart, 1) == QString(midlinePlan->closing);
-            if (closingAtCursor) {
-                // 已提交的闭引号与光标处已有闭引号是同一个字符，
-                // 保留该字符并直接对包裹两端做转换，再跳过到其后。
-                convertAsciiQuoteWrap(m_document, openerPosition, selectionStart);
-                m_editor->setProperty("cursorPosition", selectionStart + 1);
-                return CompletionResult{{openerPosition, selectionStart + 1}};
+            // IME 提交的闭符号已位于光标处；若与计划闭符号不同（如 ASCII
+            // 引号闭合全角引号对），先替换为计划闭符号，再与键盘路径共用
+            // 同一收尾（转换、边界空格与光标）。
+            if (currentText.mid(selectionStart, 1) != QString(midlinePlan->closing)) {
+                QTextCursor cursor(m_document);
+                cursor.setPosition(selectionStart);
+                cursor.setPosition(selectionStart + 1, QTextCursor::KeepAnchor);
+                cursor.beginEditBlock();
+                cursor.insertText(QString(midlinePlan->closing));
+                cursor.endEditBlock();
             }
-
-            QTextCursor cursor(m_document);
-            cursor.setPosition(selectionStart);
-            cursor.setPosition(selectionStart + 1, QTextCursor::KeepAnchor);
-            cursor.beginEditBlock();
-            cursor.insertText(QString(midlinePlan->closing));
-            cursor.endEditBlock();
-            convertAsciiQuoteWrap(m_document, openerPosition, selectionStart);
-            m_editor->setProperty("cursorPosition", selectionStart + 1);
-            return CompletionResult{{openerPosition, selectionStart + 1}};
+            return finishMidlineQuoteClosure(
+                openerPosition, selectionStart, midlinePlan->opening, false);
         }
     }
 
@@ -3124,13 +3169,9 @@ bool EditorCommandRegistry::formatSpacing()
     int rangeStart = start;
     int rangeEnd = end;
     if (start == end) {
-        rangeStart = documentText.lastIndexOf(
-            QLatin1Char('\n'), qMax(0, start - 1)) + 1;
-        int lineEnd = documentText.indexOf(QLatin1Char('\n'), start);
-        if (lineEnd < 0) {
-            lineEnd = documentText.size();
-        }
-        rangeEnd = lineEnd;
+        const LineRange line = lineRangeAt(documentText, start);
+        rangeStart = line.start;
+        rangeEnd = line.end;
     }
     if (rangeStart < 0 || rangeEnd > documentText.size() || rangeStart >= rangeEnd) {
         focusEditor();

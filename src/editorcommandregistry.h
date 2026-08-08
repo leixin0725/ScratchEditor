@@ -1,6 +1,7 @@
 #pragma once
 
 #include <QCursor>
+#include <QHash>
 #include <QObject>
 #include <QPointer>
 #include <QPointF>
@@ -97,8 +98,9 @@ private:
     TypedEditResult insertBacktickPairAt(int position);
     bool isMiddleDotDoubleDot(const QString &text, int position) const;
     bool isMiddleDotEmptyLinePair(const QString &text, int position) const;
-    std::optional<EditFootprint> insertPair(const QString &opening, const QString &closing);
-    std::optional<EditFootprint> insertFenceBlock();
+    std::optional<EditFootprint> insertWrapped(const QString &opening, const QString &closing);
+    CompletionResult finishMidlineQuoteClosure(int openerPosition, int closurePosition,
+                                               QChar opening, bool closingAlreadyAtCursor);
     bool handleSpecialBackspace();
     bool handleListEnter();
     bool jumpOutOfPair();
@@ -127,6 +129,7 @@ private:
     QPointer<QObject> m_editor;
     QPointer<QTextDocument> m_document;
     QVector<Definition> m_definitions;
+    QHash<QString, std::function<bool()>> m_commandHandlers;
     ClipboardReader m_clipboardReader;
     ClipboardWriter m_clipboardWriter;
     QTimer m_selectionDragScrollTimer;
