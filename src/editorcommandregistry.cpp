@@ -247,6 +247,24 @@ bool isCjkOrFullwidthPunctuationTrigger(const QChar &ch)
     return CjkText::isCjk(ch) || fullwidthTriggers.contains(ch.unicode());
 }
 
+std::optional<QChar> fullwidthPunctuationFor(const QChar &ch)
+{
+    // 半角 `, . : ; ? !` 对应的全角标点；供“符号加两空格转全角”使用。
+    static const QHash<char16_t, QChar> halfwidthPunctuationToFull = {
+        {u',', u'\uFF0C'},
+        {u'.', u'\u3002'},
+        {u':', u'\uFF1A'},
+        {u';', u'\uFF1B'},
+        {u'?', u'\uFF1F'},
+        {u'!', u'\uFF01'},
+    };
+    const auto it = halfwidthPunctuationToFull.find(ch.unicode());
+    if (it == halfwidthPunctuationToFull.end()) {
+        return std::nullopt;
+    }
+    return it.value();
+}
+
 std::optional<std::pair<QChar, QChar>> fullwidthQuotesFor(const QChar &opening,
                                                           const QChar &closing)
 {
@@ -2263,6 +2281,27 @@ EditorCommandRegistry::TypedEditResult EditorCommandRegistry::handleTypedText(co
                 result.consumed = true;
                 result.textChanged = true;
                 return result;
+            }
+        }
+
+        // 4. Halfwidth symbol + two spaces → Fullwidth（`,  ` → `，`，两个空格一并删除）
+        if (ch == QLatin1Char(' ') && start >= 2
+            && documentText.at(start - 1) == QLatin1Char(' ')) {
+            const auto full = fullwidthPunctuationFor(documentText.at(start - 2));
+            if (full) {
+                const CjkText::DocumentAnalysis spaceAnalysis =
+                    CjkText::analyzeDocument(documentText);
+                if (!CjkText::isPositionProtected(spaceAnalysis, start - 2)) {
+                    QTextCursor cursor(m_document);
+                    cursor.setPosition(start - 2);
+                    cursor.setPosition(start, QTextCursor::KeepAnchor);
+                    cursor.insertText(QString(full.value()));
+                    m_editor->setProperty("cursorPosition", start - 1);
+                    focusEditor();
+                    result.consumed = true;
+                    result.textChanged = true;
+                    return result;
+                }
             }
         }
     }

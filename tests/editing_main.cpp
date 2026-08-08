@@ -1756,6 +1756,65 @@ int main(int argc, char *argv[])
     cjkExpect(checks, details, QStringLiteral("cjkKeyCloseParenSkipAfterCloseParen"),
               QStringLiteral("中文））"), 3, 3, QStringLiteral("key ) skips existing ）"),
               keyAction(QStringLiteral(")")), QStringLiteral("中文））"), 4);
+    cjkExpect(checks, details, QStringLiteral("cjkKeyTwoSpacesComma"),
+              QStringLiteral("abc,"), 4, 4, QStringLiteral("key space twice after ,"),
+              [] {
+                  keyPress(QStringLiteral(" "), QStringLiteral(" "));
+                  return keyPress(QStringLiteral(" "), QStringLiteral(" "));
+              },
+              QStringLiteral("abc，"), 4);
+    cjkExpect(checks, details, QStringLiteral("cjkKeyTwoSpacesColon"),
+              QStringLiteral("abc:"), 4, 4, QStringLiteral("key space twice after :"),
+              [] {
+                  keyPress(QStringLiteral(" "), QStringLiteral(" "));
+                  return keyPress(QStringLiteral(" "), QStringLiteral(" "));
+              },
+              QStringLiteral("abc："), 4);
+    cjkExpect(checks, details, QStringLiteral("cjkKeyTwoSpacesSemicolon"),
+              QStringLiteral("abc;"), 4, 4, QStringLiteral("key space twice after ;"),
+              [] {
+                  keyPress(QStringLiteral(" "), QStringLiteral(" "));
+                  return keyPress(QStringLiteral(" "), QStringLiteral(" "));
+              },
+              QStringLiteral("abc；"), 4);
+    cjkExpect(checks, details, QStringLiteral("cjkKeyTwoSpacesQuestion"),
+              QStringLiteral("abc?"), 4, 4, QStringLiteral("key space twice after ?"),
+              [] {
+                  keyPress(QStringLiteral(" "), QStringLiteral(" "));
+                  return keyPress(QStringLiteral(" "), QStringLiteral(" "));
+              },
+              QStringLiteral("abc？"), 4);
+    cjkExpect(checks, details, QStringLiteral("cjkKeyTwoSpacesExclaim"),
+              QStringLiteral("abc!"), 4, 4, QStringLiteral("key space twice after !"),
+              [] {
+                  keyPress(QStringLiteral(" "), QStringLiteral(" "));
+                  return keyPress(QStringLiteral(" "), QStringLiteral(" "));
+              },
+              QStringLiteral("abc！"), 4);
+    cjkExpect(checks, details, QStringLiteral("cjkKeyTwoSpacesPeriod"),
+              QStringLiteral("abc."), 4, 4, QStringLiteral("key space twice after ."),
+              [] {
+                  keyPress(QStringLiteral(" "), QStringLiteral(" "));
+                  return keyPress(QStringLiteral(" "), QStringLiteral(" "));
+              },
+              QStringLiteral("abc。"), 4);
+    cjkExpect(checks, details, QStringLiteral("cjkKeyTwoSpacesDotSequence"),
+              QStringLiteral("abc.."), 5, 5, QStringLiteral("key space twice after .."),
+              [] {
+                  keyPress(QStringLiteral(" "), QStringLiteral(" "));
+                  return keyPress(QStringLiteral(" "), QStringLiteral(" "));
+              },
+              QStringLiteral("abc.。"), 5);
+    cjkExpect(checks, details, QStringLiteral("cjkKeyTwoSpacesSingleNegative"),
+              QStringLiteral("abc,"), 4, 4, QStringLiteral("key space once after ,"),
+              keyAction(QStringLiteral(" ")), QStringLiteral("abc, "), 5);
+    cjkExpect(checks, details, QStringLiteral("protectKeyTwoSpacesComma"),
+              QStringLiteral("`abc,`"), 5, 5, QStringLiteral("key space twice inside inline code"),
+              [] {
+                  keyPress(QStringLiteral(" "), QStringLiteral(" "));
+                  return keyPress(QStringLiteral(" "), QStringLiteral(" "));
+              },
+              QStringLiteral("`abc,  `"), 7);
     cjkExpect(checks, details, QStringLiteral("cjkKeyEllipsisAscii"),
               QStringLiteral("中文.."), 4, 4, QStringLiteral("key ."),
               keyAction(QStringLiteral(".")), QStringLiteral("中文……"), 4);
