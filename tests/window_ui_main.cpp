@@ -330,6 +330,39 @@ int main(int argc, char *argv[])
                      == residentStatus.value(QStringLiteral("windowRestingHeight")).toInt(),
              residentGeometry);
 
+    // 剪贴板模式：新内容默认光标落在文档末尾；内容未变化时保留原光标位置。
+    // 编辑器文本为空时才 hide，避免 commitAndHide 向真实系统剪贴板写回测试内容。
+    request(QStringLiteral("testSetText"),
+            {{QStringLiteral("text"), QStringLiteral("alpha\nbeta")}});
+    request(QStringLiteral("testSetSelection"),
+            {{QStringLiteral("start"), 2}, {QStringLiteral("end"), 2}});
+    request(QStringLiteral("testSetClipboard"),
+            {{QStringLiteral("text"), QStringLiteral("alpha\nbeta")}});
+    const QJsonObject unchangedClipboard = request(QStringLiteral("show"));
+    addCheck(checks, details, QStringLiteral("clipboardUnchangedKeepsCursor"),
+             unchangedClipboard.value(QStringLiteral("cursorPosition")).toInt() == 2,
+             unchangedClipboard);
+
+    request(QStringLiteral("testSetText"), {{QStringLiteral("text"), QString()}});
+    request(QStringLiteral("hide"));
+    QThread::msleep(240);
+    request(QStringLiteral("testSetClipboard"),
+            {{QStringLiteral("text"), QStringLiteral("alpha\nbeta")}});
+    const QJsonObject firstClipboard = request(QStringLiteral("show"));
+    addCheck(checks, details, QStringLiteral("clipboardNewContentCursorAtEnd"),
+             firstClipboard.value(QStringLiteral("cursorPosition")).toInt() == 10,
+             firstClipboard);
+
+    request(QStringLiteral("testSetText"), {{QStringLiteral("text"), QString()}});
+    request(QStringLiteral("hide"));
+    QThread::msleep(240);
+    request(QStringLiteral("testSetClipboard"),
+            {{QStringLiteral("text"), QStringLiteral("longer")}});
+    const QJsonObject secondClipboard = request(QStringLiteral("show"));
+    addCheck(checks, details, QStringLiteral("clipboardReplacedContentCursorAtEnd"),
+             secondClipboard.value(QStringLiteral("cursorPosition")).toInt() == 6,
+             secondClipboard);
+
     const QJsonObject opened = execute(QStringLiteral("settings"));
     addCheck(checks, details, QStringLiteral("lazySettingsPage"),
              !initial.value(QStringLiteral("settingsPageLoaded")).toBool()

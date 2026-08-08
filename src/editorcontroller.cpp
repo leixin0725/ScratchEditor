@@ -1721,9 +1721,19 @@ void EditorController::showEditor()
     } else {
         QString clipboardText;
         QString clipboardError;
-        if (readClipboardText(&clipboardText, &clipboardError)) {
+        bool clipboardReady = false;
+        if (m_testMode) {
+            // 隔离验证使用虚拟剪贴板：show 路径同样不触碰真实系统剪贴板。
+            clipboardText = m_testClipboardText;
+            clipboardReady = true;
+        } else {
+            clipboardReady = readClipboardText(&clipboardText, &clipboardError);
+        }
+        if (clipboardReady) {
             if (m_editor->property("text").toString() != clipboardText) {
                 m_editor->setProperty("text", clipboardText);
+                // 新剪贴板内容默认光标落在文档末尾，与外部文件模式一致。
+                m_editor->setProperty("cursorPosition", clipboardText.size());
             }
             setClipboardState(true);
         } else {
