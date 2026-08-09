@@ -81,6 +81,30 @@ CommandResult sendCommand(const QString &command, int timeoutMs = 3000)
     return readResponse(socket, timer, timeoutMs);
 }
 
+CommandResult sendCommandWithArguments(const QString &command, QJsonObject request,
+                                       int timeoutMs = 3000)
+{
+    QLocalSocket socket;
+    QElapsedTimer timer;
+    timer.start();
+#ifdef Q_OS_WIN
+    LARGE_INTEGER clientQpc{};
+    QueryPerformanceCounter(&clientQpc);
+    request.insert(QStringLiteral("clientQpc"), QString::number(clientQpc.QuadPart));
+#endif
+    socket.connectToServer(serverName());
+    if (!socket.waitForConnected(timeoutMs)) {
+        return {{}, timer.nsecsElapsed() / 1'000'000.0, socket.errorString()};
+    }
+    request.insert(QStringLiteral("command"), command);
+    const QByteArray payload = QJsonDocument(request).toJson(QJsonDocument::Compact) + '\n';
+    if (socket.write(payload) != payload.size()) {
+        return {{}, timer.nsecsElapsed() / 1'000'000.0, socket.errorString()};
+    }
+    socket.flush();
+    return readResponse(socket, timer, timeoutMs);
+}
+
 double percentile(QVector<double> values, double fraction)
 {
     if (values.isEmpty()) {
@@ -288,6 +312,85 @@ QJsonObject runInputBenchmark(int sampleCount, quintptr hwnd)
     return result;
 }
 
+QJsonObject runClipboardHistoryBenchmark()
+{
+    sendCommand(QStringLiteral("testDiscardClose"));
+    sendCommand(QStringLiteral("testResetClipboardHistory"));
+    for (int index = 0; index < 100; ++index) {
+        sendCommandWithArguments(
+            QStringLiteral("testEmitClipboardChange"),
+            {{QStringLiteral("kind"), QStringLiteral("text")},
+             {QStringLiteral("text"),
+              QStringLiteral("history seed %1\nsecond line").arg(index)},
+             {QStringLiteral("capturedAtMs"), 1786200000000.0 + index}}, 5000);
+    }
+    sendCommand(QStringLiteral("show"), 5000);
+    sendCommandWithArguments(
+        QStringLiteral("testClipboardHistoryUiAction"),
+        {{QStringLiteral("action"), QStringLiteral("historyOpen")}}, 5000);
+
+    QVector<double> captureToVisible;
+    for (int index = 0; index < 20; ++index) {
+        const CommandResult result = sendCommandWithArguments(
+            QStringLiteral("testEmitClipboardChange"),
+            {{QStringLiteral("kind"), QStringLiteral("text")},
+             {QStringLiteral("text"),
+              QStringLiteral("capture sample %1\nvisible").arg(index)},
+             {QStringLiteral("capturedAtMs"), 1786200010000.0 + index}}, 5000);
+        if (result.error.isEmpty() && result.object.value(QStringLiteral("ok")).toBool()) {
+            captureToVisible.append(result.externalMs);
+        }
+    }
+
+    QVector<double> interactions;
+    for (int index = 0; index < 20; ++index) {
+        for (const QString &action : {QStringLiteral("historyClose"),
+                                      QStringLiteral("historyOpen")}) {
+            const CommandResult result = sendCommandWithArguments(
+                QStringLiteral("testClipboardHistoryUiAction"),
+                {{QStringLiteral("action"), action}}, 5000);
+            if (result.error.isEmpty() && result.object.value(QStringLiteral("ok")).toBool()) {
+                interactions.append(result.externalMs);
+            }
+        }
+        const CommandResult search = sendCommandWithArguments(
+            QStringLiteral("testClipboardHistoryUiAction"),
+            {{QStringLiteral("action"), QStringLiteral("historySetQuery")},
+             {QStringLiteral("value"), index % 2 == 0 ? QStringLiteral("sample")
+                                                        : QString()}}, 5000);
+        if (search.error.isEmpty() && search.object.value(QStringLiteral("ok")).toBool()) {
+            interactions.append(search.externalMs);
+        }
+        const CommandResult reorder = sendCommandWithArguments(
+            QStringLiteral("testEmitClipboardChange"),
+            {{QStringLiteral("kind"), QStringLiteral("text")},
+             {QStringLiteral("text"),
+              QStringLiteral("capture sample %1\nvisible").arg(index)},
+             {QStringLiteral("capturedAtMs"), 1786200020000.0 + index}}, 5000);
+        if (reorder.error.isEmpty() && reorder.object.value(QStringLiteral("ok")).toBool()) {
+            interactions.append(reorder.externalMs);
+        }
+    }
+
+    const QJsonObject status = sendCommand(QStringLiteral("status")).object;
+    const double captureP95 = percentile(captureToVisible, 0.95);
+    const double interactionP95 = percentile(interactions, 0.95);
+    QJsonObject result;
+    result.insert(QStringLiteral("captureToVisible"), summarize(captureToVisible));
+    result.insert(QStringLiteral("interactionToFrame"), summarize(interactions));
+    result.insert(QStringLiteral("captureThresholdMs"), 500.0);
+    result.insert(QStringLiteral("interactionThresholdMs"), 100.0);
+    result.insert(QStringLiteral("passed"), captureToVisible.size() >= 20
+                      && interactions.size() >= 20 && captureP95 <= 500.0
+                      && interactionP95 <= 100.0
+                      && status.value(QStringLiteral("historyCount")).toInt() == 100
+                      && status.value(QStringLiteral("clipboardBackend")).toString()
+                         == QStringLiteral("memory")
+                      && status.value(QStringLiteral("nativeClipboardAccessAttempts")).toInteger() == 0);
+    result.insert(QStringLiteral("status"), status);
+    return result;
+}
+
 QJsonObject commandObject(const QString &command, int timeoutMs = 3000)
 {
     const CommandResult result = sendCommand(command, timeoutMs);
@@ -391,6 +494,7 @@ int main(int argc, char *argv[])
     QJsonObject report;
     report.insert(QStringLiteral("statusBefore"), commandObject(QStringLiteral("status")));
     report.insert(QStringLiteral("hotWake"), runHotBenchmark(hotSamples));
+    report.insert(QStringLiteral("clipboardHistory"), runClipboardHistoryBenchmark());
 
     const QJsonObject shown = commandObject(QStringLiteral("show"));
     report.insert(QStringLiteral("showForTests"), shown);

@@ -49,6 +49,28 @@ Window {
     readonly property color markdownTextColor: controller.markdownTextColor
     readonly property string uiFontFamily: "Microsoft YaHei UI"
     readonly property int transitionDuration: controller.animationsEnabled ? 120 : 0
+    readonly property int historyTriggerWidth: 12
+    readonly property int historyHoverOpenDelayMs: 100
+    readonly property int historyHoverCloseDelayMs: 250
+    property bool historyPanelOpen: false
+    property bool historyPanelOpenedByCommand: false
+    property bool historyRevealHovered: false
+    property bool historyPanelHovered: false
+    readonly property real historyPanelWidth: Math.max(200, Math.min(360, root.width / 3))
+    readonly property bool historyPanelOverlay:
+        (root.width - root.marginSize * 2 - historyPanelWidth) < 320
+    readonly property real editorVisibleWidth:
+        root.width - root.marginSize * 2
+        - (historyPanelOpen && !historyPanelOverlay ? historyPanelWidth : 0)
+    readonly property bool historyPanelLoaded:
+        historyPanelLoader.active && historyPanelLoader.item !== null
+    readonly property int historyRevealZoneX: 0
+    readonly property int historyRevealZoneWidth: marginSize + historyTriggerWidth
+    readonly property bool historyPanelClipped: historyPanelLoader.clip
+    readonly property bool historyRevealBlocksPointer: false
+    readonly property bool historyQueryFocused:
+        historyPanelLoader.item ? historyPanelLoader.item.queryFocused : false
+    property string historySelectedId: ""
     property real scrollContentHeight: 0
     property bool replaceMode: false
     property string searchStatus: ""
@@ -133,6 +155,132 @@ Window {
         editor.forceActiveFocus()
     }
 
+    function openClipboardHistory(byCommand) {
+        if (!controller.clipboardHistoryAvailable) {
+            return
+        }
+        historyCloseTimer.stop()
+        historyPanelOpen = true
+        historyPanelOpenedByCommand = byCommand
+        if (byCommand) {
+            Qt.callLater(function() {
+                if (historyPanelLoader.item) {
+                    historyPanelLoader.item.focusQuery()
+                }
+            })
+        }
+    }
+
+    function closeClipboardHistory() {
+        historyOpenTimer.stop()
+        historyCloseTimer.stop()
+        historyPanelOpen = false
+        historyPanelOpenedByCommand = false
+        historySelectedId = ""
+        controller.setClipboardHistoryFilter("")
+        if (historyPanelLoader.item) {
+            historyPanelLoader.item.clearQuery()
+        }
+    }
+
+    function historyEdgeActivationAllowed() {
+        return controller.clipboardHistoryAvailable
+            && root.visible
+            && !controller.historyLoadConfirmationVisible
+            && !controller.historyClearConfirmationVisible
+            && !settingsLoader.active
+            && !commandPaletteLoader.active
+    }
+
+    function beginClipboardHistoryEdgeHover() {
+        historyCloseTimer.stop()
+        if (historyEdgeActivationAllowed() && !historyPanelOpen) {
+            historyOpenTimer.restart()
+        }
+    }
+
+    function endClipboardHistoryEdgeHover() {
+        historyOpenTimer.stop()
+        scheduleClipboardHistoryClose()
+    }
+
+    function scheduleClipboardHistoryClose() {
+        if (historyPanelOpen && !historyPanelOpenedByCommand
+            && !historyRevealHovered && !historyPanelHovered) {
+            historyCloseTimer.restart()
+        }
+    }
+
+    function handleClipboardHistoryLeftEdgeExit() {
+        historyOpenTimer.stop()
+        historyCloseTimer.stop()
+        if (historyEdgeActivationAllowed() && !historyPanelOpen) {
+            openClipboardHistory(false)
+        }
+    }
+
+    function handleEscapeAction() {
+        if (controller.historyLoadConfirmationVisible) {
+            controller.cancelLoadClipboardHistory()
+        } else if (controller.historyClearConfirmationVisible) {
+            controller.cancelClearClipboardHistory()
+        } else if (root.historyPanelOpen) {
+            root.closeClipboardHistory()
+            editor.forceActiveFocus()
+        } else {
+            controller.hideEditor()
+        }
+    }
+
+    function dispatchHistoryTestAction(action, value) {
+        if (!historyPanelLoader.item) {
+            return false
+        }
+        if (action === "historyHoverTriggerEnter") {
+            historyRevealHovered = true
+            beginClipboardHistoryEdgeHover()
+        } else if (action === "historyHoverTriggerLeave") {
+            historyRevealHovered = false
+            endClipboardHistoryEdgeHover()
+        } else if (action === "historyPanelEnter") {
+            historyPanelHovered = true
+            historyCloseTimer.stop()
+        } else if (action === "historyPanelLeave") {
+            historyPanelHovered = false
+            scheduleClipboardHistoryClose()
+        } else if (action === "historyOpen") {
+            openClipboardHistory(true)
+        } else if (action === "historyClose") {
+            closeClipboardHistory()
+        } else if (action === "historySetQuery") {
+            historyPanelLoader.item.setQuery(value)
+        } else if (action === "historySelect") {
+            historyPanelLoader.item.selectId(value)
+        } else if (action === "historyActivateSelected") {
+            historyPanelLoader.item.activateSelected()
+        } else if (action === "historyDoubleClick") {
+            historyPanelLoader.item.selectId(value)
+            historyPanelLoader.item.activateSelected()
+        } else if (action === "historyConfirmLoad") {
+            controller.confirmLoadClipboardHistory()
+        } else if (action === "historyCancelLoad") {
+            controller.cancelLoadClipboardHistory()
+        } else if (action === "historyDeleteSelected") {
+            controller.deleteClipboardHistoryItem(historySelectedId)
+        } else if (action === "historyRequestClear") {
+            controller.requestClearClipboardHistory()
+        } else if (action === "historyConfirmClear") {
+            controller.confirmClearClipboardHistory()
+        } else if (action === "historyCancelClear") {
+            controller.cancelClearClipboardHistory()
+        } else if (action === "historyEscape") {
+            handleEscapeAction()
+        } else {
+            return false
+        }
+        return true
+    }
+
     Component.onCompleted: {
         controller.registerWindow(root)
         controller.registerEditor(editor)
@@ -144,6 +292,29 @@ Window {
         interval: 60
         repeat: false
         onTriggered: root.refreshScrollMetrics()
+    }
+
+    Timer {
+        id: historyOpenTimer
+        interval: root.historyHoverOpenDelayMs
+        repeat: false
+        onTriggered: {
+            if (root.historyEdgeActivationAllowed()) {
+                root.openClipboardHistory(false)
+            }
+        }
+    }
+
+    Timer {
+        id: historyCloseTimer
+        interval: root.historyHoverCloseDelayMs
+        repeat: false
+        onTriggered: {
+            if (!root.historyPanelOpenedByCommand
+                && !root.historyRevealHovered && !root.historyPanelHovered) {
+                root.closeClipboardHistory()
+            }
+        }
     }
 
     Connections {
@@ -186,12 +357,18 @@ Window {
         controller.hideEditor()
     }
 
+    onVisibleChanged: {
+        if (!visible && historyPanelOpen) {
+            closeClipboardHistory()
+        }
+    }
+
     Shortcut {
         sequence: "Escape"
         context: Qt.WindowShortcut
         enabled: root.visible && !findPanel.visible && !commandPaletteLoader.active
                  && !settingsLoader.active
-        onActivated: controller.hideEditor()
+        onActivated: root.handleEscapeAction()
     }
 
     Shortcut {
@@ -248,7 +425,18 @@ Window {
                 root.openCommandPalette()
             } else if (commandId === "settings") {
                 root.openSettings()
+            } else if (commandId === "clipboardHistory") {
+                root.openClipboardHistory(true)
             }
+        }
+
+        function onClipboardHistoryLoaded() {
+            root.closeClipboardHistory()
+            editor.forceActiveFocus()
+        }
+
+        function onClipboardHistoryLeftEdgeExited() {
+            root.handleClipboardHistoryLeftEdgeExit()
         }
 
         function onStatusMessageChanged() {
@@ -634,27 +822,36 @@ Window {
     Rectangle {
         id: editorSurface
         x: root.marginSize
+           + (root.historyPanelOpen && !root.historyPanelOverlay
+              ? root.historyPanelWidth : 0)
         y: root.dragZoneHeight
-        width: root.width - root.marginSize * 2
+        width: root.editorVisibleWidth
         height: root.height - root.dragZoneHeight - root.marginSize
         color: root.themeEditorSurfaceColor
 
         Behavior on color {
             ColorAnimation { duration: root.transitionDuration }
         }
+        Behavior on x { NumberAnimation { duration: root.transitionDuration } }
+        Behavior on width { NumberAnimation { duration: root.transitionDuration } }
     }
 
     Flickable {
         id: editorViewport
         x: root.marginSize
+           + (root.historyPanelOpen && !root.historyPanelOverlay
+              ? root.historyPanelWidth : 0)
         y: root.dragZoneHeight
-        width: root.width - root.marginSize * 2
+        width: root.editorVisibleWidth
         height: root.height - root.dragZoneHeight - root.marginSize
         clip: true
         boundsBehavior: Flickable.StopAtBounds
         contentWidth: width
         contentHeight: Math.max(height, editor.contentHeight + 20)
         pixelAligned: true
+
+        Behavior on x { NumberAnimation { duration: root.transitionDuration } }
+        Behavior on width { NumberAnimation { duration: root.transitionDuration } }
 
         TextEdit {
             id: editor
@@ -701,6 +898,345 @@ Window {
                 height: Math.max(1, editor.selectionDragRectangle.height)
                 visible: editor.selectionDragPosition >= 0
                 color: root.selectionDragColor
+            }
+        }
+    }
+
+    Loader {
+        id: historyPanelLoader
+        z: 35
+        x: root.marginSize
+        y: root.dragZoneHeight
+        width: root.historyPanelWidth
+        height: root.height - root.dragZoneHeight - root.marginSize
+        clip: true
+        active: controller.clipboardHistoryAvailable
+
+        sourceComponent: Item {
+            id: historyRoot
+            readonly property bool queryFocused: historyQuery.activeFocus
+
+            function focusQuery() {
+                historyQuery.forceActiveFocus()
+                historyQuery.selectAll()
+            }
+            function clearQuery() { historyQuery.text = "" }
+            function setQuery(value) {
+                historyQuery.text = value === undefined ? "" : value
+                controller.setClipboardHistoryFilter(historyQuery.text)
+            }
+            function selectId(value) {
+                root.historySelectedId = value
+                controller.selectClipboardHistoryItem(value)
+                for (let i = 0; i < historyList.count; ++i) {
+                    const row = historyList.itemAtIndex(i)
+                    if (row && row.itemId === value) {
+                        historyList.currentIndex = i
+                        return
+                    }
+                }
+            }
+            function activateSelected() {
+                if (root.historySelectedId.length > 0) {
+                    controller.requestLoadClipboardHistory(root.historySelectedId)
+                }
+            }
+            function moveSelection(delta) {
+                if (historyList.count === 0) return
+                historyList.currentIndex = Math.max(
+                    0, Math.min(historyList.count - 1, historyList.currentIndex + delta))
+                const row = historyList.itemAtIndex(historyList.currentIndex)
+                if (row) selectId(row.itemId)
+            }
+
+            Rectangle {
+                id: historyPanel
+                x: root.historyPanelOpen ? 0 : -root.historyPanelWidth
+                width: root.historyPanelWidth
+                height: parent.height
+                color: root.themePanelColor
+                border.color: root.themeBorderColor
+                border.width: 1
+
+                Behavior on x {
+                    NumberAnimation { duration: root.transitionDuration; easing.type: Easing.OutCubic }
+                }
+
+                HoverHandler {
+                    onHoveredChanged: {
+                        root.historyPanelHovered = hovered
+                        if (hovered) historyCloseTimer.stop()
+                        else root.scheduleClipboardHistoryClose()
+                    }
+                }
+
+                Text {
+                    id: historyTitle
+                    x: 14
+                    y: 12
+                    text: "剪贴板历史"
+                    color: root.themeStrongTextColor
+                    font.family: root.uiFontFamily
+                    font.pointSize: 11
+                    font.weight: Font.DemiBold
+                }
+
+                Rectangle {
+                    id: historySearchFrame
+                    x: 12
+                    y: 40
+                    width: parent.width - 24
+                    height: 34
+                    radius: 4
+                    color: root.themeFieldColor
+                    border.color: historyQuery.activeFocus
+                                  ? root.themeFocusColor : root.themeBorderColor
+
+                    TextInput {
+                        id: historyQuery
+                        anchors.fill: parent
+                        anchors.margins: 8
+                        color: root.themeTextColor
+                        selectionColor: root.themeSelectionColor
+                        selectedTextColor: root.themeSelectedTextColor
+                        font.family: root.uiFontFamily
+                        font.pointSize: 9
+                        clip: true
+                        onTextChanged: controller.setClipboardHistoryFilter(text)
+                        Keys.onDownPressed: function(event) {
+                            historyRoot.moveSelection(1); event.accepted = true
+                        }
+                        Keys.onUpPressed: function(event) {
+                            historyRoot.moveSelection(-1); event.accepted = true
+                        }
+                        Keys.onReturnPressed: function(event) {
+                            historyRoot.activateSelected(); event.accepted = true
+                        }
+                        Keys.onEnterPressed: function(event) {
+                            historyRoot.activateSelected(); event.accepted = true
+                        }
+                    }
+
+                    Text {
+                        anchors.left: parent.left
+                        anchors.leftMargin: 8
+                        anchors.verticalCenter: parent.verticalCenter
+                        visible: historyQuery.text.length === 0
+                        text: "搜索完整文本"
+                        color: root.themeMutedTextColor
+                        font.family: root.uiFontFamily
+                        font.pointSize: 9
+                    }
+                }
+
+                ListView {
+                    id: historyList
+                    x: 8
+                    y: 82
+                    width: parent.width - 16
+                    height: parent.height - 132
+                    clip: true
+                    spacing: 4
+                    model: controller.clipboardHistoryModel
+                    currentIndex: count > 0 ? Math.max(0, currentIndex) : -1
+                    onCountChanged: {
+                        if (count > 0 && root.historySelectedId.length === 0) {
+                            currentIndex = 0
+                            const row = itemAtIndex(0)
+                            if (row) historyRoot.selectId(row.itemId)
+                        }
+                    }
+
+                    delegate: Rectangle {
+                        id: historyRow
+                        required property string historyId
+                        required property string previewText
+                        required property double capturedAtMs
+                        required property int characterCount
+                        property string itemId: historyId
+                        width: historyList.width
+                        height: 86
+                        radius: 4
+                        color: root.historySelectedId === historyId
+                               ? root.themeButtonColor : "transparent"
+                        border.color: root.historySelectedId === historyId
+                                      ? root.themeAccentColor : "transparent"
+
+                        Text {
+                            x: 8
+                            y: 6
+                            width: parent.width - 16
+                            height: 50
+                            text: historyRow.previewText
+                            color: root.themeTextColor
+                            font.family: root.uiFontFamily
+                            font.pointSize: 9
+                            wrapMode: Text.Wrap
+                            maximumLineCount: 3
+                            elide: Text.ElideRight
+                        }
+                        Text {
+                            x: 8
+                            y: 62
+                            width: parent.width - 16
+                            text: new Date(historyRow.capturedAtMs).toLocaleString(
+                                      Qt.locale(), Locale.ShortFormat)
+                                  + " · " + historyRow.characterCount + " 字"
+                            color: root.themeMutedTextColor
+                            font.family: root.uiFontFamily
+                            font.pointSize: 8
+                            elide: Text.ElideRight
+                        }
+                        MouseArea {
+                            anchors.fill: parent
+                            acceptedButtons: Qt.LeftButton
+                            onClicked: historyRoot.selectId(historyRow.historyId)
+                            onDoubleClicked: {
+                                historyRoot.selectId(historyRow.historyId)
+                                historyRoot.activateSelected()
+                            }
+                        }
+                    }
+                }
+
+                Text {
+                    anchors.centerIn: historyList
+                    visible: historyList.count === 0
+                    text: controller.clipboardHistoryError.length > 0
+                          ? controller.clipboardHistoryError : "暂无剪贴板历史"
+                    color: controller.clipboardHistoryError.length > 0
+                           ? root.themeDangerColor : root.themeMutedTextColor
+                    width: historyList.width - 24
+                    wrapMode: Text.Wrap
+                    horizontalAlignment: Text.AlignHCenter
+                    font.family: root.uiFontFamily
+                    font.pointSize: 9
+                }
+
+                Rectangle {
+                    x: 12
+                    anchors.bottom: parent.bottom
+                    anchors.bottomMargin: 10
+                    width: 72
+                    height: 30
+                    radius: 4
+                    color: root.themeButtonColor
+                    Text { anchors.centerIn: parent; text: "删除"; color: root.themeTextColor; font.pointSize: 9 }
+                    MouseArea {
+                        anchors.fill: parent
+                        enabled: root.historySelectedId.length > 0
+                        onClicked: controller.deleteClipboardHistoryItem(root.historySelectedId)
+                    }
+                }
+                Rectangle {
+                    anchors.right: parent.right
+                    anchors.rightMargin: 12
+                    anchors.bottom: parent.bottom
+                    anchors.bottomMargin: 10
+                    width: 72
+                    height: 30
+                    radius: 4
+                    color: root.themeButtonColor
+                    Text { anchors.centerIn: parent; text: "清空"; color: root.themeDangerColor; font.pointSize: 9 }
+                    MouseArea { anchors.fill: parent; onClicked: controller.requestClearClipboardHistory() }
+                }
+            }
+
+        }
+    }
+
+    // Hover-only edge proximity area. It deliberately spans the resize/drag
+    // frame but never accepts button events, so the existing native window
+    // interactions keep their normal precedence.
+    Item {
+        id: historyRevealZone
+        z: 36
+        x: root.historyRevealZoneX
+        y: root.dragZoneHeight
+        width: root.historyRevealZoneWidth
+        height: root.height - root.dragZoneHeight - root.marginSize
+        visible: controller.clipboardHistoryAvailable
+
+        HoverHandler {
+            target: null
+            blocking: root.historyRevealBlocksPointer
+            onHoveredChanged: {
+                root.historyRevealHovered = hovered
+                if (hovered) {
+                    if (point.pressedButtons === Qt.NoButton) {
+                        root.beginClipboardHistoryEdgeHover()
+                    }
+                } else {
+                    root.endClipboardHistoryEdgeHover()
+                }
+            }
+        }
+    }
+
+    Rectangle {
+        z: 95
+        anchors.fill: parent
+        visible: controller.historyLoadConfirmationVisible
+        color: "#88000000"
+        Rectangle {
+            anchors.centerIn: parent
+            width: Math.min(420, parent.width - 48)
+            height: 140
+            radius: 6
+            color: root.themePanelColor
+            border.color: root.themeBorderColor
+            Text {
+                anchors.top: parent.top; anchors.topMargin: 24
+                anchors.horizontalCenter: parent.horizontalCenter
+                text: "放弃当前修改并载入历史？"
+                color: root.themeTextColor; font.family: root.uiFontFamily
+            }
+            Rectangle {
+                x: 54; y: 82; width: 120; height: 34; radius: 4
+                color: root.themeButtonColor
+                Text { anchors.centerIn: parent; text: "取消"; color: root.themeTextColor }
+                MouseArea { anchors.fill: parent; onClicked: controller.cancelLoadClipboardHistory() }
+            }
+            Rectangle {
+                anchors.right: parent.right; anchors.rightMargin: 54
+                y: 82; width: 120; height: 34; radius: 4
+                color: root.themeAccentColor
+                Text { anchors.centerIn: parent; text: "载入"; color: root.themeAccentTextColor }
+                MouseArea { anchors.fill: parent; onClicked: controller.confirmLoadClipboardHistory() }
+            }
+        }
+    }
+
+    Rectangle {
+        z: 95
+        anchors.fill: parent
+        visible: controller.historyClearConfirmationVisible
+        color: "#88000000"
+        Rectangle {
+            anchors.centerIn: parent
+            width: Math.min(420, parent.width - 48)
+            height: 140
+            radius: 6
+            color: root.themePanelColor
+            border.color: root.themeBorderColor
+            Text {
+                anchors.top: parent.top; anchors.topMargin: 24
+                anchors.horizontalCenter: parent.horizontalCenter
+                text: "确认清空全部剪贴板历史？"
+                color: root.themeTextColor; font.family: root.uiFontFamily
+            }
+            Rectangle {
+                x: 54; y: 82; width: 120; height: 34; radius: 4
+                color: root.themeButtonColor
+                Text { anchors.centerIn: parent; text: "取消"; color: root.themeTextColor }
+                MouseArea { anchors.fill: parent; onClicked: controller.cancelClearClipboardHistory() }
+            }
+            Rectangle {
+                anchors.right: parent.right; anchors.rightMargin: 54
+                y: 82; width: 120; height: 34; radius: 4
+                color: root.themeDangerColor
+                Text { anchors.centerIn: parent; text: "清空"; color: "white" }
+                MouseArea { anchors.fill: parent; onClicked: controller.confirmClearClipboardHistory() }
             }
         }
     }

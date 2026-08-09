@@ -24,6 +24,13 @@ $requiredFiles = @(
     ".gitattributes",
     ".gitignore",
     "src\appsettings.cpp",
+    "src\clipboardgateway.h",
+    "src\clipboardgateway.cpp",
+    "src\clipboardhistorycommandgate.h",
+    "src\clipboardhistorymodel.h",
+    "src\clipboardhistorymodel.cpp",
+    "src\clipboardhistorystore.h",
+    "src\clipboardhistorystore.cpp",
     "src\editorcontroller.cpp",
     "src\editorcommandregistry.cpp",
     "src\markdownhighlighter.cpp",
@@ -31,11 +38,14 @@ $requiredFiles = @(
     "tests\perf_main.cpp",
     "tests\system_main.cpp",
     "tests\editing_main.cpp",
+    "tests\clipboardhistory_main.cpp",
+    "tests\externaleditorprocess_main.cpp",
     "tests\window_ui_main.cpp",
     "tests\fixtures\KeysRedirect.IpcTest.ahk",
     "tests\README.md",
     "integration\KeysRedirect.QtMigration.ahk",
     "integration\README.md",
+    "scripts\run-clipboard-history-tests.ps1",
     "docs\README.md",
     "docs\archive\STAGE1-REPORT.md",
     "docs\archive\STAGE2-REPORT.md",
@@ -106,6 +116,22 @@ $settingsReferencesOutsideStore = @(
     Get-ChildItem -LiteralPath (Join-Path $projectRoot "src") -File |
         Where-Object { $_.Name -notlike "appsettings.*" } |
         Select-String -Pattern "QSettings" -CaseSensitive
+)
+
+$clipboardApiPattern = "AddClipboardFormatListener|RemoveClipboardFormatListener|" +
+    "GetClipboardSequenceNumber|OpenClipboard|CloseClipboard|GetClipboardData|SetClipboardData"
+$clipboardApiReferencesOutsideGateway = @(
+    Get-ChildItem -LiteralPath (Join-Path $projectRoot "src") -File |
+        Where-Object { $_.Name -ne "clipboardgateway.cpp" } |
+        Select-String -Pattern $clipboardApiPattern -CaseSensitive
+)
+$gatewaySource = Get-Content -LiteralPath `
+    (Join-Path $projectRoot "src\clipboardgateway.cpp") -Raw -Encoding UTF8
+$missingGatewayClipboardApis = @(
+    @("AddClipboardFormatListener", "RemoveClipboardFormatListener",
+      "GetClipboardSequenceNumber", "OpenClipboard", "CloseClipboard",
+      "GetClipboardData", "SetClipboardData") |
+        Where-Object { -not $gatewaySource.Contains($_) }
 )
 
 $migrationCopy = Get-Content -LiteralPath `
@@ -191,6 +217,10 @@ $checks = [ordered]@{
     )
     powershellScriptsParse = ($scriptParseFailures.Count -eq 0)
     centralizedSettingsImplementation = ($settingsReferencesOutsideStore.Count -eq 0)
+    clipboardNativeApiBoundary = (
+        $clipboardApiReferencesOutsideGateway.Count -eq 0 -and
+        $missingGatewayClipboardApis.Count -eq 0
+    )
     browserEngineExcluded = ($browserReferences.Count -eq 0)
     deferredFeaturesExcluded = ($deferredCommandReferences.Count -eq 0)
     ahkMigrationBoundaryPreserved = $migrationBoundary
@@ -217,6 +247,12 @@ $report = [ordered]@{
         unexpectedRootFiles = $unexpectedRootFiles
         looseArtifacts = @($looseArtifacts | ForEach-Object { $_.Name })
         scriptParseFailures = $scriptParseFailures
+        clipboardApiReferencesOutsideGateway = @(
+            $clipboardApiReferencesOutsideGateway | ForEach-Object {
+                "$($_.Path):$($_.LineNumber):$($_.Line.Trim())"
+            }
+        )
+        missingGatewayClipboardApis = $missingGatewayClipboardApis
         trackedExcluded = $trackedExcluded
         gitInitialized = $gitInitialized
         gitStatus = $gitStatus

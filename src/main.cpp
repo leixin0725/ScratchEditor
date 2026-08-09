@@ -3,11 +3,16 @@
 #include <QCommandLineOption>
 #include <QCommandLineParser>
 #include <QDebug>
+#include <QDir>
 #include <QElapsedTimer>
+#include <QFileInfo>
 #include <QGuiApplication>
+#include <QJsonDocument>
+#include <QJsonObject>
 #include <QQmlApplicationEngine>
 #include <QQmlContext>
 #include <QQuickWindow>
+#include <QSaveFile>
 #include <QTimer>
 
 int main(int argc, char *argv[])
@@ -114,6 +119,33 @@ int main(int argc, char *argv[])
     engine.loadFromModule(QStringLiteral("ScratchEditor"), QStringLiteral("Main"));
     if (engine.rootObjects().isEmpty()) {
         return 3;
+    }
+
+    if (externalFileMode && controller.testMode()) {
+        const QString statusPath = qEnvironmentVariable(
+            "SCRATCHEDITOR_EXTERNAL_TEST_STATUS_FILE");
+        if (!statusPath.isEmpty()) {
+            const QFileInfo statusInfo(statusPath);
+            const QFileInfo settingsInfo(controller.settingsFile());
+            if (statusInfo.absoluteDir().absolutePath()
+                == settingsInfo.absoluteDir().absolutePath()) {
+                const QObject *root = engine.rootObjects().constFirst();
+                QJsonObject status;
+                status.insert(QStringLiteral("historyAvailable"), false);
+                status.insert(QStringLiteral("historyStoreFile"), QString());
+                status.insert(QStringLiteral("historyCommandRegistered"), false);
+                status.insert(QStringLiteral("historyPanelLoaded"),
+                              root->property("historyPanelLoaded").toBool());
+                status.insert(QStringLiteral("clipboardBackend"), QStringLiteral("memory"));
+                status.insert(QStringLiteral("nativeClipboardAccessAttempts"), 0);
+                QSaveFile file(statusInfo.absoluteFilePath());
+                file.setDirectWriteFallback(false);
+                if (file.open(QIODevice::WriteOnly)) {
+                    file.write(QJsonDocument(status).toJson(QJsonDocument::Compact));
+                    file.commit();
+                }
+            }
+        }
     }
 
     QObject::connect(&app, &QCoreApplication::aboutToQuit, &controller,

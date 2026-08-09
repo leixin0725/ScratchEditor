@@ -938,7 +938,9 @@ std::optional<int> taskCheckboxStatePosition(const QString &line)
 
 } // namespace
 
-EditorCommandRegistry::EditorCommandRegistry(AppSettings *settings, QObject *parent)
+EditorCommandRegistry::EditorCommandRegistry(AppSettings *settings,
+                                             bool clipboardHistoryAvailable,
+                                             QObject *parent)
     : QObject(parent)
     , m_settings(settings)
 {
@@ -994,6 +996,12 @@ EditorCommandRegistry::EditorCommandRegistry(AppSettings *settings, QObject *par
         {QStringLiteral("formatSpacing"), QStringLiteral("整理选区或当前行格式"),
          QStringLiteral("编辑"), QStringLiteral("Alt+F"), {}, false},
     };
+
+    if (clipboardHistoryAvailable) {
+        m_definitions.append({QStringLiteral("clipboardHistory"),
+                              QStringLiteral("打开剪贴板历史"),
+                              QStringLiteral("界面"), QString(), {}, true});
+    }
 
     for (Definition &item : m_definitions) {
         item.shortcut = m_settings ? m_settings->shortcut(item.id, item.defaultShortcut)
