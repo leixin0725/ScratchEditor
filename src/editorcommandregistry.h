@@ -88,6 +88,7 @@ private:
     bool deleteSelectedLines();
     bool copyLine();
     bool cutLine();
+    bool cutSelection();
     bool pasteClipboard();
     bool toggleCurrentCheckbox();
     TypedEditResult handleTypedText(const QString &text);
@@ -105,11 +106,15 @@ private:
     CompletionResult finishMidlineQuoteOpening(int openerPosition, int closerPosition,
                                                QChar opening);
     bool handleSpecialBackspace();
+    bool handleStructuralDelete(bool backwards);
     bool handleListEnter();
+    void repairOrderedLists(const QString &beforeText, const QString &afterText,
+                            bool preservePreviousStart);
     bool jumpOutOfPair();
     bool changeIndent(bool outdent);
     bool formatSpacing();
-    void applyAutoSpacing(EditFootprint footprint, bool includeInternalBoundaries = false);
+    void applyAutoSpacing(EditFootprint footprint, bool includeInternalBoundaries = false,
+                          const std::optional<QString> &expectedText = std::nullopt);
     bool isInsideFencedBlock(int position) const;
     std::optional<CompletionResult> completeInputMethodCommit(
         const QString &committedText, const QString &beforeText,
@@ -130,6 +135,8 @@ private:
     AppSettings *m_settings = nullptr;
     QPointer<QObject> m_editor;
     QPointer<QTextDocument> m_document;
+    QString m_documentTextSnapshot;
+    bool m_documentTextSnapshotPrepared = false;
     QVector<Definition> m_definitions;
     QHash<QString, std::function<bool()>> m_commandHandlers;
     ClipboardReader m_clipboardReader;

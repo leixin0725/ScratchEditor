@@ -1318,6 +1318,8 @@ void EditorController::buildCommandHandlers()
                 key = Qt::Key_Up;
             } else if (keyName == QStringLiteral("Backspace")) {
                 key = Qt::Key_Backspace;
+            } else if (keyName == QStringLiteral("Delete")) {
+                key = Qt::Key_Delete;
             } else if (keyName == QStringLiteral("Enter")) {
                 key = Qt::Key_Return;
             } else if (keyName.size() == 1) {

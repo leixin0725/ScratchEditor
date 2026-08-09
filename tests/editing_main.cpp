@@ -1122,6 +1122,133 @@ int main(int argc, char *argv[])
              QJsonObject{{QStringLiteral("flat"), insertedOrderedItem},
                          {QStringLiteral("nested"), insertedBeforeNestedItem}});
 
+    setTextAndSelection(QStringLiteral("1. one\n2. two\n3. three"), 7, 7);
+    const QJsonObject deletedOrderedLine = execute(QStringLiteral("deleteLine"));
+    const QJsonObject deletedOrderedLineUndo = request(QStringLiteral("testUndo"));
+    const QJsonObject deletedOrderedLineRedo = request(QStringLiteral("testRedo"));
+    setTextAndSelection(QStringLiteral("1. one\n2. two\n3. three"), 7, 7);
+    const QJsonObject cutOrderedLine = keyPress({}, QStringLiteral("X"), false,
+                                                QStringLiteral("ctrl"));
+    addCheck(checks, details, QStringLiteral("orderedListLineRemovalRenumbers"),
+             deletedOrderedLine.value(QStringLiteral("text")).toString()
+                    == QStringLiteral("1. one\n2. three")
+                 && deletedOrderedLineUndo.value(QStringLiteral("text")).toString()
+                    == QStringLiteral("1. one\n2. two\n3. three")
+                 && deletedOrderedLineRedo.value(QStringLiteral("text")).toString()
+                    == QStringLiteral("1. one\n2. three")
+                 && cutOrderedLine.value(QStringLiteral("text")).toString()
+                    == QStringLiteral("1. one\n2. three"),
+             QJsonObject{{QStringLiteral("delete"), deletedOrderedLine},
+                         {QStringLiteral("undo"), deletedOrderedLineUndo},
+                         {QStringLiteral("redo"), deletedOrderedLineRedo},
+                         {QStringLiteral("cut"), cutOrderedLine}});
+
+    setTextAndSelection(QStringLiteral("1. one\n2. two\n3. three"), 0, 7);
+    keyPress({}, QStringLiteral("Delete"));
+    QThread::msleep(30);
+    const QJsonObject selectionDeletedOrderedItem = editorStatus();
+    const QString selectionDeletedOrderedText = editorText();
+    setTextAndSelection(QStringLiteral("1. one\n2. two\n3. three"), 7, 14);
+    setClipboard(QStringLiteral("9. replacement\n"));
+    keyPress({}, QStringLiteral("V"), false, QStringLiteral("ctrl"));
+    QThread::msleep(30);
+    const QJsonObject replacedOrderedItem = editorStatus();
+    const QString replacedOrderedText = editorText();
+    addCheck(checks, details, QStringLiteral("orderedListNativeStructuralEditsRenumber"),
+             selectionDeletedOrderedText == QStringLiteral("1. two\n2. three")
+                 && replacedOrderedText
+                    == QStringLiteral("1. one\n2. replacement\n3. three"),
+             QJsonObject{
+                 {QStringLiteral("deleteSelection"), selectionDeletedOrderedItem},
+                 {QStringLiteral("deleteSelectionText"), selectionDeletedOrderedText},
+                 {QStringLiteral("replaceSelection"), replacedOrderedItem},
+                 {QStringLiteral("replaceSelectionText"), replacedOrderedText}});
+
+    setTextAndSelection(QStringLiteral("1. one\n2. two\n3. three"), 7, 8);
+    keyPress(QStringLiteral("8"), QStringLiteral("8"));
+    QThread::msleep(30);
+    const QJsonObject normalizedMiddleNumber = editorStatus();
+    const QString normalizedMiddleText = editorText();
+    setTextAndSelection(QStringLiteral("1. one\n2. two\n3. three"), 8, 8);
+    keyPress({}, QStringLiteral("Backspace"));
+    keyPress(QStringLiteral("8"), QStringLiteral("8"));
+    QThread::msleep(30);
+    const QJsonObject normalizedRetypedMiddleNumber = editorStatus();
+    const QString normalizedRetypedMiddleText = editorText();
+    setTextAndSelection(QStringLiteral("1. one\n2. two\n3. three"), 0, 1);
+    keyPress(QStringLiteral("4"), QStringLiteral("4"));
+    QThread::msleep(30);
+    const QJsonObject changedOrderedStart = editorStatus();
+    const QString changedOrderedStartText = editorText();
+    addCheck(checks, details, QStringLiteral("orderedListManualNumberPolicy"),
+             normalizedMiddleText == QStringLiteral("1. one\n2. two\n3. three")
+                 && normalizedRetypedMiddleText
+                    == QStringLiteral("1. one\n2. two\n3. three")
+                 && changedOrderedStartText
+                    == QStringLiteral("4. one\n5. two\n6. three"),
+             QJsonObject{
+                 {QStringLiteral("middle"), normalizedMiddleNumber},
+                 {QStringLiteral("middleText"), normalizedMiddleText},
+                 {QStringLiteral("retypedMiddle"), normalizedRetypedMiddleNumber},
+                 {QStringLiteral("retypedMiddleText"), normalizedRetypedMiddleText},
+                 {QStringLiteral("start"), changedOrderedStart},
+                 {QStringLiteral("startText"), changedOrderedStartText}});
+
+    setTextAndSelection(QStringLiteral("1. \n2. two\n3. three"), 3, 3);
+    const QJsonObject deletedFirstEmptyOrdered = keyPress({}, QStringLiteral("Backspace"));
+    setTextAndSelection(QStringLiteral("1. one\n    1. child\n2. two"), 11, 11);
+    const QJsonObject deletedNestedOrdered = execute(QStringLiteral("deleteLine"));
+    setTextAndSelection(QStringLiteral("8. eight\n9. nine\n10. ten\n11. eleven"), 9, 9);
+    const QJsonObject deletedAcrossDigitBoundary = execute(QStringLiteral("deleteLine"));
+    setTextAndSelection(QStringLiteral("1. one\n2. two\n3. three\n\n7. seven\n8. eight"), 7, 7);
+    const QJsonObject preservedSeparateOrderedBlock = execute(QStringLiteral("deleteLine"));
+    addCheck(checks, details, QStringLiteral("orderedListDeletionBoundaries"),
+             deletedFirstEmptyOrdered.value(QStringLiteral("text")).toString()
+                    == QStringLiteral("1. two\n2. three")
+                 && deletedNestedOrdered.value(QStringLiteral("text")).toString()
+                    == QStringLiteral("1. one\n2. two")
+                 && deletedAcrossDigitBoundary.value(QStringLiteral("text")).toString()
+                    == QStringLiteral("8. eight\n9. ten\n10. eleven")
+                 && preservedSeparateOrderedBlock.value(QStringLiteral("text")).toString()
+                    == QStringLiteral("1. one\n2. three\n\n7. seven\n8. eight"),
+             QJsonObject{{QStringLiteral("firstEmpty"), deletedFirstEmptyOrdered},
+                         {QStringLiteral("nested"), deletedNestedOrdered},
+                         {QStringLiteral("digits"), deletedAcrossDigitBoundary},
+                         {QStringLiteral("separateBlock"), preservedSeparateOrderedBlock}});
+
+    setTextAndSelection(QStringLiteral("1. one\n2. two\n3. three"), 7, 13);
+    const QJsonObject indentedOrderedItem = keyPress({}, QStringLiteral("Tab"));
+    setTextAndSelection(QStringLiteral("1. one\n2. two\n3. three"), 7, 14);
+    const QJsonObject movedOrderedItem = dragSelection(7, 14, 0);
+    addCheck(checks, details, QStringLiteral("orderedListMoveAndIndentRenumber"),
+             indentedOrderedItem.value(QStringLiteral("text")).toString()
+                    == QStringLiteral("1. one\n    2. two\n2. three")
+                 && movedOrderedItem.value(QStringLiteral("text")).toString()
+                    == QStringLiteral("1. two\n2. one\n3. three"),
+             QJsonObject{{QStringLiteral("indent"), indentedOrderedItem},
+                         {QStringLiteral("move"), movedOrderedItem}});
+
+    QStringList largeOrderedLines;
+    largeOrderedLines.reserve(500);
+    for (int number = 1; number <= 500; ++number) {
+        largeOrderedLines.append(QStringLiteral("%1. item %1").arg(number));
+    }
+    const QString largeOrderedList = largeOrderedLines.join(QLatin1Char('\n'));
+    const int largeDeletePosition = largeOrderedList.indexOf(QStringLiteral("250. item"));
+    setTextAndSelection(largeOrderedList, largeDeletePosition, largeDeletePosition);
+    QElapsedTimer orderedRepairTimer;
+    orderedRepairTimer.start();
+    const QJsonObject repairedLargeOrderedList = execute(QStringLiteral("deleteLine"));
+    const qint64 orderedRepairMs = orderedRepairTimer.elapsed();
+    const QString repairedLargeText = repairedLargeOrderedList.value(
+        QStringLiteral("text")).toString();
+    addCheck(checks, details, QStringLiteral("orderedListRepairScalesLinearly"),
+             orderedRepairMs < 2000
+                 && repairedLargeText.contains(QStringLiteral("249. item 249\n250. item 251"))
+                 && repairedLargeText.endsWith(QStringLiteral("499. item 500")),
+             QJsonObject{{QStringLiteral("elapsedMs"), orderedRepairMs},
+                         {QStringLiteral("length"), repairedLargeText.size()}});
+
     setTextAndSelection(QStringLiteral("- aaa\n- bbb\n- \n- ddd"), 14, 14);
     const QJsonObject backspaceEmptyBullet = keyPress({}, QStringLiteral("Backspace"));
     setTextAndSelection(QStringLiteral("- aaa\n- bbb\n- \n- ddd"), 14, 14);
