@@ -126,6 +126,12 @@ QJsonObject formatAt(const QString &document, const QString &needle, int offset 
                    {{QStringLiteral("position"), document.indexOf(needle) + offset}});
 }
 
+QJsonObject formatAtPosition(int position)
+{
+    return request(QStringLiteral("testFormatAt"),
+                   {{QStringLiteral("position"), position}});
+}
+
 bool hasColor(const QJsonObject &format, const QString &color)
 {
     return format.value(QStringLiteral("formatted")).toBool()
@@ -449,6 +455,210 @@ int main(int argc, char *argv[])
                  && strikeStyle.value(QStringLiteral("strikeThrough")).toBool(),
              boldItalicStyle);
 
+    const QString pathMarkdown = QStringLiteral(
+        "左侧文字 `D:\\_Dev\\ScratchEditor` 示例文字 `D:\\_Dev\\ScratchEditor` 右侧文字");
+    request(QStringLiteral("testSetText"),
+            {{QStringLiteral("text"), pathMarkdown}});
+    const QJsonObject pathCodeStyle = formatAtPosition(pathMarkdown.indexOf(QStringLiteral("_Dev")));
+    const QJsonObject pathMiddleStyle = formatAtPosition(
+        pathMarkdown.indexOf(QStringLiteral("示例文字")));
+    addCheck(checks, details, QStringLiteral("underscorePathsDoNotCrossCodeSpans"),
+             pathCodeStyle.value(QStringLiteral("background")).toString()
+                    == QStringLiteral("#303030")
+                 && !pathCodeStyle.value(QStringLiteral("italic")).toBool()
+                 && !pathMiddleStyle.value(QStringLiteral("italic")).toBool(),
+             QJsonObject{{QStringLiteral("code"), pathCodeStyle},
+                         {QStringLiteral("middle"), pathMiddleStyle}});
+
+    const QString barePathMarkdown = QStringLiteral(
+        "左侧文字 D:\\_Dev\\ScratchEditor 示例文字 D:\\_Dev\\ScratchEditor 右侧文字");
+    request(QStringLiteral("testSetText"),
+            {{QStringLiteral("text"), barePathMarkdown}});
+    const QJsonObject barePathMiddleStyle = formatAtPosition(
+        barePathMarkdown.indexOf(QStringLiteral("示例文字")));
+    addCheck(checks, details, QStringLiteral("bareUnderscorePathsStayLiteral"),
+             !barePathMiddleStyle.value(QStringLiteral("italic")).toBool(),
+             barePathMiddleStyle);
+
+    const QString emphasisBoundaries = QStringLiteral(
+        "_italic_ __bold__ ___both___ foo_bar_baz foo*star*baz \\_literal\\_ "
+        "**outer *inner* outer**");
+    request(QStringLiteral("testSetText"),
+            {{QStringLiteral("text"), emphasisBoundaries}});
+    const QJsonObject underscoreItalic = formatAt(emphasisBoundaries,
+                                                   QStringLiteral("italic"));
+    const QJsonObject underscoreBold = formatAt(emphasisBoundaries,
+                                                 QStringLiteral("bold"));
+    const QJsonObject underscoreBoth = formatAt(emphasisBoundaries,
+                                                 QStringLiteral("both"));
+    const QJsonObject intrawordUnderscore = formatAt(emphasisBoundaries,
+                                                     QStringLiteral("bar"));
+    const QJsonObject intrawordAsterisk = formatAt(emphasisBoundaries,
+                                                   QStringLiteral("star"));
+    const QJsonObject escapedUnderscore = formatAt(emphasisBoundaries,
+                                                   QStringLiteral("literal"));
+    const QJsonObject nestedOuter = formatAt(emphasisBoundaries,
+                                              QStringLiteral("outer"));
+    const QJsonObject nestedInner = formatAt(emphasisBoundaries,
+                                              QStringLiteral("inner"));
+    addCheck(checks, details, QStringLiteral("commonMarkEmphasisBoundaries"),
+             underscoreItalic.value(QStringLiteral("italic")).toBool()
+                 && underscoreBold.value(QStringLiteral("bold")).toBool()
+                 && !underscoreBold.value(QStringLiteral("italic")).toBool()
+                 && underscoreBoth.value(QStringLiteral("bold")).toBool()
+                 && underscoreBoth.value(QStringLiteral("italic")).toBool()
+                 && !intrawordUnderscore.value(QStringLiteral("italic")).toBool()
+                 && intrawordAsterisk.value(QStringLiteral("italic")).toBool()
+                 && !escapedUnderscore.value(QStringLiteral("italic")).toBool()
+                 && nestedOuter.value(QStringLiteral("bold")).toBool()
+                 && !nestedOuter.value(QStringLiteral("italic")).toBool()
+                 && nestedInner.value(QStringLiteral("bold")).toBool()
+                 && nestedInner.value(QStringLiteral("italic")).toBool(),
+             QJsonObject{{QStringLiteral("underscoreItalic"), underscoreItalic},
+                         {QStringLiteral("underscoreBold"), underscoreBold},
+                         {QStringLiteral("underscoreBoth"), underscoreBoth},
+                         {QStringLiteral("intrawordUnderscore"), intrawordUnderscore},
+                         {QStringLiteral("intrawordAsterisk"), intrawordAsterisk},
+                         {QStringLiteral("escaped"), escapedUnderscore},
+                         {QStringLiteral("nestedOuter"), nestedOuter},
+                         {QStringLiteral("nestedInner"), nestedInner}});
+
+    const QString emphasisEdgeCases = QStringLiteral(
+        "_中文_ 中_文_中 €_symbol_ 😀_emoji_\n_ leading_\n_trailing _\n\\\\*even*\n"
+        "*foo _bar* baz_\n*a `*`*");
+    request(QStringLiteral("testSetText"),
+            {{QStringLiteral("text"), emphasisEdgeCases}});
+    const QJsonObject unicodeEmphasis = formatAt(emphasisEdgeCases,
+                                                  QStringLiteral("中文"));
+    const QJsonObject unicodeIntraword = formatAtPosition(
+        emphasisEdgeCases.indexOf(QStringLiteral("中_文")) + 2);
+    const QJsonObject unicodeSymbolBoundary = formatAt(emphasisEdgeCases,
+                                                        QStringLiteral("symbol"));
+    const QJsonObject surrogateSymbolBoundary = formatAt(emphasisEdgeCases,
+                                                          QStringLiteral("emoji"));
+    const QJsonObject leadingWhitespace = formatAt(emphasisEdgeCases,
+                                                    QStringLiteral("leading"));
+    const QJsonObject trailingWhitespace = formatAt(emphasisEdgeCases,
+                                                     QStringLiteral("trailing"));
+    const QJsonObject evenlyEscaped = formatAt(emphasisEdgeCases,
+                                                QStringLiteral("even"));
+    const int overlapStart = emphasisEdgeCases.indexOf(QStringLiteral("*foo"));
+    const QJsonObject overlapFirst = formatAtPosition(overlapStart + 1);
+    const QJsonObject overlapInner = formatAtPosition(
+        emphasisEdgeCases.indexOf(QStringLiteral("_bar")) + 1);
+    const QJsonObject overlapTail = formatAt(emphasisEdgeCases,
+                                              QStringLiteral("baz"));
+    const int codePrecedenceStart = emphasisEdgeCases.indexOf(QStringLiteral("*a `"));
+    const QJsonObject emphasisAroundCode = formatAtPosition(codePrecedenceStart + 1);
+    const QJsonObject codeInsideEmphasis = formatAtPosition(codePrecedenceStart + 4);
+    addCheck(checks, details, QStringLiteral("emphasisUnicodeAndPrecedenceEdges"),
+             unicodeEmphasis.value(QStringLiteral("italic")).toBool()
+                 && !unicodeIntraword.value(QStringLiteral("italic")).toBool()
+                 && unicodeSymbolBoundary.value(QStringLiteral("italic")).toBool()
+                 && surrogateSymbolBoundary.value(QStringLiteral("italic")).toBool()
+                 && !leadingWhitespace.value(QStringLiteral("italic")).toBool()
+                 && !trailingWhitespace.value(QStringLiteral("italic")).toBool()
+                 && evenlyEscaped.value(QStringLiteral("italic")).toBool()
+                 && overlapFirst.value(QStringLiteral("italic")).toBool()
+                 && overlapInner.value(QStringLiteral("italic")).toBool()
+                 && !overlapTail.value(QStringLiteral("italic")).toBool()
+                 && emphasisAroundCode.value(QStringLiteral("italic")).toBool()
+                 && codeInsideEmphasis.value(QStringLiteral("background")).toString()
+                    == QStringLiteral("#303030")
+                 && !codeInsideEmphasis.value(QStringLiteral("italic")).toBool(),
+             QJsonObject{{QStringLiteral("unicode"), unicodeEmphasis},
+                         {QStringLiteral("unicodeIntraword"), unicodeIntraword},
+                         {QStringLiteral("unicodeSymbol"), unicodeSymbolBoundary},
+                         {QStringLiteral("surrogateSymbol"), surrogateSymbolBoundary},
+                         {QStringLiteral("leadingWhitespace"), leadingWhitespace},
+                         {QStringLiteral("trailingWhitespace"), trailingWhitespace},
+                         {QStringLiteral("evenEscape"), evenlyEscaped},
+                         {QStringLiteral("overlapFirst"), overlapFirst},
+                         {QStringLiteral("overlapInner"), overlapInner},
+                         {QStringLiteral("overlapTail"), overlapTail},
+                         {QStringLiteral("aroundCode"), emphasisAroundCode},
+                         {QStringLiteral("insideCode"), codeInsideEmphasis}});
+
+    const QString emphasisResolution = QStringLiteral(
+        "*foo **bar***\n**foo *bar* baz**\n**first **short close**\n"
+        "foo***triple***baz");
+    request(QStringLiteral("testSetText"),
+            {{QStringLiteral("text"), emphasisResolution}});
+    const QJsonObject italicOuter = formatAt(emphasisResolution, QStringLiteral("foo"));
+    const QJsonObject strongInsideItalic = formatAt(emphasisResolution,
+                                                     QStringLiteral("bar"));
+    const int secondLine = emphasisResolution.indexOf(QStringLiteral("**foo *bar"));
+    const QJsonObject strongOuter = formatAtPosition(secondLine + 2);
+    const QJsonObject italicInsideStrong = formatAtPosition(
+        emphasisResolution.indexOf(QStringLiteral("*bar*"), secondLine) + 1);
+    const QJsonObject earlierSameOpener = formatAt(emphasisResolution,
+                                                   QStringLiteral("first"));
+    const QJsonObject shorterSameCloser = formatAt(emphasisResolution,
+                                                    QStringLiteral("short"));
+    const QJsonObject tripleIntraword = formatAt(emphasisResolution,
+                                                 QStringLiteral("triple"));
+    addCheck(checks, details, QStringLiteral("commonMarkNestingResolution"),
+             italicOuter.value(QStringLiteral("italic")).toBool()
+                 && !italicOuter.value(QStringLiteral("bold")).toBool()
+                 && strongInsideItalic.value(QStringLiteral("italic")).toBool()
+                 && strongInsideItalic.value(QStringLiteral("bold")).toBool()
+                 && strongOuter.value(QStringLiteral("bold")).toBool()
+                 && !strongOuter.value(QStringLiteral("italic")).toBool()
+                 && italicInsideStrong.value(QStringLiteral("bold")).toBool()
+                 && italicInsideStrong.value(QStringLiteral("italic")).toBool()
+                 && !earlierSameOpener.value(QStringLiteral("bold")).toBool()
+                 && shorterSameCloser.value(QStringLiteral("bold")).toBool()
+                 && tripleIntraword.value(QStringLiteral("bold")).toBool()
+                 && tripleIntraword.value(QStringLiteral("italic")).toBool(),
+             QJsonObject{{QStringLiteral("italicOuter"), italicOuter},
+                         {QStringLiteral("strongInsideItalic"), strongInsideItalic},
+                         {QStringLiteral("strongOuter"), strongOuter},
+                         {QStringLiteral("italicInsideStrong"), italicInsideStrong},
+                         {QStringLiteral("earlierSameOpener"), earlierSameOpener},
+                         {QStringLiteral("shorterSameCloser"), shorterSameCloser},
+                         {QStringLiteral("tripleIntraword"), tripleIntraword}});
+
+    const QString codeAndLinkMarkdown = QStringLiteral(
+        "`_single_` ``a`_multi_`` _outside_ *[Title](URL_with_under)* "
+        "`unclosed ``_later_``");
+    request(QStringLiteral("testSetText"),
+            {{QStringLiteral("text"), codeAndLinkMarkdown}});
+    const QJsonObject singleCodeEmphasis = formatAt(codeAndLinkMarkdown,
+                                                     QStringLiteral("single"));
+    const QJsonObject multiCodeEmphasis = formatAt(codeAndLinkMarkdown,
+                                                    QStringLiteral("multi"));
+    const QJsonObject outsideEmphasis = formatAt(codeAndLinkMarkdown,
+                                                  QStringLiteral("outside"));
+    const QJsonObject emphasizedLink = formatAt(codeAndLinkMarkdown,
+                                                 QStringLiteral("Title"));
+    const QJsonObject emphasizedLinkTarget = formatAt(codeAndLinkMarkdown,
+                                                       QStringLiteral("URL"));
+    const QJsonObject codeAfterUnmatchedRun = formatAt(codeAndLinkMarkdown,
+                                                        QStringLiteral("later"));
+    addCheck(checks, details, QStringLiteral("codeAndLinkPrecedeEmphasis"),
+             singleCodeEmphasis.value(QStringLiteral("background")).toString()
+                    == QStringLiteral("#303030")
+                 && !singleCodeEmphasis.value(QStringLiteral("italic")).toBool()
+                 && multiCodeEmphasis.value(QStringLiteral("background")).toString()
+                    == QStringLiteral("#303030")
+                 && !multiCodeEmphasis.value(QStringLiteral("italic")).toBool()
+                 && outsideEmphasis.value(QStringLiteral("italic")).toBool()
+                 && emphasizedLink.value(QStringLiteral("underline")).toBool()
+                 && emphasizedLink.value(QStringLiteral("italic")).toBool()
+                 && emphasizedLinkTarget.value(QStringLiteral("underline")).toBool()
+                 && emphasizedLinkTarget.value(QStringLiteral("italic")).toBool()
+                 && codeAfterUnmatchedRun.value(QStringLiteral("background")).toString()
+                    == QStringLiteral("#303030")
+                 && !codeAfterUnmatchedRun.value(QStringLiteral("italic")).toBool(),
+             QJsonObject{{QStringLiteral("singleCode"), singleCodeEmphasis},
+                         {QStringLiteral("multiCode"), multiCodeEmphasis},
+                         {QStringLiteral("outside"), outsideEmphasis},
+                         {QStringLiteral("link"), emphasizedLink},
+                         {QStringLiteral("linkTarget"), emphasizedLinkTarget},
+                         {QStringLiteral("afterUnmatched"), codeAfterUnmatchedRun}});
+
+    request(QStringLiteral("testSetText"),
+            {{QStringLiteral("text"), styledMarkdown}});
     const QJsonObject linkTextStyle = formatAt(styledMarkdown, QStringLiteral("Title"));
     const QJsonObject linkBracketStyle = formatAt(styledMarkdown, QStringLiteral("[Title"));
     const QJsonObject checkboxStyle = formatAt(styledMarkdown, QStringLiteral("[ ]"));

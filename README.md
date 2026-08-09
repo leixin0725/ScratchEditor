@@ -78,6 +78,11 @@ Qt 6 Quick/QML、C++20 和 CMake；AutoHotkey 继续负责全局快捷键与启�
 `theme.accentTextColor` 控制强调色背景上的文字。行内代码和围栏代码的背景色、等宽字体及其他
 Markdown 样式也由该文件管理。
 
+普通文本行中的 `*` / `_` 强调按 CommonMark 的左右侧定界规则高亮：词内下划线保持字面量，
+反斜杠可转义强调标记，粗体与斜体嵌套时组合显示。等长反引号 run 构成的行内代码和现有
+`[标题](目标)` 链接优先于强调，内部标记不会与外部标记误配；标题、引用和任务等结构行继续
+使用各自的整行样式。
+
 稳定安装首次构建时会把模板初始化到
 `%LOCALAPPDATA%\ScratchEditor\ScratchEditor\markdown-style.json`。Codex/pi 与 AHK 两个安装副本
 共同读取并监听这一个用户配置；可随时手工保存修改，运行中的编辑器会自动热更新，无需重启。后续构建
