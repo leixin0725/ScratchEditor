@@ -46,4 +46,4 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\run-editing-te
 6. **提交、部署和文档维护**：重要改动完成后检查并更新 `docs/README.md` 索引；已完结的功能需求移入 `docs/archive/`；用户要求提交后，若最新版尚未部署，主动询问是否需要部署。
 7. **文件编码**：项目内所有含中文的文本文件统一为 UTF-8（无 BOM）编码，不得混用 GBK/ANSI、UTF-16 或带 BOM 的 UTF-8；新增或编辑文件时保持该约定。
 8. **沙箱权限**：开发沙箱对 `.git` 目录只读，`git add`/`git commit` 等写入 `.git` 的操作必须使用沙箱外权限（require_escalated）执行，可直接申请，无需先在沙箱内试错。
-9. **Worktree 共享工具链安全**：worktree 的 `.tools` 可能是指向主工作区 `.tools` 的目录联接（junction）。移除 worktree 前必须检查 `.tools` 的 `LinkType` 与 `Target`；若为共享联接，必须先只解除联接并确认目标目录及工具链仍存在，再执行 `git worktree remove`。禁止直接移除包含共享 `.tools` 联接的 worktree，也禁止对该联接执行递归删除；Git for Windows 可能沿联接清空主工作区工具链。
+9. **Worktree 共享工具链安全**：worktree 的 `.tools` 可能是指向主工作区 `.tools` 的目录联接（junction）。移除任何非主 worktree 必须使用 `scripts/remove-worktree.ps1 -WorktreePath <path>`；该脚本会验证注册状态，只解除 `.tools` 联接，确认共享工具链仍存在后才调用 Git。禁止绕过脚本直接执行 `git worktree remove`，禁止直接移除包含共享 `.tools` 联接的 worktree，也禁止对该联接执行递归删除；Git for Windows 可能沿联接清空主工作区工具链。若脚本因 `.tools` 不是 junction、共享目标不完整或 worktree 未注册而拒绝执行，必须停止并向用户确认，不得自行清理。

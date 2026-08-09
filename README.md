@@ -141,6 +141,27 @@ Codex / pi ───────文件模式───> %LOCALAPPDATA%\ScratchEdi
 已验证工具链：Qt 6.10.2、MinGW 13.1、CMake 3.25+、Ninja、Windows 11。
 工作区工具链默认位于 `.tools/Qt`，该目录不会提交到 Git。
 
+首次配置或 `.tools` 缓存丢失后，运行以下脚本即可从 Qt 官方仓库恢复项目锁定的完整工具链：
+
+```powershell
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\restore-toolchain.ps1
+```
+
+脚本使用临时 Python 3.13 环境和固定版本的 `aqtinstall`，先在 `.tools` 下暂存并校验
+Qt 6.10.2、MinGW 13.1、CMake 与 Ninja，成功后再替换 `.tools/Qt`。完整环境重复执行会直接跳过；
+非空但不完整的目录默认拒绝覆盖，确认其中没有需要保留的内容后可显式传入 `-Force`。
+
+创建 worktree 时若把其中的 `.tools` 设为指向主工作区 `.tools` 的目录联接，必须使用受保护的入口移除：
+
+```powershell
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\remove-worktree.ps1 `
+  -WorktreePath <worktree>
+```
+
+脚本会确认路径属于已注册的非主 worktree；若存在 `.tools`，则要求其必须是 `Junction`，只解除联接并
+确认共享工具链仍完整后才执行 `git worktree remove`。不要绕过脚本直接移除仍包含共享 `.tools`
+联接的 worktree，也不要对该联接递归删除；Git for Windows 可能沿联接清空主工作区工具链。
+
 ```powershell
 ./scripts/build.ps1
 ```
