@@ -23,7 +23,8 @@ class EditorCommandRegistry final : public QObject
     Q_OBJECT
 
 public:
-    explicit EditorCommandRegistry(AppSettings *settings, QObject *parent = nullptr);
+    explicit EditorCommandRegistry(AppSettings *settings, bool clipboardHistoryAvailable = true,
+                                   QObject *parent = nullptr);
 
     void setEditor(QObject *editor, QTextDocument *document);
     using ClipboardReader = std::function<QString()>;

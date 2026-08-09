@@ -61,6 +61,13 @@ QJsonObject execute(const QString &commandId)
                    {{QStringLiteral("commandId"), commandId}});
 }
 
+QJsonObject historyAction(const QString &action, const QString &value = {})
+{
+    return request(QStringLiteral("testClipboardHistoryUiAction"),
+                   {{QStringLiteral("action"), action},
+                    {QStringLiteral("value"), value}}, 5000);
+}
+
 void addCheck(QJsonObject &checks, QJsonObject &details, const QString &name, bool passed,
               const QJsonValue &detail = {})
 {
@@ -501,6 +508,257 @@ int main(int argc, char *argv[])
                  && panelReset.value(QStringLiteral("statusPanelHideDelayMs")).toInt() == 250
                  && panelReset.value(QStringLiteral("statusPanelMaxWidth")).toInt() == 360,
              panelReset);
+
+    const QJsonObject beforeHistoryLayout = request(QStringLiteral("status"));
+    request(QStringLiteral("testDiscardClose"));
+    QThread::msleep(180);
+    request(QStringLiteral("testResetClipboardHistory"));
+    request(QStringLiteral("testSetGeometry"),
+            {{QStringLiteral("x"), 100}, {QStringLiteral("y"), 100},
+             {QStringLiteral("width"), 920}, {QStringLiteral("height"), 640}});
+    request(QStringLiteral("show"));
+    QThread::msleep(180);
+    const QJsonObject historyInitial = request(QStringLiteral("status"));
+    addCheck(checks, details, QStringLiteral("historyPanelDefaults"),
+             historyInitial.value(QStringLiteral("historyAvailable")).toBool()
+                 && historyInitial.value(QStringLiteral("historyPanelLoaded")).toBool()
+                 && !historyInitial.value(QStringLiteral("historyPanelOpen")).toBool()
+                 && historyInitial.value(QStringLiteral("historyTriggerWidth")).toInt() == 12
+                 && historyInitial.value(QStringLiteral("historyRevealZoneX")).toInt() == 0
+                 && historyInitial.value(QStringLiteral("historyRevealZoneWidth")).toInt() == 30
+                 && historyInitial.value(QStringLiteral("historyPanelClipped")).toBool()
+                 && !historyInitial.value(QStringLiteral("historyRevealBlocksPointer")).toBool()
+                 && historyInitial.value(QStringLiteral("historyHoverOpenDelayMs")).toInt() == 100
+                 && historyInitial.value(QStringLiteral("historyHoverCloseDelayMs")).toInt() == 250,
+             historyInitial);
+    request(QStringLiteral("testEmitClipboardChange"),
+            {{QStringLiteral("kind"), QStringLiteral("text")},
+             {QStringLiteral("text"), QStringLiteral("alpha\nsecond line")},
+             {QStringLiteral("capturedAtMs"), 1786200000000.0}});
+    request(QStringLiteral("testEmitClipboardChange"),
+            {{QStringLiteral("kind"), QStringLiteral("text")},
+             {QStringLiteral("text"), QStringLiteral("Beta 😀")},
+             {QStringLiteral("capturedAtMs"), 1786200001000.0}});
+    const QJsonObject historyCommand = execute(QStringLiteral("clipboardHistory"));
+    QThread::msleep(150);
+    const QJsonObject wideHistory = request(QStringLiteral("status"));
+    addCheck(checks, details, QStringLiteral("historyCommandOpensFocusedPushPanel"),
+             historyCommand.value(QStringLiteral("executed")).toBool()
+                 && wideHistory.value(QStringLiteral("historyPanelOpen")).toBool()
+                 && wideHistory.value(QStringLiteral("historyQueryFocused")).toBool()
+                 && !wideHistory.value(QStringLiteral("historyPanelOverlay")).toBool()
+                 && wideHistory.value(QStringLiteral("width")).toInt() == 920
+                 && qAbs(wideHistory.value(QStringLiteral("historyPanelWidth")).toDouble()
+                         - 920.0 / 3.0) < 1.0
+                 && wideHistory.value(QStringLiteral("editorVisibleWidth")).toDouble() >= 320.0,
+             wideHistory);
+
+    const QJsonObject historyState = request(QStringLiteral("testClipboardHistoryState"));
+    const QJsonArray historyItems = historyState.value(QStringLiteral("items")).toArray();
+    const QString selectedHistoryId = historyItems.isEmpty()
+        ? QString() : historyItems.first().toObject().value(QStringLiteral("id")).toString();
+    const QJsonObject beforeSingleClickText = request(QStringLiteral("testText"));
+    historyAction(QStringLiteral("historySelect"), selectedHistoryId);
+    const QJsonObject afterSingleClickText = request(QStringLiteral("testText"));
+    addCheck(checks, details, QStringLiteral("historySingleClickOnlySelects"),
+             !selectedHistoryId.isEmpty()
+                 && beforeSingleClickText.value(QStringLiteral("text"))
+                    == afterSingleClickText.value(QStringLiteral("text")),
+             afterSingleClickText);
+    historyAction(QStringLiteral("historySetQuery"), QStringLiteral("ALPHA"));
+    const QJsonObject filteredHistory = request(QStringLiteral("testClipboardHistoryState"));
+    addCheck(checks, details, QStringLiteral("historySearchIsCaseInsensitiveFullText"),
+             filteredHistory.value(QStringLiteral("visibleIds")).toArray().size() == 1,
+             filteredHistory);
+    const QString filteredId = filteredHistory.value(QStringLiteral("visibleIds"))
+                                   .toArray().first().toString();
+    historyAction(QStringLiteral("historySelect"), filteredId);
+    request(QStringLiteral("testSetText"),
+            {{QStringLiteral("text"), QStringLiteral("dirty buffer")}});
+    const QJsonObject dirtyBefore = request(QStringLiteral("status"));
+    const QString dirtyTextBefore = request(QStringLiteral("testText"))
+                                        .value(QStringLiteral("text")).toString();
+    historyAction(QStringLiteral("historyActivateSelected"));
+    const QJsonObject dirtyConfirmation = request(QStringLiteral("status"));
+    historyAction(QStringLiteral("historyCancelLoad"));
+    const QJsonObject dirtyCancelled = request(QStringLiteral("status"));
+    const QString dirtyTextAfterCancel = request(QStringLiteral("testText"))
+                                             .value(QStringLiteral("text")).toString();
+    addCheck(checks, details, QStringLiteral("historyDirtyLoadCancellationPreservesState"),
+             dirtyConfirmation.value(QStringLiteral("historyLoadConfirmationVisible")).toBool()
+                 && !dirtyCancelled.value(QStringLiteral("historyLoadConfirmationVisible")).toBool()
+                 && dirtyTextAfterCancel == dirtyTextBefore
+                 && dirtyCancelled.value(QStringLiteral("historyPanelOpen")).toBool()
+                 && dirtyCancelled.value(QStringLiteral("historySelectedId")).toString()
+                    == filteredId
+                 && dirtyCancelled.value(QStringLiteral("cursorPosition")).toInt()
+                    == dirtyBefore.value(QStringLiteral("cursorPosition")).toInt(),
+             dirtyCancelled);
+    historyAction(QStringLiteral("historyActivateSelected"));
+    historyAction(QStringLiteral("historyConfirmLoad"));
+    QThread::msleep(100);
+    const QJsonObject loadedHistoryText = request(QStringLiteral("testText"));
+    const QJsonObject loadedHistoryStatus = request(QStringLiteral("status"));
+    addCheck(checks, details, QStringLiteral("historyConfirmedLoadResetsEditorState"),
+             loadedHistoryText.value(QStringLiteral("text")).toString()
+                    == QStringLiteral("alpha\nsecond line")
+                 && loadedHistoryStatus.value(QStringLiteral("cursorPosition")).toInt() == 17
+                 && !loadedHistoryStatus.value(QStringLiteral("historyPanelOpen")).toBool()
+                 && loadedHistoryStatus.value(QStringLiteral("editorHasFocus")).toBool(),
+             loadedHistoryStatus);
+
+    historyAction(QStringLiteral("historyClose"));
+    request(QStringLiteral("testSetGeometry"),
+            {{QStringLiteral("x"), 100}, {QStringLiteral("y"), 100},
+             {QStringLiteral("width"), 500}, {QStringLiteral("height"), 640}});
+    QThread::msleep(180);
+    execute(QStringLiteral("clipboardHistory"));
+    QThread::msleep(150);
+    const QJsonObject narrowHistory = request(QStringLiteral("status"));
+    addCheck(checks, details, QStringLiteral("historyNarrowWindowUsesOverlay"),
+             narrowHistory.value(QStringLiteral("historyPanelOverlay")).toBool()
+                 && qAbs(narrowHistory.value(QStringLiteral("historyPanelWidth")).toDouble()
+                         - 200.0) < 1.0
+                 && narrowHistory.value(QStringLiteral("editorVisibleWidth")).toDouble() >= 320.0,
+             narrowHistory);
+    historyAction(QStringLiteral("historyClose"));
+    historyAction(QStringLiteral("historyHoverTriggerEnter"));
+    QThread::msleep(60);
+    const bool hoverBeforeThreshold = request(QStringLiteral("status"))
+                                          .value(QStringLiteral("historyPanelOpen")).toBool();
+    QThread::msleep(70);
+    const bool hoverAfterThreshold = request(QStringLiteral("status"))
+                                         .value(QStringLiteral("historyPanelOpen")).toBool();
+    historyAction(QStringLiteral("historyHoverTriggerLeave"));
+    QThread::msleep(150);
+    const bool closeBeforeThreshold = request(QStringLiteral("status"))
+                                          .value(QStringLiteral("historyPanelOpen")).toBool();
+    QThread::msleep(140);
+    const bool closeAfterThreshold = request(QStringLiteral("status"))
+                                         .value(QStringLiteral("historyPanelOpen")).toBool();
+    addCheck(checks, details, QStringLiteral("historyHoverUsesNominalDelays"),
+             !hoverBeforeThreshold && hoverAfterThreshold
+                 && closeBeforeThreshold && !closeAfterThreshold);
+
+    historyAction(QStringLiteral("historyHoverTriggerEnter"));
+    QThread::msleep(130);
+    historyAction(QStringLiteral("historyHoverTriggerLeave"));
+    historyAction(QStringLiteral("historyPanelEnter"));
+    QThread::msleep(290);
+    const bool panelTransferStaysOpen = request(QStringLiteral("status"))
+                                            .value(QStringLiteral("historyPanelOpen")).toBool();
+    historyAction(QStringLiteral("historyPanelLeave"));
+    QThread::msleep(280);
+    const bool panelTransferEventuallyCloses = !request(QStringLiteral("status"))
+                                                   .value(QStringLiteral("historyPanelOpen")).toBool();
+    addCheck(checks, details, QStringLiteral("historyHoverTransferKeepsPanelOpen"),
+             panelTransferStaysOpen && panelTransferEventuallyCloses);
+
+    const QJsonObject leftExit = request(
+        QStringLiteral("testClipboardHistoryWindowLeave"),
+        {{QStringLiteral("x"), -4}, {QStringLiteral("y"), 320},
+         {QStringLiteral("buttonDown"), false}});
+    addCheck(checks, details, QStringLiteral("historyFastLeftExitOpensImmediately"),
+             leftExit.value(QStringLiteral("edgeExitEmitted")).toBool()
+                 && leftExit.value(QStringLiteral("historyPanelOpen")).toBool(),
+             leftExit);
+    historyAction(QStringLiteral("historyClose"));
+    const QJsonObject rightExit = request(
+        QStringLiteral("testClipboardHistoryWindowLeave"),
+        {{QStringLiteral("x"), 924}, {QStringLiteral("y"), 320},
+         {QStringLiteral("buttonDown"), false}});
+    const QJsonObject topLeftExit = request(
+        QStringLiteral("testClipboardHistoryWindowLeave"),
+        {{QStringLiteral("x"), -4}, {QStringLiteral("y"), 4},
+         {QStringLiteral("buttonDown"), false}});
+    const QJsonObject bottomLeftExit = request(
+        QStringLiteral("testClipboardHistoryWindowLeave"),
+        {{QStringLiteral("x"), -4}, {QStringLiteral("y"), 636},
+         {QStringLiteral("buttonDown"), false}});
+    const QJsonObject draggingLeftExit = request(
+        QStringLiteral("testClipboardHistoryWindowLeave"),
+        {{QStringLiteral("x"), -4}, {QStringLiteral("y"), 320},
+         {QStringLiteral("buttonDown"), true}});
+    addCheck(checks, details, QStringLiteral("historyNonIntentionalWindowLeaveIgnored"),
+             !rightExit.value(QStringLiteral("edgeExitEmitted")).toBool()
+                 && !topLeftExit.value(QStringLiteral("edgeExitEmitted")).toBool()
+                 && !bottomLeftExit.value(QStringLiteral("edgeExitEmitted")).toBool()
+                 && !draggingLeftExit.value(QStringLiteral("edgeExitEmitted")).toBool()
+                 && !draggingLeftExit.value(QStringLiteral("historyPanelOpen")).toBool(),
+             QJsonObject{{QStringLiteral("right"), rightExit},
+                         {QStringLiteral("topLeft"), topLeftExit},
+                         {QStringLiteral("bottomLeft"), bottomLeftExit},
+                         {QStringLiteral("dragging"), draggingLeftExit}});
+
+    request(QStringLiteral("testEmitClipboardChange"),
+            {{QStringLiteral("kind"), QStringLiteral("text")},
+             {QStringLiteral("text"), QStringLiteral("delete-me")}});
+    request(QStringLiteral("testSetClipboard"),
+            {{QStringLiteral("text"), QStringLiteral("management-clipboard")}});
+    const QString managementEditorBefore = request(QStringLiteral("testText"))
+                                               .value(QStringLiteral("text")).toString();
+    execute(QStringLiteral("clipboardHistory"));
+    QThread::msleep(100);
+    const QJsonObject beforeDelete = request(QStringLiteral("testClipboardHistoryState"));
+    const QJsonObject managementDeliveryBefore = request(QStringLiteral("testDeliveredText"));
+    const QJsonObject managementKeysBefore = request(QStringLiteral("testConfigKeys"));
+    const QJsonObject managementStatusBefore = request(QStringLiteral("status"));
+    const QString deleteId = beforeDelete.value(QStringLiteral("items")).toArray()
+                                 .first().toObject().value(QStringLiteral("id")).toString();
+    historyAction(QStringLiteral("historySelect"), deleteId);
+    historyAction(QStringLiteral("historyDeleteSelected"));
+    const QJsonObject afterDelete = request(QStringLiteral("testClipboardHistoryState"));
+    historyAction(QStringLiteral("historyRequestClear"));
+    const QJsonObject clearRequested = request(QStringLiteral("status"));
+    historyAction(QStringLiteral("historyEscape"));
+    const QJsonObject afterClearEscape = request(QStringLiteral("testClipboardHistoryState"));
+    historyAction(QStringLiteral("historyRequestClear"));
+    historyAction(QStringLiteral("historyCancelClear"));
+    const QJsonObject afterClearCancel = request(QStringLiteral("testClipboardHistoryState"));
+    historyAction(QStringLiteral("historyRequestClear"));
+    historyAction(QStringLiteral("historyConfirmClear"));
+    const QJsonObject afterClearConfirm = request(QStringLiteral("testClipboardHistoryState"));
+    const QJsonObject managementClipboardAfter = request(QStringLiteral("testClipboard"));
+    const QJsonObject managementDeliveryAfter = request(QStringLiteral("testDeliveredText"));
+    const QJsonObject managementKeysAfter = request(QStringLiteral("testConfigKeys"));
+    const QJsonObject managementStatusAfter = request(QStringLiteral("status"));
+    const QString managementEditorAfter = request(QStringLiteral("testText"))
+                                              .value(QStringLiteral("text")).toString();
+    addCheck(checks, details, QStringLiteral("historyDeleteAndClearAreInternalOnly"),
+             afterDelete.value(QStringLiteral("items")).toArray().size()
+                    == beforeDelete.value(QStringLiteral("items")).toArray().size() - 1
+                 && clearRequested.value(QStringLiteral("historyClearConfirmationVisible")).toBool()
+                 && !afterClearEscape.value(QStringLiteral("historyClearConfirmationVisible")).toBool()
+                 && afterClearEscape.value(QStringLiteral("items")).toArray().size()
+                    == afterDelete.value(QStringLiteral("items")).toArray().size()
+                 && afterClearCancel.value(QStringLiteral("items")).toArray().size()
+                    == afterDelete.value(QStringLiteral("items")).toArray().size()
+                 && afterClearConfirm.value(QStringLiteral("items")).toArray().isEmpty()
+                 && managementClipboardAfter.value(QStringLiteral("text")).toString()
+                    == QStringLiteral("management-clipboard")
+                 && managementEditorAfter == managementEditorBefore
+                 && managementDeliveryAfter.value(QStringLiteral("text"))
+                    == managementDeliveryBefore.value(QStringLiteral("text"))
+                 && managementKeysAfter.value(QStringLiteral("keys"))
+                    == managementKeysBefore.value(QStringLiteral("keys"))
+                 && managementStatusBefore.value(QStringLiteral("selectionStart"))
+                    == managementStatusAfter.value(QStringLiteral("selectionStart"))
+                 && managementStatusBefore.value(QStringLiteral("selectionEnd"))
+                    == managementStatusAfter.value(QStringLiteral("selectionEnd")),
+             afterClearConfirm);
+    const QJsonObject animationsOff = request(QStringLiteral("status"));
+    addCheck(checks, details, QStringLiteral("historyAnimationDisabledIsImmediate"),
+             animationsOff.value(QStringLiteral("transitionDuration")).toInt() == 0,
+             animationsOff);
+    historyAction(QStringLiteral("historyClose"));
+    request(QStringLiteral("testDiscardClose"));
+    QThread::msleep(180);
+    request(QStringLiteral("testSetGeometry"),
+            {{QStringLiteral("x"), beforeHistoryLayout.value(QStringLiteral("x")).toInt()},
+             {QStringLiteral("y"), beforeHistoryLayout.value(QStringLiteral("y")).toInt()},
+             {QStringLiteral("width"), beforeHistoryLayout.value(QStringLiteral("width")).toInt()},
+             {QStringLiteral("height"), beforeHistoryLayout.value(QStringLiteral("height")).toInt()}});
+    QThread::msleep(180);
 
     const QStringList excludedCommands{
         QStringLiteral("togglePreview"), QStringLiteral("historyDrafts"),

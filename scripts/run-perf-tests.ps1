@@ -192,6 +192,7 @@ $coldAverage = ($coldResults | Measure-Object -Average).Average
 $checks = [ordered]@{
     coldStart = ($coldMaximum -le 300.0)
     hotWake = [bool]$perf.hotWake.passed
+    clipboardHistory = [bool]$perf.clipboardHistory.passed
     inputFrame = [bool]$perf.largeDocumentInput.passed
     idleCpu = ($idleCpuPercent -le 0.5)
     workingSet = ($workingSetMb -le 80.0)

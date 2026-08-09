@@ -36,6 +36,13 @@ qt_add_executable(ScratchEditor WIN32
     src/statuspanelhints.h
     src/windowplacement.cpp
     src/windowplacement.h
+    src/clipboardgateway.cpp
+    src/clipboardgateway.h
+    src/clipboardhistorycommandgate.h
+    src/clipboardhistorymodel.cpp
+    src/clipboardhistorymodel.h
+    src/clipboardhistorystore.cpp
+    src/clipboardhistorystore.h
 )
 
 set(SCRATCHEDITOR_MARKDOWN_STYLE
@@ -72,7 +79,25 @@ target_link_options(ScratchEditor PRIVATE
 
 if(WIN32)
     target_compile_definitions(ScratchEditor PRIVATE UNICODE _UNICODE)
-    target_link_libraries(ScratchEditor PRIVATE dwmapi user32)
+    target_link_libraries(ScratchEditor PRIVATE crypt32 dwmapi user32)
+endif()
+
+qt_add_executable(ScratchEditorClipboardHistoryTests
+    tests/clipboardhistory_main.cpp
+    src/clipboardgateway.cpp
+    src/clipboardgateway.h
+    src/clipboardhistorycommandgate.h
+    src/clipboardhistorymodel.cpp
+    src/clipboardhistorymodel.h
+    src/clipboardhistorystore.cpp
+    src/clipboardhistorystore.h
+)
+
+target_include_directories(ScratchEditorClipboardHistoryTests PRIVATE src)
+target_link_libraries(ScratchEditorClipboardHistoryTests PRIVATE Qt6::Core)
+if(WIN32)
+    target_compile_definitions(ScratchEditorClipboardHistoryTests PRIVATE UNICODE _UNICODE)
+    target_link_libraries(ScratchEditorClipboardHistoryTests PRIVATE crypt32 user32)
 endif()
 
 qt_add_executable(ScratchEditorEditingTests
@@ -174,6 +199,7 @@ target_link_options(ScratchEditorExternalProcessTests PRIVATE
 )
 
 install(TARGETS ScratchEditor ScratchEditorPerf ScratchEditorSystemTests ScratchEditorEditingTests
+        ScratchEditorClipboardHistoryTests
         ScratchEditorWindowUiTests ScratchEditorExternalFileTests ScratchEditorExternalProcessTests
     RUNTIME DESTINATION .
 )

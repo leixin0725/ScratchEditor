@@ -2,6 +2,8 @@
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
+#include <QJsonDocument>
+#include <QJsonObject>
 #include <QProcess>
 #include <QProcessEnvironment>
 #include <QRect>
@@ -169,6 +171,54 @@ int main(int argc, char *argv[])
                        QStringLiteral("无法创建 CLI 生命周期夹具"));
     failures += !check(writeText(secondEditedFile, QStringLiteral("second original\n")),
                        QStringLiteral("无法创建第二个 CLI 生命周期夹具"));
+
+    const QString externalSettings = temporaryDirectory.filePath(
+        QStringLiteral("external-isolation-settings.ini"));
+    const QString externalHistory = temporaryDirectory.filePath(
+        QStringLiteral("clipboard-history.dat"));
+    const QString externalStatus = temporaryDirectory.filePath(
+        QStringLiteral("external-history-status.json"));
+    const QByteArray historySentinel("external-mode-must-not-touch-history");
+    {
+        QFile sentinel(externalHistory);
+        failures += !check(sentinel.open(QIODevice::WriteOnly)
+                               && sentinel.write(historySentinel) == historySentinel.size(),
+                           QStringLiteral("无法创建 external history 隔离哨兵"));
+    }
+    QProcess isolationProcess;
+    QProcessEnvironment isolationEnvironment = residentEnvironment;
+    isolationEnvironment.insert(QStringLiteral("SCRATCHEDITOR_SETTINGS_FILE"),
+                                externalSettings);
+    isolationEnvironment.insert(QStringLiteral("SCRATCHEDITOR_EXTERNAL_TEST_STATUS_FILE"),
+                                externalStatus);
+    isolationEnvironment.insert(QStringLiteral("SCRATCHEDITOR_EXTERNAL_TEST_DISCARD"),
+                                QStringLiteral("1"));
+    isolationProcess.setProcessEnvironment(isolationEnvironment);
+    isolationProcess.setProgram(editor);
+    isolationProcess.setArguments(
+        {QStringLiteral("--test-mode"), QStringLiteral("--wait"), editedFile});
+    isolationProcess.start();
+    failures += !check(isolationProcess.waitForStarted(5000)
+                           && isolationProcess.waitForFinished(10000),
+                       QStringLiteral("external history 隔离进程未正常完成"));
+    QFile statusFile(externalStatus);
+    QJsonObject externalStatusObject;
+    if (statusFile.open(QIODevice::ReadOnly)) {
+        externalStatusObject = QJsonDocument::fromJson(statusFile.readAll()).object();
+    }
+    failures += !check(
+        externalStatusObject.value(QStringLiteral("historyAvailable")).toBool(true) == false
+            && externalStatusObject.value(QStringLiteral("historyStoreFile")).toString().isEmpty()
+            && externalStatusObject.value(QStringLiteral("historyCommandRegistered")).toBool(true) == false
+            && externalStatusObject.value(QStringLiteral("historyPanelLoaded")).toBool(true) == false
+            && externalStatusObject.value(QStringLiteral("clipboardBackend")).toString()
+                == QStringLiteral("memory")
+            && externalStatusObject.value(QStringLiteral("nativeClipboardAccessAttempts")).toInt(-1) == 0,
+        QStringLiteral("external file mode 必须无 history model/store/command/panel/native access"));
+    QFile sentinelAfter(externalHistory);
+    failures += !check(sentinelAfter.open(QIODevice::ReadOnly)
+                           && sentinelAfter.readAll() == historySentinel,
+                       QStringLiteral("external file mode 不得访问或改写 history store"));
 
     const QString replacementText = QStringLiteral(
         "# CLI edited\n\nUnicode: 你好 🧪\n");

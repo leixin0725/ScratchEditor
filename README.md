@@ -20,10 +20,36 @@ Qt 6 Quick/QML、C++20 和 CMake；AutoHotkey 继续负责全局快捷键与启�
 - 延迟加载设置页、深浅主题、编辑字体/字号，以及同步透明度与居中形变的轻量唤出/关闭动画开关。
 - 右上角动态状态显示：正常显示字数统计（有选区时显示选区/总数），悬停展开状态面板（按配置展示快捷键提示或红色错误详情），错误信息可点击复制；面板字号、悬停/收起延迟与最大宽度可在设置页配置。
 - 窗口、外观和快捷键统一保存在一个带 schema 的 INI 配置文件中。
+- 常驻模式监听启动后的纯文本剪贴板变化，并提供加密的本地历史浏览、搜索、回溯编辑、删除与清空。
 - 可作为 Codex 和 pi-coding-agent 的同步外部提示词编辑器（标题标注调用它的 CLI 类型），按文件启动独立瞬态进程。
 
 按用户决定不提供 Markdown 预览。项目也不使用 Qt WebEngine、WebView 或其他浏览器
 内核；历史草稿、标签页、固定草稿、多光标、插件和 LSP 当前均不在范围内。
+
+## 剪贴板历史
+
+剪贴板历史仅在普通常驻模式启用。实例启动后通过 Windows 剪贴板监听消息捕获
+`CF_UNICODETEXT` 纯文本；启动前已有内容、空内容、非文本、读取失败、UTF-8 编码后超过
+1 MiB 的单项，以及带 `ExcludeClipboardContentFromMonitorProcessing` 或明确禁止
+`CanIncludeInClipboardHistory` 标记的内容都不会进入历史。集合最多保留 100 条，按全文逐个
+UTF-16 code unit 精确去重；再次复制完全相同的文本会保留稳定 ID、刷新时间并移动到最前。
+
+编辑器左侧内沿提供 12px 触发区；窗口左框还有不拦截拖动和缩放的 hover 感应区，从外侧靠近并
+停留 100ms 可展开，指针快速向左越出窗口时立即展开。也可从命令面板执行“打开剪贴板历史”。
+该命令默认不绑定快捷键，可沿用通用快捷键设置自行配置。面板支持全文大小写不敏感搜索、鼠标双击或键盘 Enter
+载入；若当前编辑缓冲区相对打开/上次载入基线有修改，会先请求确认。历史原项保持不可变，之后
+仍可用 Escape、`Ctrl+S`、`Ctrl+W` 按现有语义回写或放弃。删除单项和确认清空只改变内部历史，
+不写剪贴板，也不改变当前编辑文本。
+
+历史文件与 `settings.ini` 同目录，正式环境通常为
+`%LOCALAPPDATA%\ScratchEditor\ScratchEditor\clipboard-history.dat`。文件使用当前 Windows 用户
+范围的 DPAPI 加密，并以带版本、长度与 SHA-256 完整性校验的二进制 envelope 保存；这可以避免
+磁盘上的直接明文，但同一登录用户上下文仍可通过 DPAPI 解密。写入通过原子替换保留最近一次有效
+文件；读取或解密失败时进入 `ReadLocked`，不会自动覆盖原文件，只有用户明确确认清空后才重置。
+保存失败时会保留本次会话内存结果并显示错误，磁盘上的 last-known-good 不变。
+
+`--wait <path>` 外部文件模式不会创建模型、注册监听器、读取历史文件或注册历史命令。测试模式
+统一使用内存剪贴板 gateway 和隔离的 settings/history 路径，生产 IPC 不开放任何历史测试命令。
 
 ## 编辑快捷键
 
@@ -41,7 +67,7 @@ Qt 6 Quick/QML、C++20 和 CMake；AutoHotkey 继续负责全局快捷键与启�
 | 切换引用 / 切换代码标记 | `Ctrl+Shift+Q` / `Ctrl+Alt+C` |
 | 查找 / 替换 | `Ctrl+F` / `Ctrl+H` |
 | 命令面板 / 设置 | `Ctrl+Shift+P` / `Ctrl+,` |
-| 循环标题级别 / 切换项目列表 | 无默认快捷键 |
+| 打开剪贴板历史 / 循环标题级别 / 切换项目列表 | 无默认快捷键 |
 
 - 加粗、斜体和代码命令在无选区时按 Qt 词边界处理相邻词语；在同类标记内部再次触发会取消对应格式，跨边界选区则只清理同类内部标记。
 - 无选区时 `Ctrl+C` 复制光标所在整行（统一携带行尾换行符，末行也补上），`Ctrl+X` 剪切整行并让后续行补位、光标落在补位后一行的行首；无选区 `Ctrl+V` 在剪贴板以换行结尾时将其粘贴为当前行下方的新行（当前行原样保留，连续粘贴持续在下方堆叠；空文档、文档已以换行结尾时直接插入，不会产生前导空行），否则在光标处标准插入。有选区时这三个快捷键保持标准复制/剪切/替换行为。
@@ -127,6 +153,22 @@ Codex / pi ───────文件模式───> %LOCALAPPDATA%\ScratchEdi
 
 隔离验证 preset 按职责命名：`editing` 覆盖 Markdown、高频编辑命令、查找替换与快捷键；
 `window-ui` 覆盖设置、主题、窗口交互与动画。两组验证相互独立，完整回归时都应执行。
+
+剪贴板历史功能可在不访问真实剪贴板、不部署稳定副本的前提下单独验证：
+
+```powershell
+./scripts/build.ps1 -Preset editing -SkipLocalInstall
+./build/editing/ScratchEditorClipboardHistoryTests.exe
+./scripts/run-clipboard-history-tests.ps1 -BuildSubdirectory build\editing `
+  -ServerName ScratchEditor.ClipboardHistory.Validation
+./scripts/run-editing-tests.ps1 -BuildSubdirectory build\editing `
+  -ServerName ScratchEditor.Editing.ClipboardHistory
+./scripts/build.ps1 -Preset window-ui -SkipLocalInstall
+./scripts/run-window-ui-tests.ps1 -BuildSubdirectory build\window-ui `
+  -ServerName ScratchEditor.WindowUi.ClipboardHistory
+./scripts/run-perf-tests.ps1 -BuildSubdirectory build\window-ui `
+  -ServerName ScratchEditor.Perf.ClipboardHistory
+```
 
 也可以直接使用 CMake：
 

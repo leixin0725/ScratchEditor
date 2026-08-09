@@ -5,6 +5,8 @@
 
 ## 更新记录
 
+- `2026-08-09`：剪贴板历史的当前功能、隐私边界与隔离验证入口见根目录
+  [`README.md`](../README.md#剪贴板历史)；持续维护细节只保留在该正式文档。
 - [`2026-08-08-editor-core-refactor/`](2026-08-08-editor-core-refactor/README.md)：编辑命令核心复用重构记录（行范围/成对包裹/命令分发/行变换拆分、IME 引号收尾统一与后续建议）。
 - [`2026-08-06-status-panel/`](2026-08-06-status-panel/README.md)：右上角状态块拓展（字数统计、悬停状态面板、错误信息复制与状态面板配置）。
 - [`2026-08-05-window-hotplug/`](2026-08-05-window-hotplug/README.md)：窗口放置与

@@ -2,6 +2,7 @@
 #include <QDateTime>
 #include <QElapsedTimer>
 #include <QJsonDocument>
+#include <QJsonArray>
 #include <QJsonObject>
 #include <QLocalSocket>
 #include <QStringList>
@@ -3239,6 +3240,116 @@ int main(int argc, char *argv[])
                 QStringLiteral("$x$末$中文ABC"),
                 {}, {{0, 3, 1, 2, ProtectedKind::InlineFormula}},
                 {{4, 10, 5, 10, ProtectedKind::InlineFormula}});
+
+    // --- Clipboard history integration and command contract ---
+    const QJsonObject historyShortcutDefault = request(
+        QStringLiteral("testShortcut"),
+        {{QStringLiteral("commandId"), QStringLiteral("clipboardHistory")}});
+    const QJsonObject historyCommand = execute(QStringLiteral("clipboardHistory"));
+    addCheck(checks, details, QStringLiteral("clipboardHistoryCommandRegistered"),
+             historyCommand.value(QStringLiteral("executed")).toBool()
+                 && historyShortcutDefault.value(QStringLiteral("shortcut")).toString().isEmpty(),
+             historyCommand);
+    const QJsonObject historyShortcutSet = request(
+        QStringLiteral("testSetShortcut"),
+        {{QStringLiteral("commandId"), QStringLiteral("clipboardHistory")},
+         {QStringLiteral("sequence"), QStringLiteral("Ctrl+Alt+V")}});
+    addCheck(checks, details, QStringLiteral("clipboardHistoryShortcutConfigurable"),
+             historyShortcutSet.value(QStringLiteral("configured")).toBool()
+                 && historyShortcutSet.value(QStringLiteral("shortcut")).toString()
+                    == QStringLiteral("Ctrl+Alt+V"),
+             historyShortcutSet);
+    request(QStringLiteral("testSetShortcut"),
+            {{QStringLiteral("commandId"), QStringLiteral("clipboardHistory")},
+             {QStringLiteral("sequence"), QString()}});
+
+    request(QStringLiteral("testResetClipboardHistory"));
+    request(QStringLiteral("testSetClipboard"),
+            {{QStringLiteral("text"), QStringLiteral("virtual-seed")}});
+    request(QStringLiteral("show"));
+    request(QStringLiteral("testSetText"),
+            {{QStringLiteral("text"), QStringLiteral("committed-history")}});
+    request(QStringLiteral("hide"));
+    QThread::msleep(250);
+    const QJsonObject committedClipboard = request(QStringLiteral("testClipboard"));
+    const QJsonObject committedHistory = request(
+        QStringLiteral("testClipboardHistoryState"));
+    addCheck(checks, details, QStringLiteral("clipboardHistoryEscCommitUsesMemoryGateway"),
+             committedClipboard.value(QStringLiteral("text")).toString()
+                    == QStringLiteral("committed-history")
+                 && committedHistory.value(QStringLiteral("items")).toArray().size() == 1
+                 && committedHistory.value(QStringLiteral("items")).toArray().first()
+                        .toObject().value(QStringLiteral("text")).toString()
+                    == QStringLiteral("committed-history")
+                 && committedHistory.value(QStringLiteral("clipboardBackend")).toString()
+                    == QStringLiteral("memory")
+                 && committedHistory.value(QStringLiteral("nativeClipboardAccessAttempts")).toInteger() == 0,
+             committedHistory);
+
+    request(QStringLiteral("testSetClipboard"),
+            {{QStringLiteral("text"), QStringLiteral("discard-seed")}});
+    request(QStringLiteral("show"));
+    request(QStringLiteral("testSetText"),
+            {{QStringLiteral("text"), QStringLiteral("must-be-discarded")}});
+    request(QStringLiteral("testDiscardClose"));
+    QThread::msleep(250);
+    const QJsonObject discardedClipboard = request(QStringLiteral("testClipboard"));
+    const QJsonObject discardedHistory = request(
+        QStringLiteral("testClipboardHistoryState"));
+    addCheck(checks, details, QStringLiteral("clipboardHistoryCtrlWDoesNotCapture"),
+             discardedClipboard.value(QStringLiteral("text")).toString()
+                    == QStringLiteral("discard-seed")
+                 && discardedHistory.value(QStringLiteral("items")).toArray().size() == 1,
+             discardedHistory);
+
+    request(QStringLiteral("testEmitClipboardChange"),
+            {{QStringLiteral("kind"), QStringLiteral("text")},
+             {QStringLiteral("text"), QStringLiteral("immutable-original")},
+             {QStringLiteral("sequenceNumber"), 901},
+             {QStringLiteral("capturedAtMs"), 1786200000000.0}});
+    const QJsonObject beforeLoadHistory = request(
+        QStringLiteral("testClipboardHistoryState"));
+    const QJsonArray beforeLoadItems = beforeLoadHistory.value(
+        QStringLiteral("items")).toArray();
+    QString originalId;
+    for (const QJsonValue &value : beforeLoadItems) {
+        if (value.toObject().value(QStringLiteral("text")).toString()
+            == QStringLiteral("immutable-original")) {
+            originalId = value.toObject().value(QStringLiteral("id")).toString();
+            break;
+        }
+    }
+    request(QStringLiteral("show"));
+    request(QStringLiteral("testClipboardHistoryUiAction"),
+            {{QStringLiteral("action"), QStringLiteral("historySelect")},
+             {QStringLiteral("value"), originalId}});
+    request(QStringLiteral("testClipboardHistoryUiAction"),
+            {{QStringLiteral("action"), QStringLiteral("historyActivateSelected")}});
+    QThread::msleep(150);
+    const QJsonObject loadedText = request(QStringLiteral("testText"));
+    request(QStringLiteral("testSetText"),
+            {{QStringLiteral("text"), QStringLiteral("edited-from-history")}});
+    request(QStringLiteral("hide"));
+    QThread::msleep(250);
+    const QJsonObject afterEditHistory = request(
+        QStringLiteral("testClipboardHistoryState"));
+    bool originalUnchanged = false;
+    bool editedRecorded = false;
+    for (const QJsonValue &value : afterEditHistory.value(QStringLiteral("items")).toArray()) {
+        const QJsonObject item = value.toObject();
+        originalUnchanged = originalUnchanged
+            || (item.value(QStringLiteral("id")).toString() == originalId
+                && item.value(QStringLiteral("text")).toString()
+                   == QStringLiteral("immutable-original"));
+        editedRecorded = editedRecorded
+            || item.value(QStringLiteral("text")).toString()
+               == QStringLiteral("edited-from-history");
+    }
+    addCheck(checks, details, QStringLiteral("clipboardHistoryLoadAndEditIsImmutable"),
+             loadedText.value(QStringLiteral("text")).toString()
+                    == QStringLiteral("immutable-original")
+                 && originalUnchanged && editedRecorded,
+             afterEditHistory);
 
     // --- CJK Fix: Pure Spacing Planner Tests (SPACE-001..018) ---
     const auto spaceExpect = [&](const QString &name, const QString &text,

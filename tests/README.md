@@ -5,7 +5,8 @@
 - `perf_main.cpp`：性能、真实 OS 输入和微软拼音验收客户端。
 - `system_main.cpp`：滚动条、Escape、焦点和剪贴板异常回归。
 - `editing_main.cpp`：编辑行为验证，覆盖 Markdown 高亮、编辑命令、查找替换和快捷键回归。
-- `window_ui_main.cpp`：窗口界面验证，覆盖设置页、主题字体、集中配置、窗口交互/配色、20 轮唤出关闭动画稳定性、窗口放置算法单元校验（记忆恢复、混合 DPI 非主屏坐标、尺寸阶梯、锚定顺序与重叠避让）与明确排除项回归。
+- `clipboardhistory_main.cpp`：无窗口的内存 gateway、历史集合、二进制 codec、DPAPI、原子存储与故障边界测试。
+- `window_ui_main.cpp`：窗口界面验证，覆盖设置页、主题字体、集中配置、历史栏内外侧 hover/快速左向越界、窗口交互/配色、20 轮唤出关闭动画稳定性、窗口放置算法单元校验（记忆恢复、混合 DPI 非主屏坐标、尺寸阶梯、锚定顺序与重叠避让）与明确排除项回归。
 - `externalfilesession_main.cpp`：外部 CLI 编辑模式的 UTF-8/BOM、Unicode 路径、空文件、原子保存和错误边界回归。
 - `externaleditorprocess_main.cpp`：验证外部编辑进程在编辑期间持续等待、保存写回后以成功状态退出、外部尺寸记忆独立写入 `window/externalGeometry`，并覆盖错误参数退出码。
 - `../scripts/run-external-cli-integration.mjs`：通过伪终端实测 Codex 与 pi 的 `Ctrl+G`，由 ScratchEditor 写回 `/quit` 后确认 CLI 成功返回；Claude Code 暂不在此脚本中测试。
@@ -15,6 +16,10 @@ CLI 级脚本需要一个已安装的 `node-pty` 包。本机默认复用全局 
 请求，也不读取或覆盖用户的认证和设置。
 
 这些程序只连接由脚本启动的 `--test-mode` 隔离实例。生产 IPC 不暴露测试命令。
+
+`../scripts/run-clipboard-history-tests.ps1` 会创建唯一的临时 settings/history 目录，运行无窗口核心
+测试，并以显式虚拟变化验证隐藏捕获、排除规则、加密落盘、连续重启、损坏密文只读锁定和清理边界。
+它只停止自己记录的 PID，且断言 backend 为 `memory`、原生剪贴板访问次数为 0。
 
 ## AHK 夹具
 
@@ -41,6 +46,20 @@ AHK 迁移获批后，`../scripts/run-ahk-tests.ps1` 会从已安装文件创建
 或复用测试脚本中的 IPC 退出逻辑，不能向可执行文件传入 `--quit`。
 
 ## 推荐执行顺序
+
+剪贴板历史日常开发应先执行以下完全隔离序列；它不会部署稳定副本，也不会读取、比较或修改真实
+系统剪贴板：
+
+1. `scripts/build.ps1 -Preset editing -SkipLocalInstall`
+2. `build/editing/ScratchEditorClipboardHistoryTests.exe`
+3. `scripts/run-clipboard-history-tests.ps1 -BuildSubdirectory build\editing -ServerName ScratchEditor.ClipboardHistory.Validation`
+4. `scripts/run-editing-tests.ps1 -BuildSubdirectory build\editing -ServerName ScratchEditor.Editing.ClipboardHistory`
+5. `scripts/build.ps1 -Preset window-ui -SkipLocalInstall`
+6. `scripts/run-window-ui-tests.ps1 -BuildSubdirectory build\window-ui -ServerName ScratchEditor.WindowUi.ClipboardHistory`
+7. `scripts/run-perf-tests.ps1 -BuildSubdirectory build\window-ui -ServerName ScratchEditor.Perf.ClipboardHistory`
+
+下面的仓库完整回归包含真实系统集成。特别是 `run-system-tests.ps1` 的遗留用例会读取、保存、写入
+并恢复真实 Windows 剪贴板；未经用户明确批准，不得把它作为剪贴板历史功能的自动验收步骤。
 
 1. `scripts/build.ps1 -Preset release`
 2. `scripts/run-system-tests.ps1`

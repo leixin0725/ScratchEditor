@@ -1,6 +1,7 @@
 #pragma once
 
 #include <QAbstractNativeEventFilter>
+#include <QByteArray>
 #include <QElapsedTimer>
 #include <QFileSystemWatcher>
 #include <QHash>
@@ -25,7 +26,11 @@ class QParallelAnimationGroup;
 class QQuickWindow;
 class QScreen;
 class QVariantAnimation;
+class QAbstractItemModel;
 class AppSettings;
+class ClipboardGateway;
+class ClipboardHistoryModel;
+class ClipboardHistoryStore;
 class EditorCommandRegistry;
 class ExternalFileSession;
 class MarkdownHighlighter;
@@ -52,6 +57,12 @@ class EditorController final : public QObject, public QAbstractNativeEventFilter
     Q_PROPERTY(QString statusPanelSummary READ statusPanelSummary
                    NOTIFY statusPanelSummaryChanged)
     Q_PROPERTY(bool clipboardHealthy READ clipboardHealthy NOTIFY clipboardStateChanged)
+    Q_PROPERTY(QAbstractItemModel* clipboardHistoryModel READ clipboardHistoryModel CONSTANT)
+    Q_PROPERTY(bool clipboardHistoryAvailable READ clipboardHistoryAvailable CONSTANT)
+    Q_PROPERTY(bool clipboardHistoryHealthy READ clipboardHistoryHealthy NOTIFY clipboardHistoryStateChanged)
+    Q_PROPERTY(QString clipboardHistoryError READ clipboardHistoryError NOTIFY clipboardHistoryStateChanged)
+    Q_PROPERTY(bool historyLoadConfirmationVisible READ historyLoadConfirmationVisible NOTIFY clipboardHistoryUiStateChanged)
+    Q_PROPERTY(bool historyClearConfirmationVisible READ historyClearConfirmationVisible NOTIFY clipboardHistoryUiStateChanged)
     Q_PROPERTY(QVariantList commands READ commands NOTIFY commandsChanged)
     Q_PROPERTY(bool markdownHighlighting READ markdownHighlighting NOTIFY markdownHighlightingChanged)
     Q_PROPERTY(QString theme READ theme NOTIFY appearanceChanged)
@@ -96,6 +107,12 @@ public:
     QStringList statusPanelHints() const;
     QString statusPanelSummary() const;
     bool clipboardHealthy() const;
+    QAbstractItemModel *clipboardHistoryModel() const;
+    bool clipboardHistoryAvailable() const;
+    bool clipboardHistoryHealthy() const;
+    QString clipboardHistoryError() const;
+    bool historyLoadConfirmationVisible() const;
+    bool historyClearConfirmationVisible() const;
     QVariantList commands() const;
     bool markdownHighlighting() const;
     QString theme() const;
@@ -134,6 +151,15 @@ public:
                                               int hideDelayMs, int maxWidth);
     Q_INVOKABLE void resetStatusPanelSettings();
     Q_INVOKABLE bool copyToClipboard(const QString &text);
+    Q_INVOKABLE void setClipboardHistoryFilter(const QString &query);
+    Q_INVOKABLE void selectClipboardHistoryItem(const QString &id);
+    Q_INVOKABLE void requestLoadClipboardHistory(const QString &id);
+    Q_INVOKABLE void confirmLoadClipboardHistory();
+    Q_INVOKABLE void cancelLoadClipboardHistory();
+    Q_INVOKABLE void deleteClipboardHistoryItem(const QString &id);
+    Q_INVOKABLE void requestClearClipboardHistory();
+    Q_INVOKABLE void confirmClearClipboardHistory();
+    Q_INVOKABLE void cancelClearClipboardHistory();
 
     void showEditor();
     void toggleEditor();
@@ -145,6 +171,10 @@ signals:
     void statusPanelSettingsChanged();
     void statusPanelSummaryChanged();
     void clipboardStateChanged();
+    void clipboardHistoryStateChanged();
+    void clipboardHistoryUiStateChanged();
+    void clipboardHistoryLoaded();
+    void clipboardHistoryLeftEdgeExited();
     void commandsChanged();
     void markdownHighlightingChanged();
     void markdownStyleChanged();
@@ -209,6 +239,12 @@ private:
     void updateReadyState();
     bool readClipboardText(QString *text, QString *errorMessage);
     bool writeClipboardText(const QString &text, QString *errorMessage);
+    void processClipboardHistoryChange(int attempt = 0);
+    QString captureHistoryCandidate(const QString &text, qint64 capturedAtUtcMs,
+                                    quint32 sequenceNumber, bool selfNotification = false);
+    void persistClipboardHistory();
+    void setClipboardHistoryError(const QString &error);
+    void updateClipboardHistoryError();
     void setClipboardState(bool healthy, const QString &message = {});
     bool restoreWindowGeometry();
     void saveWindowGeometry();
@@ -222,6 +258,8 @@ private:
     void scheduleScreenConfigurationUpdate();
     void handleScreenConfigurationChanged();
     void restorePreviousFocus();
+    bool handleClipboardHistoryWindowLeave(const QPointF &localPosition,
+                                           bool mouseButtonPressed);
     QJsonObject statusObject() const;
     void runLargeDocumentBenchmark(QLocalSocket *socket, qint64 startedNs,
                                    const QString &requestId);
@@ -240,6 +278,9 @@ private:
     QPointer<QObject> m_editor;
     std::unique_ptr<AppSettings> m_settings;
     std::unique_ptr<EditorCommandRegistry> m_commands;
+    std::unique_ptr<ClipboardGateway> m_clipboardGateway;
+    std::unique_ptr<ClipboardHistoryModel> m_clipboardHistoryModel;
+    std::unique_ptr<ClipboardHistoryStore> m_clipboardHistoryStore;
     std::unique_ptr<ExternalFileSession> m_externalFileSession;
     std::unique_ptr<MarkdownStyle> m_markdownStyle;
     QFileSystemWatcher m_markdownStyleWatcher;
@@ -289,7 +330,16 @@ private:
     qint64 m_lastMouseClickElapsedMs = -1;
     QPointF m_lastMouseClickScenePosition;
     bool m_multiClickPress = false;
-    QString m_testClipboardText;
+    QString m_editorBaselineText;
+    QString m_pendingHistoryId;
+    bool m_historyLoadConfirmationVisible = false;
+    bool m_historyClearConfirmationVisible = false;
+    QString m_clipboardHistoryError;
+    QString m_clipboardHistoryMonitorError;
+    QString m_clipboardHistoryStoreError;
+    quint32 m_selfWriteSequence = 0;
+    QByteArray m_selfWriteFingerprint;
+    qint64 m_selfWriteExpiresAtMs = 0;
     QString m_settingsError;
     QTimer m_screenConfigurationTimer;
     QTimer m_displayChangeSettleTimer;
