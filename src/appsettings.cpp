@@ -23,6 +23,7 @@ constexpr auto statusPanelFontSizeKey = "statusPanel/fontSize";
 constexpr auto statusPanelShowDelayMsKey = "statusPanel/showDelayMs";
 constexpr auto statusPanelHideDelayMsKey = "statusPanel/hideDelayMs";
 constexpr auto statusPanelMaxWidthKey = "statusPanel/maxWidth";
+constexpr auto clipboardHistoryCardHeightKey = "clipboardHistory/cardHeight";
 constexpr auto defaultTheme = "dark";
 constexpr int defaultFontPointSize = 13;
 constexpr bool defaultAnimationsEnabled = true;
@@ -30,6 +31,9 @@ constexpr int defaultStatusPanelFontSize = 10;
 constexpr int defaultStatusPanelShowDelayMs = 300;
 constexpr int defaultStatusPanelHideDelayMs = 250;
 constexpr int defaultStatusPanelMaxWidth = 360;
+constexpr int defaultClipboardHistoryCardHeight = 58;
+constexpr int minClipboardHistoryCardHeight = 44;
+constexpr int maxClipboardHistoryCardHeight = 200;
 
 QString shortcutKey(const QString &commandId)
 {
@@ -289,6 +293,17 @@ void AppSettings::resetStatusPanel()
     m_settings->remove(QStringLiteral("statusPanel"));
     writeSchemaVersion();
     sync();
+}
+
+int AppSettings::historyCardHeight() const
+{
+    if (!m_settings) {
+        return defaultClipboardHistoryCardHeight;
+    }
+    const int stored = m_settings->value(QLatin1StringView(clipboardHistoryCardHeightKey),
+                                         defaultClipboardHistoryCardHeight).toInt();
+    return std::clamp(stored, minClipboardHistoryCardHeight,
+                      maxClipboardHistoryCardHeight);
 }
 
 void AppSettings::resetAll()

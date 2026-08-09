@@ -650,6 +650,11 @@ bool EditorController::historyClearConfirmationVisible() const
     return m_historyClearConfirmationVisible;
 }
 
+int EditorController::historyCardHeight() const
+{
+    return m_settings ? m_settings->historyCardHeight() : 58;
+}
+
 QVariantList EditorController::commands() const
 {
     return m_commands ? m_commands->commands() : QVariantList{};
@@ -3103,6 +3108,7 @@ QJsonObject EditorController::statusObject() const
                   QJsonArray::fromStringList(statusPanelHints()));
     status.insert(QStringLiteral("statusPanelSummary"), statusPanelSummary());
     status.insert(QStringLiteral("clipboardHealthy"), m_clipboardHealthy);
+    status.insert(QStringLiteral("historyCardHeight"), historyCardHeight());
     status.insert(QStringLiteral("settingsFile"), m_settings ? m_settings->fileName() : QString());
     status.insert(QStringLiteral("settingsStatus"),
                   m_settings ? m_settings->status() : -1);

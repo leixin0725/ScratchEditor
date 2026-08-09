@@ -526,6 +526,7 @@ int main(int argc, char *argv[])
                  && historyInitial.value(QStringLiteral("historyTriggerWidth")).toInt() == 12
                  && historyInitial.value(QStringLiteral("historyRevealZoneX")).toInt() == 0
                  && historyInitial.value(QStringLiteral("historyRevealZoneWidth")).toInt() == 30
+                 && historyInitial.value(QStringLiteral("historyCardHeight")).toInt() == 58
                  && historyInitial.value(QStringLiteral("historyPanelClipped")).toBool()
                  && !historyInitial.value(QStringLiteral("historyRevealBlocksPointer")).toBool()
                  && historyInitial.value(QStringLiteral("historyHoverOpenDelayMs")).toInt() == 100

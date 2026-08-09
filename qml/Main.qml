@@ -1055,7 +1055,7 @@ Window {
                         required property int characterCount
                         property string itemId: historyId
                         width: historyList.width
-                        height: 86
+                        height: controller.historyCardHeight
                         radius: 4
                         color: root.historySelectedId === historyId
                                ? root.themeButtonColor : "transparent"
@@ -1064,20 +1064,21 @@ Window {
 
                         Text {
                             x: 8
-                            y: 6
+                            y: 4
                             width: parent.width - 16
-                            height: 50
+                            height: parent.height - 22
                             text: historyRow.previewText
                             color: root.themeTextColor
                             font.family: root.uiFontFamily
                             font.pointSize: 9
                             wrapMode: Text.Wrap
-                            maximumLineCount: 3
+                            maximumLineCount: Math.max(1, Math.min(
+                                3, Math.floor((parent.height - 22) / 18)))
                             elide: Text.ElideRight
                         }
                         Text {
                             x: 8
-                            y: 62
+                            y: parent.height - 16
                             width: parent.width - 16
                             text: new Date(historyRow.capturedAtMs).toLocaleString(
                                       Qt.locale(), Locale.ShortFormat)

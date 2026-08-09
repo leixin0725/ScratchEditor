@@ -63,6 +63,7 @@ class EditorController final : public QObject, public QAbstractNativeEventFilter
     Q_PROPERTY(QString clipboardHistoryError READ clipboardHistoryError NOTIFY clipboardHistoryStateChanged)
     Q_PROPERTY(bool historyLoadConfirmationVisible READ historyLoadConfirmationVisible NOTIFY clipboardHistoryUiStateChanged)
     Q_PROPERTY(bool historyClearConfirmationVisible READ historyClearConfirmationVisible NOTIFY clipboardHistoryUiStateChanged)
+    Q_PROPERTY(int historyCardHeight READ historyCardHeight CONSTANT)
     Q_PROPERTY(QVariantList commands READ commands NOTIFY commandsChanged)
     Q_PROPERTY(bool markdownHighlighting READ markdownHighlighting NOTIFY markdownHighlightingChanged)
     Q_PROPERTY(QString theme READ theme NOTIFY appearanceChanged)
@@ -113,6 +114,7 @@ public:
     QString clipboardHistoryError() const;
     bool historyLoadConfirmationVisible() const;
     bool historyClearConfirmationVisible() const;
+    int historyCardHeight() const;
     QVariantList commands() const;
     bool markdownHighlighting() const;
     QString theme() const;

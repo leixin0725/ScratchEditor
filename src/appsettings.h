@@ -50,6 +50,7 @@ public:
     bool setStatusPanel(int fontSize, int showDelayMs, int hideDelayMs, int maxWidth,
                         QString *errorMessage = nullptr);
     void resetStatusPanel();
+    int historyCardHeight() const;
     void resetAll();
 
 private:
