@@ -343,6 +343,30 @@ int main(int argc, char *argv[])
                          {QStringLiteral("parked"), parkedWindow},
                          {QStringLiteral("reopened"), reopenedWindow}});
 
+    // 轻量关闭动画（形状收缩）期间，短文本无滚动范围时不得闪现右侧滚动条：
+    // 可见性此前依赖 60ms 防抖快照，动画期间视口高度逐帧收缩而快照停滞，
+    // 修复后可见性实时跟随 contentHeight。在动画中段（90ms/120ms）采样。
+    request(QStringLiteral("testSetText"), {{QStringLiteral("text"), QString()}});
+    QThread::msleep(150);
+    const QJsonObject scrollbarBeforeClose = request(QStringLiteral("status"));
+    request(QStringLiteral("hide"));
+    QThread::msleep(90);
+    const QJsonObject scrollbarClosing = request(QStringLiteral("status"));
+    QThread::msleep(200);
+    request(QStringLiteral("show"));
+    QThread::msleep(animationSettleMs);
+    addCheck(checks, details, QStringLiteral("closingAnimationScrollbarStaysHidden"),
+             !scrollbarBeforeClose.value(QStringLiteral("verticalScrollBarVisible")).toBool()
+                 && scrollbarClosing.value(QStringLiteral("windowTransitionActive")).toBool()
+                 && !scrollbarClosing.value(QStringLiteral("visible")).toBool()
+                 && scrollbarClosing.value(QStringLiteral("width")).toInt()
+                        < scrollbarBeforeClose.value(QStringLiteral("width")).toInt()
+                 && scrollbarClosing.value(QStringLiteral("height")).toInt()
+                        < scrollbarBeforeClose.value(QStringLiteral("height")).toInt()
+                 && !scrollbarClosing.value(QStringLiteral("verticalScrollBarVisible")).toBool(),
+             QJsonObject{{QStringLiteral("before"), scrollbarBeforeClose},
+                         {QStringLiteral("closing"), scrollbarClosing}});
+
     // 动画开启的闭合态窗口缩放回归：缩放动画期间历史面板右边缘不得探入编辑区交界。
     const QJsonObject geometryBeforeResize = request(QStringLiteral("status"));
     request(QStringLiteral("testSetGeometry"),
@@ -367,6 +391,40 @@ int main(int argc, char *argv[])
                  && resizedClosedAnimated.value(
                         QStringLiteral("historyPanelEdgeIntrusion")).toDouble() <= 0.001,
              resizedClosedAnimated);
+
+    // 窗口缩小（无真实滚动范围的短文本）时，右侧滚动条不得因 60ms 防抖快照滞后
+    // 而闪现：缩小后 30ms（仍处防抖窗口内）采样，可见性必须保持隐藏。
+    request(QStringLiteral("testSetText"), {{QStringLiteral("text"), QStringLiteral("short")}});
+    QThread::msleep(150);
+    const QJsonObject scrollbarBeforeResize = request(QStringLiteral("status"));
+    request(QStringLiteral("testSetGeometry"),
+            {{QStringLiteral("x"), geometryBeforeResize.value(QStringLiteral("x")).toInt()},
+             {QStringLiteral("y"), geometryBeforeResize.value(QStringLiteral("y")).toInt()},
+             {QStringLiteral("width"),
+              geometryBeforeResize.value(QStringLiteral("width")).toInt()},
+             {QStringLiteral("height"),
+              qMax(geometryBeforeResize.value(QStringLiteral("height")).toInt() - 100,
+                   geometryBeforeResize.value(
+                       QStringLiteral("minimumHeight")).toInt() + 10)}});
+    QThread::msleep(30);
+    const QJsonObject scrollbarResized = request(QStringLiteral("status"));
+    request(QStringLiteral("testSetGeometry"),
+            {{QStringLiteral("x"), geometryBeforeResize.value(QStringLiteral("x")).toInt()},
+             {QStringLiteral("y"), geometryBeforeResize.value(QStringLiteral("y")).toInt()},
+             {QStringLiteral("width"),
+              geometryBeforeResize.value(QStringLiteral("width")).toInt()},
+             {QStringLiteral("height"),
+              geometryBeforeResize.value(QStringLiteral("height")).toInt()}});
+    request(QStringLiteral("testSetText"), {{QStringLiteral("text"), QString()}});
+    QThread::msleep(180);
+    addCheck(checks, details, QStringLiteral("resizeScrollbarStaysHidden"),
+             !scrollbarBeforeResize.value(QStringLiteral("verticalScrollBarVisible")).toBool()
+                 && scrollbarResized.value(QStringLiteral("scrollViewportHeight")).toDouble()
+                        < scrollbarBeforeResize.value(
+                              QStringLiteral("scrollViewportHeight")).toDouble()
+                 && !scrollbarResized.value(QStringLiteral("verticalScrollBarVisible")).toBool(),
+             QJsonObject{{QStringLiteral("before"), scrollbarBeforeResize},
+                         {QStringLiteral("resized"), scrollbarResized}});
 
     request(QStringLiteral("hide"));
     QThread::msleep(180);
