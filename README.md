@@ -65,6 +65,7 @@ UTF-16 code unit 精确去重；再次复制完全相同的文本会保留稳定
 | 设为 1–6 级标题 | `Ctrl+Num+1`–`Ctrl+Num+6` |
 | 标题向 6 级 / 1 级推进 | `Ctrl+Num+-` / `Ctrl+Num++` |
 | 删除整行 | `Ctrl+Shift+L` |
+| 清空整个编辑区 | `Alt+X` |
 | 无选区复制 / 剪切整行 | `Ctrl+C` / `Ctrl+X` |
 | 无选区粘贴整行为下方新行 | `Ctrl+V`（智能） |
 | 切换任务项 / 切换本行 checkbox | `Ctrl+Alt+T` / `Ctrl+L` |

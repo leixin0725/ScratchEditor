@@ -1227,6 +1227,8 @@ EditorCommandRegistry::EditorCommandRegistry(AppSettings *settings,
          QStringLiteral("界面"), QStringLiteral("Ctrl+,"), {}, true},
         {QStringLiteral("formatSpacing"), QStringLiteral("整理选区或当前行格式"),
          QStringLiteral("编辑"), QStringLiteral("Alt+F"), {}, false},
+        {QStringLiteral("clearDocument"), QStringLiteral("清空整个编辑区"),
+         QStringLiteral("编辑"), QStringLiteral("Alt+X"), {}, false},
     };
 
     if (clipboardHistoryAvailable) {
@@ -1254,6 +1256,7 @@ EditorCommandRegistry::EditorCommandRegistry(AppSettings *settings,
              return wrapSelection(QStringLiteral("`"), QStringLiteral("`"));
          }},
         {QStringLiteral("deleteLine"), [this] { return deleteSelectedLines(); }},
+        {QStringLiteral("clearDocument"), [this] { return clearDocument(); }},
         {QStringLiteral("copyLine"), [this] { return copyLine(); }},
         {QStringLiteral("cutLine"), [this] { return cutLine(); }},
         {QStringLiteral("pasteClipboard"), [this] { return pasteClipboard(); }},
@@ -2272,6 +2275,23 @@ bool EditorCommandRegistry::deleteSelectedLines()
     m_editor->setProperty("cursorPosition", removeStart);
     repairOrderedLists(text, m_document->toPlainText(), true);
     cursor.endEditBlock();
+    focusEditor();
+    return true;
+}
+
+bool EditorCommandRegistry::clearDocument()
+{
+    if (!m_editor || !m_document || m_editor->property("readOnly").toBool()) {
+        return false;
+    }
+
+    // 整篇清空合并为一次撤销（一次 Ctrl+Z 可整体恢复原文）。
+    QTextCursor cursor(m_document);
+    cursor.beginEditBlock();
+    cursor.select(QTextCursor::Document);
+    cursor.removeSelectedText();
+    cursor.endEditBlock();
+    selectRange(0, 0);
     focusEditor();
     return true;
 }

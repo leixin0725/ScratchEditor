@@ -87,6 +87,7 @@ private:
     bool wrapSelection(const QString &opening, const QString &closing);
     bool transformSelectedLines(const QString &commandId);
     bool deleteSelectedLines();
+    bool clearDocument();
     bool copyLine();
     bool cutLine();
     bool cutSelection();

@@ -1684,6 +1684,53 @@ int main(int argc, char *argv[])
                     == QStringLiteral("Ctrl+I"),
              shortcut);
 
+    // --- 清空整个编辑区命令（默认 Alt+X） ---
+    const QJsonObject clearShortcutDefault = request(
+        QStringLiteral("testShortcut"),
+        {{QStringLiteral("commandId"), QStringLiteral("clearDocument")}});
+    setTextAndSelection(QStringLiteral("第一行\n第二行\n第三行"), 4, 4);
+    const QJsonObject cleared = execute(QStringLiteral("clearDocument"));
+    const QJsonObject clearUndo = request(QStringLiteral("testUndo"));
+    const QJsonObject clearRedo = request(QStringLiteral("testRedo"));
+    setTextAndSelection(QString(), 0, 0);
+    const QJsonObject clearEmpty = execute(QStringLiteral("clearDocument"));
+    addCheck(checks, details, QStringLiteral("clearDocumentCommand"),
+             clearShortcutDefault.value(QStringLiteral("shortcut")).toString()
+                    == QStringLiteral("Alt+X")
+                 && cleared.value(QStringLiteral("executed")).toBool()
+                 && cleared.value(QStringLiteral("text")).toString().isEmpty()
+                 && cleared.value(QStringLiteral("cursorPosition")).toInt() == 0
+                 && cleared.value(QStringLiteral("selectionStart")).toInt() == 0
+                 && cleared.value(QStringLiteral("selectionEnd")).toInt() == 0
+                 && clearUndo.value(QStringLiteral("text")).toString()
+                    == QStringLiteral("第一行\n第二行\n第三行")
+                 && clearRedo.value(QStringLiteral("text")).toString().isEmpty()
+                 && clearEmpty.value(QStringLiteral("executed")).toBool()
+                 && clearEmpty.value(QStringLiteral("text")).toString().isEmpty(),
+             cleared);
+
+    const QJsonObject clearConflict = request(
+        QStringLiteral("testSetShortcut"),
+        {{QStringLiteral("commandId"), QStringLiteral("clearDocument")},
+         {QStringLiteral("sequence"), QStringLiteral("Ctrl+Alt+C")}});
+    const QJsonObject clearShortcutSet = request(
+        QStringLiteral("testSetShortcut"),
+        {{QStringLiteral("commandId"), QStringLiteral("clearDocument")},
+         {QStringLiteral("sequence"), QStringLiteral("Ctrl+Alt+Q")}});
+    const QJsonObject clearShortcutRestored = request(
+        QStringLiteral("testSetShortcut"),
+        {{QStringLiteral("commandId"), QStringLiteral("clearDocument")},
+         {QStringLiteral("sequence"), QStringLiteral("Alt+X")}});
+    addCheck(checks, details, QStringLiteral("clearDocumentShortcutConfigurable"),
+             !clearConflict.value(QStringLiteral("configured")).toBool()
+                 && clearShortcutSet.value(QStringLiteral("configured")).toBool()
+                 && clearShortcutSet.value(QStringLiteral("shortcut")).toString()
+                    == QStringLiteral("Ctrl+Alt+Q")
+                 && clearShortcutRestored.value(QStringLiteral("configured")).toBool()
+                 && clearShortcutRestored.value(QStringLiteral("shortcut")).toString()
+                    == QStringLiteral("Alt+X"),
+             clearShortcutSet);
+
     // --- CJK Punctuation Auto Conversion ---
     setTextAndSelection(QStringLiteral("中文"), 2, 2);
     keyPress(QStringLiteral(","), QStringLiteral(","));
