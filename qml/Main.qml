@@ -78,6 +78,7 @@ Window {
     property bool statusPanelHovered: false
     property bool statusPanelOpen: false
     property bool statusCopyFeedback: false
+    property bool inputScrollRestoreInProgress: false
 
     function scrollToBottom() {
         editorViewport.contentY = Math.max(0, editorViewport.contentHeight - editorViewport.height)
@@ -857,7 +858,9 @@ Window {
         clip: true
         boundsBehavior: Flickable.StopAtBounds
         contentWidth: width
-        contentHeight: Math.max(height, editor.contentHeight + 20)
+        // 正文下方保留 2/3 页可滚动的留白区，配合 PageUp/PageDown 纯滚动浏览；
+        // 触底自动滚动后光标停在视口上 1/3（段尾触底即滚到此处的最大位置）。
+        contentHeight: Math.max(height, editor.contentHeight + height * 2 / 3)
         pixelAligned: true
 
         Behavior on x { NumberAnimation { duration: root.transitionDuration } }
@@ -888,6 +891,18 @@ Window {
             inputMethodHints: Qt.ImhMultiLine
 
             onCursorRectangleChanged: {
+                // 撤销回滚滚动位置期间，光标跟随可能在下一帧延迟触发并覆盖
+                // 恢复结果，这里先跳过；由 C++ 在回滚窗口结束后恢复。
+                if (root.inputScrollRestoreInProgress) {
+                    return
+                }
+                // 文档变更期间 QML 会短暂给出过期/无效的光标矩形（如落在
+                // 文档开头附近），若直接跟随会把视图拉回顶部。用 positionAt
+                // 反查该矩形对应的位置并与当前光标位置比对，不一致则跳过。
+                const rectPosition = positionAt(cursorRectangle.x, cursorRectangle.y)
+                if (Math.abs(rectPosition - cursorPosition) > 4) {
+                    return
+                }
                 const top = cursorRectangle.y
                 const bottom = cursorRectangle.y + cursorRectangle.height
                 if (top < editorViewport.contentY) {

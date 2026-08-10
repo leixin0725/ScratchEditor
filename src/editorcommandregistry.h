@@ -8,6 +8,7 @@
 #include <QString>
 #include <QTimer>
 #include <QVariantList>
+#include <QVariantMap>
 #include <QVector>
 
 #include <functional>
@@ -17,6 +18,7 @@ class QTextDocument;
 class AppSettings;
 class QEvent;
 class QQuickItem;
+class QQuickWindow;
 
 class EditorCommandRegistry final : public QObject
 {
@@ -27,6 +29,7 @@ public:
                                    QObject *parent = nullptr);
 
     void setEditor(QObject *editor, QTextDocument *document);
+    void setWindow(QQuickWindow *window);
     using ClipboardReader = std::function<QString()>;
     using ClipboardWriter = std::function<bool(const QString &text)>;
     void setClipboardAccess(ClipboardReader reader, ClipboardWriter writer);
@@ -37,6 +40,8 @@ public:
     void resetShortcuts();
     bool execute(const QString &commandId);
     bool handleEditorEvent(QEvent *event);
+    bool undoWithScrollRollback();
+    QVariantMap inputScrollDiagnostics() const;
 
     bool findNext(const QString &query, bool caseSensitive, bool backwards);
     bool replaceCurrent(const QString &query, const QString &replacement, bool caseSensitive);
@@ -133,10 +138,67 @@ private:
                             const QPointF &scenePosition);
     void updateSelectionDrag(const QPointF &scenePosition, bool scrollViewport);
     void resetSelectionDrag(bool releaseMouseGrab);
+    void beginInputAutoScrollTracking(const QString &kind);
+    void queueInputAutoScrollCheck();
+    void checkInputAutoScroll();
+
+    struct InputScrollRecord {
+        qreal preScrollY = 0.0;
+        bool didScroll = false;
+    };
+
+    struct InputScrollDiagnostics {
+        QString lastKind;
+        qint64 inputCount = 0;
+        qint64 checkCount = 0;
+        qint64 triggerCount = 0;
+        qint64 overrideCount = 0;
+        qreal preScrollY = 0.0;
+        qreal currentY = 0.0;
+        qreal cursorTop = 0.0;
+        qreal cursorBottom = 0.0;
+        qreal viewportHeight = 0.0;
+        qreal maxY = 0.0;
+        qreal targetY = 0.0;
+        qreal settleY = 0.0;
+        int preLength = -1;
+        int docLength = -1;
+        int cursorPosition = -1;
+        bool atEnd = false;
+        bool touched = false;
+        bool didScroll = false;
+        bool overrideDetected = false;
+    };
+
+    struct InputScrollEvent {
+        QString type;
+        QString kind;
+        qint64 seq = 0;
+        qreal preY = 0.0;
+        qreal curY = 0.0;
+        qreal curBottom = 0.0;
+        qreal vh = 0.0;
+        qreal maxY = 0.0;
+        qreal targetY = 0.0;
+        qreal settleY = 0.0;
+        int preLen = -1;
+        int docLen = -1;
+        int cursorPos = -1;
+        int recordCount = -1;
+        bool atEnd = false;
+        bool touched = false;
+        bool didScroll = false;
+        bool earlyReturn = false;
+        bool pending = false;
+        bool restoreInProgress = false;
+    };
+
+    void recordInputScrollEvent(InputScrollEvent event);
 
     AppSettings *m_settings = nullptr;
     QPointer<QObject> m_editor;
     QPointer<QTextDocument> m_document;
+    QPointer<QQuickWindow> m_window;
     QString m_documentTextSnapshot;
     bool m_documentTextSnapshotPrepared = false;
     QVector<Definition> m_definitions;
@@ -153,4 +215,15 @@ private:
     bool m_selectionDragPreviousKeepMouseGrab = false;
     QCursor m_selectionDragOriginalCursor;
     std::optional<FormatUndoSnapshot> m_formatUndoSnapshot;
+    QVector<InputScrollRecord> m_inputScrollHistory;
+    bool m_inputAutoScrollPending = false;
+    bool m_inputAutoScrollCheckQueued = false;
+    bool m_scrollRestoreUndoInProgress = false;
+    qreal m_inputPreScrollY = 0.0;
+    int m_inputPreTextLength = -1;
+    InputScrollDiagnostics m_inputScrollDiag;
+    QVector<InputScrollEvent> m_inputScrollEvents;
+    qint64 m_inputScrollEventSeq = 0;
+    qint64 m_inputScrollClearCount = 0;
+    qint64 m_inputScrollEarlyReturnCount = 0;
 };

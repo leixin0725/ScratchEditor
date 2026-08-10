@@ -10,6 +10,8 @@
 #include <QMetaObject>
 #include <QMouseEvent>
 #include <QQuickItem>
+#include <QQuickWindow>
+#include <QRectF>
 #include <QRegularExpression>
 #include <QSet>
 #include <QStyleHints>
@@ -1306,12 +1308,39 @@ void EditorCommandRegistry::setEditor(QObject *editor, QTextDocument *document)
             if (m_document) {
                 if (m_documentTextSnapshotPrepared) {
                     m_documentTextSnapshotPrepared = false;
+                    // 结构编辑（列表修复等）必然改变内容，且属于非输入文本变化。
+                    if (!m_inputAutoScrollPending && !m_scrollRestoreUndoInProgress) {
+                        m_inputScrollHistory.clear();
+                    }
                 } else {
+                    const QString previousText = m_documentTextSnapshot;
                     m_documentTextSnapshot = m_document->toPlainText();
+                    // 仅当文本内容真正变化时才清空滚动记录：光标移动等也会触发
+                    // contentsChanged，但内容未变，输入与撤销的对应关系仍然成立。
+                    // 非输入文本变化（命令、加载、redo 等）会使其与撤销栈脱钩。
+                    if (m_documentTextSnapshot != previousText
+                        && !m_inputAutoScrollPending && !m_scrollRestoreUndoInProgress) {
+                        ++m_inputScrollClearCount;
+                        InputScrollEvent event;
+                        event.type = QStringLiteral("clear");
+                        event.kind = m_inputScrollDiag.lastKind;
+                        event.preLen = m_inputPreTextLength;
+                        event.docLen = m_document->characterCount() - 1;
+                        event.recordCount = m_inputScrollHistory.size();
+                        event.pending = m_inputAutoScrollPending;
+                        event.restoreInProgress = m_scrollRestoreUndoInProgress;
+                        recordInputScrollEvent(event);
+                        m_inputScrollHistory.clear();
+                    }
                 }
             }
         });
     }
+}
+
+void EditorCommandRegistry::setWindow(QQuickWindow *window)
+{
+    m_window = window;
 }
 
 void EditorCommandRegistry::setClipboardAccess(ClipboardReader reader, ClipboardWriter writer)
@@ -1453,6 +1482,32 @@ bool EditorCommandRegistry::handleEditorEvent(QEvent *event)
             }
             m_formatUndoSnapshot.reset();
         }
+        // 输入触发自动滚动后，Ctrl+Z 一步撤销输入并回到输入前的滚动位置。
+        if (ctrlZ && !m_inputScrollHistory.isEmpty()) {
+            return undoWithScrollRollback();
+        }
+        // PageUp/PageDown：按一页纯滚动浏览，光标与选区保持不动；
+        // Ctrl/Alt/Meta 组合不拦截（Shift 组合也按纯滚动处理）。
+        const bool pageKey = (keyEvent->key() == Qt::Key_PageUp
+                              || keyEvent->key() == Qt::Key_PageDown)
+            && !modifiers.testFlag(Qt::ControlModifier)
+            && !modifiers.testFlag(Qt::AltModifier)
+            && !modifiers.testFlag(Qt::MetaModifier);
+        if (pageKey) {
+            if (QQuickItem *viewport = editorViewport()) {
+                const qreal viewportHeight = viewport->height();
+                const qreal currentY = viewport->property("contentY").toReal();
+                const qreal maximumY = qMax<qreal>(
+                    0.0, viewport->property("contentHeight").toReal() - viewportHeight);
+                const qreal delta = keyEvent->key() == Qt::Key_PageDown
+                    ? viewportHeight : -viewportHeight;
+                const qreal requestedY = qBound<qreal>(0.0, currentY + delta, maximumY);
+                if (!qFuzzyCompare(requestedY + 1.0, currentY + 1.0)) {
+                    viewport->setProperty("contentY", requestedY);
+                }
+            }
+            return true;
+        }
         // 无选区时拦截 Ctrl+C / Ctrl+X / Ctrl+V，执行整行复制、剪切与智能粘贴；
         // 有选区时保持 TextEdit 标准行为（复制/剪切/替换选区）。
         const bool plainCtrl = modifiers.testFlag(Qt::ControlModifier)
@@ -1471,7 +1526,10 @@ bool EditorCommandRegistry::handleEditorEvent(QEvent *event)
             }
             if (keyEvent->key() == Qt::Key_V
                 && !m_editor->property("readOnly").toBool()) {
-                return pasteClipboard();
+                beginInputAutoScrollTracking(QStringLiteral("paste"));
+                const bool pasted = pasteClipboard();
+                queueInputAutoScrollCheck();
+                return pasted;
             }
         }
         const bool tabPressed = keyEvent->key() == Qt::Key_Tab
@@ -1493,16 +1551,30 @@ bool EditorCommandRegistry::handleEditorEvent(QEvent *event)
                                  || keyEvent->key() == Qt::Key_Enter)
             && !(modifiers & (Qt::ShiftModifier | Qt::ControlModifier
                               | Qt::AltModifier | Qt::MetaModifier));
-        if (plainEnter && !m_editor->property("inputMethodComposing").toBool()
-            && handleListEnter()) {
-            return true;
+        if (plainEnter && !m_editor->property("inputMethodComposing").toBool()) {
+            beginInputAutoScrollTracking(QStringLiteral("enter"));
+            if (handleListEnter()) {
+                queueInputAutoScrollCheck();
+                return true;
+            }
+            // 普通换行由 TextEdit 原生插入，仍需触发自动滚动检查。
+            queueInputAutoScrollCheck();
         }
         if (tabPressed
             && !(modifiers & (Qt::ControlModifier | Qt::AltModifier | Qt::MetaModifier))) {
+            beginInputAutoScrollTracking(QStringLiteral("tab"));
             if (shiftPressed || keyEvent->key() == Qt::Key_Backtab) {
-                return changeIndent(true);
+                const bool outdented = changeIndent(true);
+                if (outdented) {
+                    queueInputAutoScrollCheck();
+                }
+                return outdented;
             }
-            return jumpOutOfPair() || changeIndent(false);
+            const bool handled = jumpOutOfPair() || changeIndent(false);
+            if (handled) {
+                queueInputAutoScrollCheck();
+            }
+            return handled;
         }
 
         const bool plainVerticalArrow = (keyEvent->key() == Qt::Key_Down
@@ -1525,6 +1597,7 @@ bool EditorCommandRegistry::handleEditorEvent(QEvent *event)
 
         if (!(modifiers & (Qt::ControlModifier | Qt::AltModifier | Qt::MetaModifier))
             && !keyEvent->text().isEmpty()) {
+            beginInputAutoScrollTracking(QStringLiteral("key"));
             const int start = m_editor->property("selectionStart").toInt();
             const int end = m_editor->property("selectionEnd").toInt();
             const QString beforeText = m_documentTextSnapshot;
@@ -1536,6 +1609,7 @@ bool EditorCommandRegistry::handleEditorEvent(QEvent *event)
                 if (mergedResult->runAutoSpacing) {
                     applyAutoSpacing(mergedResult->footprint);
                 }
+                queueInputAutoScrollCheck();
                 return true;
             }
             // 把字符插入与自动空格放进同一个 edit block，使一次 Ctrl+Z 能整体撤销。
@@ -1555,6 +1629,7 @@ bool EditorCommandRegistry::handleEditorEvent(QEvent *event)
                     repairOrderedLists(beforeText, afterText, false);
                     undoGroupCursor.endEditBlock();
                     focusEditor();
+                    queueInputAutoScrollCheck();
                     return true;
                 }
                 QString expectedText = beforeText;
@@ -1569,6 +1644,9 @@ bool EditorCommandRegistry::handleEditorEvent(QEvent *event)
                                         {start, start + static_cast<int>(text.size())},
                                         text.size() > 1, expectedText);
                                     undoGroupCursor.endEditBlock();
+                                    // 编辑块收尾后再检查，避免收尾触发的
+                                    // contentsChanged 清掉刚压入的滚动记录。
+                                    queueInputAutoScrollCheck();
                                 });
                 return false;
             }
@@ -1576,6 +1654,7 @@ bool EditorCommandRegistry::handleEditorEvent(QEvent *event)
                 applyAutoSpacing(result.footprint);
             }
             undoGroupCursor.endEditBlock();
+            queueInputAutoScrollCheck();
             return true;
         }
         return false;
@@ -1587,6 +1666,7 @@ bool EditorCommandRegistry::handleEditorEvent(QEvent *event)
         if (committedText.isEmpty()) {
             return false;
         }
+        beginInputAutoScrollTracking(QStringLiteral("ime"));
         const bool relevant = committedText == QStringLiteral("```")
             || committedText == QStringLiteral("`")
             || committedText == QStringLiteral("·")
@@ -1604,6 +1684,7 @@ bool EditorCommandRegistry::handleEditorEvent(QEvent *event)
             if (mergedResult->runAutoSpacing) {
                 applyAutoSpacing(mergedResult->footprint);
             }
+            queueInputAutoScrollCheck();
             return true;
         }
         const QString selection = selectedText();
@@ -1629,6 +1710,9 @@ bool EditorCommandRegistry::handleEditorEvent(QEvent *event)
                     }
                 }
                 undoGroupCursor.endEditBlock();
+                // 编辑块收尾后再检查，避免收尾触发的 contentsChanged
+                // 清掉刚压入的滚动记录。
+                queueInputAutoScrollCheck();
             });
             return false;
         }
@@ -1648,9 +1732,284 @@ bool EditorCommandRegistry::handleEditorEvent(QEvent *event)
                 }
             }
             undoGroupCursor.endEditBlock();
+            queueInputAutoScrollCheck();
         });
     }
     return false;
+}
+
+void EditorCommandRegistry::beginInputAutoScrollTracking(const QString &kind)
+{
+    if (!m_editor || !m_document) {
+        return;
+    }
+    if (!m_inputAutoScrollPending) {
+        ++m_inputScrollDiag.inputCount;
+    }
+    m_inputScrollDiag.lastKind = kind;
+    m_inputAutoScrollPending = true;
+    if (QQuickItem *viewport = editorViewport()) {
+        m_inputPreScrollY = viewport->property("contentY").toReal();
+    } else {
+        m_inputPreScrollY = 0.0;
+    }
+    m_inputPreTextLength = m_document->characterCount() - 1;
+    InputScrollEvent event;
+    event.type = QStringLiteral("input");
+    event.kind = kind;
+    event.preY = m_inputPreScrollY;
+    event.preLen = m_inputPreTextLength;
+    event.recordCount = m_inputScrollHistory.size();
+    event.pending = m_inputAutoScrollPending;
+    recordInputScrollEvent(event);
+}
+
+void EditorCommandRegistry::queueInputAutoScrollCheck()
+{
+    if (m_inputAutoScrollCheckQueued) {
+        return;
+    }
+    m_inputAutoScrollCheckQueued = true;
+    // 延迟到文档/布局落定后再判定：真实输入（IME/回车）会在事件处理期间
+    // 产生瞬态光标矩形与重复 contentsChanged，立即检查会读到过期几何
+    // （误判触底）并在检查后触发清栈。40ms 足够这些瞬态收尾。
+    QTimer::singleShot(40, this, [this] {
+        m_inputAutoScrollCheckQueued = false;
+        checkInputAutoScroll();
+    });
+}
+
+void EditorCommandRegistry::checkInputAutoScroll()
+{
+    m_inputAutoScrollPending = false;
+    ++m_inputScrollDiag.checkCount;
+    m_inputScrollDiag.overrideDetected = false;
+    InputScrollEvent event;
+    event.type = QStringLiteral("check");
+    event.kind = m_inputScrollDiag.lastKind;
+    event.preY = m_inputPreScrollY;
+    event.preLen = m_inputPreTextLength;
+    event.pending = m_inputAutoScrollPending;
+    if (!m_editor || !m_document) {
+        return;
+    }
+    const int documentLength = m_document->characterCount() - 1;
+    m_inputScrollDiag.docLength = documentLength;
+    m_inputScrollDiag.preLength = m_inputPreTextLength;
+    event.docLen = documentLength;
+    if (documentLength == m_inputPreTextLength) {
+        // 本次输入没有改变文本（如被 IME 组合状态拦截），不记录滚动。
+        ++m_inputScrollEarlyReturnCount;
+        event.earlyReturn = true;
+        event.recordCount = m_inputScrollHistory.size();
+        recordInputScrollEvent(event);
+        return;
+    }
+    const int cursorPosition = m_editor->property("cursorPosition").toInt();
+    m_inputScrollDiag.cursorPosition = cursorPosition;
+    event.cursorPos = cursorPosition;
+    QRectF cursorRect;
+    const bool rectLocated = QMetaObject::invokeMethod(
+        m_editor, "positionToRectangle", Qt::DirectConnection,
+        Q_RETURN_ARG(QRectF, cursorRect), Q_ARG(int, cursorPosition));
+    m_inputScrollDiag.cursorTop = rectLocated ? cursorRect.y() : -1.0;
+    m_inputScrollDiag.cursorBottom = rectLocated
+        ? cursorRect.y() + cursorRect.height() : -1.0;
+    event.curBottom = m_inputScrollDiag.cursorBottom;
+    bool didScroll = false;
+    if (QQuickItem *viewport = editorViewport()) {
+        const qreal viewportHeight = viewport->height();
+        const qreal currentY = viewport->property("contentY").toReal();
+        const qreal maximumY = qMax<qreal>(
+            0.0, viewport->property("contentHeight").toReal() - viewportHeight);
+        m_inputScrollDiag.preScrollY = m_inputPreScrollY;
+        m_inputScrollDiag.currentY = currentY;
+        m_inputScrollDiag.viewportHeight = viewportHeight;
+        m_inputScrollDiag.maxY = maximumY;
+        event.curY = currentY;
+        event.vh = viewportHeight;
+        event.maxY = maximumY;
+        const bool atDocumentEnd = cursorPosition == documentLength;
+        const bool cursorTouchesBottomEdge = rectLocated
+            && cursorRect.y() + cursorRect.height() >= currentY + viewportHeight - 0.5;
+        m_inputScrollDiag.atEnd = atDocumentEnd;
+        m_inputScrollDiag.touched = cursorTouchesBottomEdge;
+        event.atEnd = atDocumentEnd;
+        event.touched = cursorTouchesBottomEdge;
+        // 间歇式自动滚动：只在光标碰到/越过视口底边时触发一次，
+        // 触发后不再重复，光标随输入自然下落，下次触底再触发。
+        // - 段中触底：光标行滚到视口上 1/3；
+        // - 段尾触底：等效于滚到底（PageDown 到底，正文末尾下方 2/3 页
+        //   留白翻出，光标停在上 1/3）。
+        if (cursorTouchesBottomEdge) {
+            ++m_inputScrollDiag.triggerCount;
+            qreal targetY = currentY;
+            if (atDocumentEnd && rectLocated) {
+                targetY = maximumY;
+            } else if (rectLocated) {
+                // 段中触底：把光标行滚动到视口上 1/3。
+                QQuickItem *item = editorItem();
+                const qreal editorY = item ? item->y() : 0.0;
+                targetY = qBound<qreal>(
+                    0.0, editorY + cursorRect.y() - viewportHeight / 3.0, maximumY);
+            }
+            if (!qFuzzyCompare(targetY + 1.0, currentY + 1.0)) {
+                viewport->setProperty("contentY", targetY);
+            }
+            m_inputScrollDiag.targetY = targetY;
+            event.targetY = targetY;
+            // 最小可见跟随可能已把视图先行滚动到位（目标与当前相等）；
+            // 只要输入使视图从输入前位置移向目标位置，就按“本次输入触发了
+            // 滚动”记录，保证 Ctrl+Z 能连同滚动一起回滚。
+            didScroll = !qFuzzyCompare(targetY + 1.0, m_inputPreScrollY + 1.0);
+            m_inputScrollDiag.didScroll = didScroll;
+            event.didScroll = didScroll;
+            // 触发后采样落定位置，检测是否被后续逻辑（如延迟的光标跟随）覆盖。
+            QTimer::singleShot(50, this, [this] {
+                if (QQuickItem *vp = editorViewport()) {
+                    m_inputScrollDiag.settleY = vp->property("contentY").toReal();
+                    InputScrollEvent settleEvent;
+                    settleEvent.type = QStringLiteral("settle");
+                    settleEvent.kind = m_inputScrollDiag.lastKind;
+                    settleEvent.settleY = m_inputScrollDiag.settleY;
+                    settleEvent.targetY = m_inputScrollDiag.targetY;
+                    settleEvent.didScroll = m_inputScrollDiag.didScroll;
+                    settleEvent.recordCount = m_inputScrollHistory.size();
+                    if (m_inputScrollDiag.didScroll
+                        && !qFuzzyCompare(m_inputScrollDiag.settleY + 1.0,
+                                          m_inputScrollDiag.targetY + 1.0)) {
+                        ++m_inputScrollDiag.overrideCount;
+                        m_inputScrollDiag.overrideDetected = true;
+                        settleEvent.curY = m_inputScrollDiag.settleY;
+                    }
+                    recordInputScrollEvent(settleEvent);
+                }
+            });
+        }
+    }
+    // 每笔文本输入记录一次滚动前置位置与是否发生滚动，供 Ctrl+Z 一并回滚。
+    // 栈与撤销顺序一一对应（非输入文本变化会清空），保留最近 256 笔。
+    if (m_inputScrollHistory.size() >= 256) {
+        m_inputScrollHistory.removeFirst();
+    }
+    m_inputScrollHistory.append({m_inputPreScrollY, didScroll});
+    m_inputPreTextLength = -1;
+    event.recordCount = m_inputScrollHistory.size();
+    recordInputScrollEvent(event);
+}
+
+void EditorCommandRegistry::recordInputScrollEvent(InputScrollEvent event)
+{
+    event.seq = ++m_inputScrollEventSeq;
+    if (m_inputScrollEvents.size() >= 64) {
+        m_inputScrollEvents.removeFirst();
+    }
+    m_inputScrollEvents.append(std::move(event));
+}
+
+QVariantMap EditorCommandRegistry::inputScrollDiagnostics() const
+{
+    const InputScrollDiagnostics &d = m_inputScrollDiag;
+    QVariantMap result{
+        {QStringLiteral("LastKind"), d.lastKind},
+        {QStringLiteral("InputCount"), static_cast<qint64>(d.inputCount)},
+        {QStringLiteral("CheckCount"), static_cast<qint64>(d.checkCount)},
+        {QStringLiteral("TriggerCount"), static_cast<qint64>(d.triggerCount)},
+        {QStringLiteral("OverrideCount"), static_cast<qint64>(d.overrideCount)},
+        {QStringLiteral("ClearCount"), static_cast<qint64>(m_inputScrollClearCount)},
+        {QStringLiteral("EarlyReturnCount"),
+         static_cast<qint64>(m_inputScrollEarlyReturnCount)},
+        {QStringLiteral("Pending"), m_inputAutoScrollPending},
+        {QStringLiteral("CheckQueued"), m_inputAutoScrollCheckQueued},
+        {QStringLiteral("RecordCount"),
+         static_cast<qint64>(m_inputScrollHistory.size())},
+        {QStringLiteral("PreScrollY"), d.preScrollY},
+        {QStringLiteral("CurrentY"), d.currentY},
+        {QStringLiteral("CursorTop"), d.cursorTop},
+        {QStringLiteral("CursorBottom"), d.cursorBottom},
+        {QStringLiteral("ViewportHeight"), d.viewportHeight},
+        {QStringLiteral("MaxY"), d.maxY},
+        {QStringLiteral("TargetY"), d.targetY},
+        {QStringLiteral("SettleY"), d.settleY},
+        {QStringLiteral("PreLength"), d.preLength},
+        {QStringLiteral("DocLength"), d.docLength},
+        {QStringLiteral("CursorPosition"), d.cursorPosition},
+        {QStringLiteral("AtEnd"), d.atEnd},
+        {QStringLiteral("Touched"), d.touched},
+        {QStringLiteral("DidScroll"), d.didScroll},
+        {QStringLiteral("OverrideDetected"), d.overrideDetected},
+    };
+    QVariantList history;
+    history.reserve(m_inputScrollEvents.size());
+    for (const InputScrollEvent &item : m_inputScrollEvents) {
+        history.append(QVariantMap{
+            {QStringLiteral("seq"), static_cast<qint64>(item.seq)},
+            {QStringLiteral("type"), item.type},
+            {QStringLiteral("kind"), item.kind},
+            {QStringLiteral("preY"), item.preY},
+            {QStringLiteral("curY"), item.curY},
+            {QStringLiteral("curBottom"), item.curBottom},
+            {QStringLiteral("vh"), item.vh},
+            {QStringLiteral("maxY"), item.maxY},
+            {QStringLiteral("targetY"), item.targetY},
+            {QStringLiteral("settleY"), item.settleY},
+            {QStringLiteral("preLen"), item.preLen},
+            {QStringLiteral("docLen"), item.docLen},
+            {QStringLiteral("cursorPos"), item.cursorPos},
+            {QStringLiteral("recordCount"), item.recordCount},
+            {QStringLiteral("atEnd"), item.atEnd},
+            {QStringLiteral("touched"), item.touched},
+            {QStringLiteral("didScroll"), item.didScroll},
+            {QStringLiteral("earlyReturn"), item.earlyReturn},
+            {QStringLiteral("pending"), item.pending},
+            {QStringLiteral("restoreInProgress"), item.restoreInProgress},
+        });
+    }
+    result.insert(QStringLiteral("History"), history);
+    return result;
+}
+
+bool EditorCommandRegistry::undoWithScrollRollback()
+{
+    if (!m_editor) {
+        return false;
+    }
+    if (m_inputScrollHistory.isEmpty()) {
+        return QMetaObject::invokeMethod(m_editor, "undo");
+    }
+    const InputScrollRecord record = m_inputScrollHistory.takeLast();
+    if (record.didScroll && m_window) {
+        // 抑制 QML 光标跟随：撤销引起的延迟光标矩形更新可能覆盖滚动恢复位置。
+        m_window->setProperty("inputScrollRestoreInProgress", true);
+    }
+    // 撤销期间的 contentsChanged 不能清空剩余滚动记录，
+    // 否则多次输入各自触发的滚动无法逐级回滚。
+    m_scrollRestoreUndoInProgress = true;
+    const bool invoked = QMetaObject::invokeMethod(m_editor, "undo");
+    m_scrollRestoreUndoInProgress = false;
+    if (invoked && record.didScroll) {
+        // 延迟到事件循环下一轮再恢复，避免撤销过程中光标跟随逻辑覆盖结果。
+        QTimer::singleShot(0, this, [this, preScrollY = record.preScrollY] {
+            if (!m_editor) {
+                return;
+            }
+            if (QQuickItem *viewport = editorViewport()) {
+                const qreal maximumY = qMax<qreal>(
+                    0.0, viewport->property("contentHeight").toReal() - viewport->height());
+                viewport->setProperty("contentY",
+                                      qBound<qreal>(0.0, preScrollY, maximumY));
+            }
+        });
+        if (m_window) {
+            // 等到撤销引起的光标矩形更新（可能延迟到下一帧）之后解除抑制。
+            QTimer::singleShot(100, this, [this] {
+                if (m_window) {
+                    m_window->setProperty("inputScrollRestoreInProgress", false);
+                }
+            });
+        }
+    }
+    return invoked;
 }
 
 bool EditorCommandRegistry::moveSelection(int selectionStart, int selectionEnd,

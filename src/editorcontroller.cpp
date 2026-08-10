@@ -732,6 +732,9 @@ void EditorController::registerWindow(QQuickWindow *window)
         m_window->removeEventFilter(this);
     }
     m_window = window;
+    if (m_commands) {
+        m_commands->setWindow(window);
+    }
     if (m_window) {
         m_window->installEventFilter(this);
         connect(m_window, &QQuickWindow::screenChanged, this, [this](QScreen *screen) {
@@ -1235,6 +1238,23 @@ void EditorController::buildCommandHandlers()
             response.insert(QStringLiteral("invoked"), invoked);
             sendResponse(r.socket, response, r.startedNs, r.requestId);
         }}},
+        {QStringLiteral("testSetScrollY"), {Gate::Test, [this](const DispatchRequest &r) {
+            // 确定性构造滚动初始状态，供翻页/自动滚动测试使用。
+            QJsonObject response = statusObject();
+            response.insert(QStringLiteral("command"), r.command);
+            bool applied = false;
+            if (QQuickItem *viewport = m_commands ? m_commands->editorViewport() : nullptr) {
+                const qreal maximumY = qMax<qreal>(
+                    0.0, viewport->property("contentHeight").toReal() - viewport->height());
+                const qreal requestedY = qBound<qreal>(
+                    0.0, r.request.value(QStringLiteral("contentY")).toDouble(), maximumY);
+                viewport->setProperty("contentY", requestedY);
+                response.insert(QStringLiteral("contentY"), requestedY);
+                applied = true;
+            }
+            response.insert(QStringLiteral("applied"), applied);
+            sendResponse(r.socket, response, r.startedNs, r.requestId);
+        }}},
         {QStringLiteral("testClipboard"), {Gate::Test, [this](const DispatchRequest &r) {
             QJsonObject response = statusObject();
             response.insert(QStringLiteral("command"), r.command);
@@ -1575,7 +1595,8 @@ void EditorController::buildCommandHandlers()
             sendResponse(r.socket, response, r.startedNs, r.requestId);
         }}},
         {QStringLiteral("testUndo"), {Gate::Test, [this](const DispatchRequest &r) {
-            const bool invoked = QMetaObject::invokeMethod(m_editor, "undo");
+            // 与真实 Ctrl+Z 走同一路径：输入触发的自动滚动一并回滚。
+            const bool invoked = m_commands ? m_commands->undoWithScrollRollback() : false;
             QJsonObject response = statusObject();
             response.insert(QStringLiteral("command"), r.command);
             response.insert(QStringLiteral("invoked"), invoked);
@@ -1602,6 +1623,10 @@ void EditorController::buildCommandHandlers()
                 key = Qt::Key_Down;
             } else if (keyName == QStringLiteral("Up")) {
                 key = Qt::Key_Up;
+            } else if (keyName == QStringLiteral("PageUp")) {
+                key = Qt::Key_PageUp;
+            } else if (keyName == QStringLiteral("PageDown")) {
+                key = Qt::Key_PageDown;
             } else if (keyName == QStringLiteral("Backspace")) {
                 key = Qt::Key_Backspace;
             } else if (keyName == QStringLiteral("Delete")) {
@@ -3168,6 +3193,23 @@ QJsonObject EditorController::statusObject() const
                       static_cast<int>(m_window->rendererInterface()->graphicsApi()));
         status.insert(QStringLiteral("verticalScrollBarVisible"),
                       m_window->property("verticalScrollBarVisible").toBool());
+        status.insert(QStringLiteral("inputScrollRestoreInProgress"),
+                      m_window->property("inputScrollRestoreInProgress").toBool());
+        if (m_commands) {
+            const QVariantMap scrollDiagnostics = m_commands->inputScrollDiagnostics();
+            for (auto it = scrollDiagnostics.constBegin();
+                 it != scrollDiagnostics.constEnd(); ++it) {
+                status.insert(QStringLiteral("inputScroll") + it.key(),
+                              QJsonValue::fromVariant(it.value()));
+            }
+        }
+        if (QQuickItem *viewport = m_commands ? m_commands->editorViewport() : nullptr) {
+            status.insert(QStringLiteral("scrollContentY"),
+                          viewport->property("contentY").toDouble());
+            status.insert(QStringLiteral("scrollContentHeight"),
+                          viewport->property("contentHeight").toDouble());
+            status.insert(QStringLiteral("scrollViewportHeight"), viewport->height());
+        }
         status.insert(QStringLiteral("commandPaletteLoaded"),
                       m_window->property("commandPaletteLoaded").toBool());
         status.insert(QStringLiteral("findPanelVisible"),
@@ -3259,6 +3301,11 @@ QJsonObject EditorController::statusObject() const
         status.insert(QStringLiteral("selectionStart"), m_editor->property("selectionStart").toInt());
         status.insert(QStringLiteral("selectionEnd"), m_editor->property("selectionEnd").toInt());
         status.insert(QStringLiteral("cursorPosition"), m_editor->property("cursorPosition").toInt());
+        status.insert(QStringLiteral("editorContentOffsetY"), m_editor->property("y").toDouble());
+        status.insert(QStringLiteral("editorContentHeight"),
+                      m_editor->property("contentHeight").toDouble());
+        status.insert(QStringLiteral("cursorRectY"),
+                      m_editor->property("cursorRectangle").toRectF().y());
     }
     return status;
 }

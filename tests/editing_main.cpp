@@ -11,6 +11,7 @@
 #include "cjktextprocessor.h"
 
 #include <array>
+#include <cmath>
 #include <functional>
 #include <utility>
 
@@ -72,6 +73,12 @@ bool setTextAndSelection(const QString &text, int start, int end, int cursor = -
 QJsonObject editorStatus()
 {
     return request(QStringLiteral("status"));
+}
+
+QJsonObject setScrollY(double contentY)
+{
+    return request(QStringLiteral("testSetScrollY"),
+                   {{QStringLiteral("contentY"), contentY}});
 }
 
 QJsonObject execute(const QString &commandId)
@@ -3623,6 +3630,393 @@ int main(int argc, char *argv[])
                                   return values.join(QLatin1Char(','));
                               }()}});
     }
+
+    // --- 翻页浏览与输入自动滚动 ---
+    QString scrollText;
+    scrollText.reserve(4000);
+    for (int i = 0; i < 80; ++i) {
+        scrollText += QStringLiteral("line-%1 abcdefghij klmnopqrstuvwxyz\n")
+                          .arg(i, 2, 10, QLatin1Char('0'));
+    }
+    const int scrollMidCursor = scrollText.indexOf(QStringLiteral("line-70"));
+    const int scrollEndCursor = scrollText.size();
+
+    request(QStringLiteral("testSetText"), {{QStringLiteral("text"), scrollText}});
+    request(QStringLiteral("testSetSelection"),
+            {{QStringLiteral("start"), 10}, {QStringLiteral("end"), 20}});
+    setScrollY(0);
+    QThread::msleep(50);
+    const QJsonObject scrollTop = editorStatus();
+    const double pageViewportHeight =
+        scrollTop.value(QStringLiteral("scrollViewportHeight")).toDouble();
+    const double pageMaxY =
+        scrollTop.value(QStringLiteral("scrollContentHeight")).toDouble()
+        - pageViewportHeight;
+    keyPress({}, QStringLiteral("PageDown"));
+    QThread::msleep(40);
+    const QJsonObject pageDownStatus = editorStatus();
+    keyPress({}, QStringLiteral("PageUp"));
+    QThread::msleep(40);
+    const QJsonObject pageUpStatus = editorStatus();
+    addCheck(checks, details, QStringLiteral("pageScrollPageDownUpKeepsCursorSelection"),
+             std::abs(pageDownStatus.value(QStringLiteral("scrollContentY")).toDouble()
+                      - qMin(pageViewportHeight, pageMaxY)) < 1.5
+                 && pageDownStatus.value(QStringLiteral("cursorPosition")).toInt() == 20
+                 && pageDownStatus.value(QStringLiteral("selectionStart")).toInt() == 10
+                 && pageDownStatus.value(QStringLiteral("selectionEnd")).toInt() == 20
+                 && pageDownStatus.value(QStringLiteral("scrollContentY")).toDouble()
+                    > scrollTop.value(QStringLiteral("scrollContentY")).toDouble()
+                 && std::abs(pageUpStatus.value(QStringLiteral("scrollContentY")).toDouble()
+                             - scrollTop.value(QStringLiteral("scrollContentY")).toDouble()) < 1.5,
+             QJsonObject{{QStringLiteral("top"), scrollTop},
+                         {QStringLiteral("pageDown"), pageDownStatus},
+                         {QStringLiteral("pageUp"), pageUpStatus}});
+
+    request(QStringLiteral("testSetSelection"),
+            {{QStringLiteral("start"), 0}, {QStringLiteral("end"), 0}});
+    setScrollY(pageMaxY);
+    QThread::msleep(20);
+    keyPress({}, QStringLiteral("PageDown"));
+    QThread::msleep(40);
+    const QJsonObject clampedBottom = editorStatus();
+    setScrollY(0);
+    QThread::msleep(20);
+    keyPress({}, QStringLiteral("PageUp"));
+    QThread::msleep(40);
+    const QJsonObject clampedTop = editorStatus();
+    addCheck(checks, details, QStringLiteral("pageScrollClampsAtEnds"),
+             std::abs(clampedBottom.value(QStringLiteral("scrollContentY")).toDouble()
+                      - pageMaxY) < 1.5
+                 && std::abs(clampedTop.value(QStringLiteral("scrollContentY")).toDouble())
+                        < 1.5,
+             QJsonObject{{QStringLiteral("maxY"), pageMaxY},
+                         {QStringLiteral("bottom"), clampedBottom},
+                         {QStringLiteral("top"), clampedTop}});
+
+    request(QStringLiteral("testSetText"), {{QStringLiteral("text"), scrollText}});
+    QThread::msleep(50);
+    const QJsonObject paddingStatus = editorStatus();
+    const double paddingContentHeight =
+        paddingStatus.value(QStringLiteral("scrollContentHeight")).toDouble();
+    const double paddingTextHeight =
+        paddingStatus.value(QStringLiteral("editorContentHeight")).toDouble();
+    const double paddingViewportHeight =
+        paddingStatus.value(QStringLiteral("scrollViewportHeight")).toDouble();
+    addCheck(checks, details, QStringLiteral("scrollPastEndReservesTwoThirdsPage"),
+             std::abs(paddingContentHeight
+                      - (paddingTextHeight + paddingViewportHeight * 2.0 / 3.0)) < 1.5
+                 && paddingContentHeight > paddingViewportHeight,
+             paddingStatus);
+
+    request(QStringLiteral("testSetText"), {{QStringLiteral("text"), QStringLiteral("short")}});
+    // 滚动条可见性由 60ms 防抖定时器刷新，需等待其完成后读取。
+    QThread::msleep(150);
+    const QJsonObject shortDocStatus = editorStatus();
+    keyPress({}, QStringLiteral("PageDown"));
+    QThread::msleep(40);
+    const QJsonObject shortDocPageDown = editorStatus();
+    addCheck(checks, details, QStringLiteral("shortDocumentHasNoScrollRange"),
+             std::abs(shortDocStatus.value(QStringLiteral("scrollContentHeight")).toDouble()
+                      - shortDocStatus.value(QStringLiteral("scrollViewportHeight")).toDouble())
+                     < 1.5
+                 && !shortDocStatus.value(QStringLiteral("verticalScrollBarVisible")).toBool()
+                 && std::abs(shortDocPageDown.value(QStringLiteral("scrollContentY")).toDouble())
+                        < 1.5
+                 && shortDocPageDown.value(QStringLiteral("cursorPosition")).toInt() == 5,
+             QJsonObject{{QStringLiteral("before"), shortDocStatus},
+                         {QStringLiteral("pageDown"), shortDocPageDown}});
+
+    request(QStringLiteral("testSetText"), {{QStringLiteral("text"), scrollText}});
+    request(QStringLiteral("testSetSelection"),
+            {{QStringLiteral("start"), scrollEndCursor},
+             {QStringLiteral("end"), scrollEndCursor}});
+    setScrollY(0);
+    QThread::msleep(50);
+    const QJsonObject beforeEndInput = editorStatus();
+    const double endMaxY =
+        beforeEndInput.value(QStringLiteral("scrollContentHeight")).toDouble()
+        - beforeEndInput.value(QStringLiteral("scrollViewportHeight")).toDouble();
+    keyPress(QStringLiteral("x"));
+    QThread::msleep(50);
+    const QJsonObject afterEndInput = editorStatus();
+    addCheck(checks, details, QStringLiteral("inputAtDocumentEndScrollsToBottom"),
+             std::abs(afterEndInput.value(QStringLiteral("scrollContentY")).toDouble()
+                      - endMaxY) < 1.5
+                 && afterEndInput.value(QStringLiteral("cursorPosition")).toInt()
+                    == scrollEndCursor + 1
+                 && editorText() == scrollText + QStringLiteral("x"),
+             QJsonObject{{QStringLiteral("maxY"), endMaxY},
+                         {QStringLiteral("after"), afterEndInput}});
+
+    request(QStringLiteral("testSetText"), {{QStringLiteral("text"), scrollText}});
+    request(QStringLiteral("testSetSelection"),
+            {{QStringLiteral("start"), scrollMidCursor},
+             {QStringLiteral("end"), scrollMidCursor}});
+    setScrollY(0);
+    QThread::msleep(50);
+    keyPress(QStringLiteral("x"));
+    QThread::msleep(50);
+    const QJsonObject midInputStatus = editorStatus();
+    const double midExpectedY =
+        midInputStatus.value(QStringLiteral("editorContentOffsetY")).toDouble()
+        + midInputStatus.value(QStringLiteral("cursorRectY")).toDouble()
+        - midInputStatus.value(QStringLiteral("scrollViewportHeight")).toDouble() / 3.0;
+    const double midMaxY =
+        midInputStatus.value(QStringLiteral("scrollContentHeight")).toDouble()
+        - midInputStatus.value(QStringLiteral("scrollViewportHeight")).toDouble();
+    addCheck(checks, details, QStringLiteral("inputMidDocumentAnchorsToUpperThird"),
+             std::abs(midInputStatus.value(QStringLiteral("scrollContentY")).toDouble()
+                      - midExpectedY) < 3.0
+                 && midInputStatus.value(QStringLiteral("scrollContentY")).toDouble() > 0.0
+                 && midInputStatus.value(QStringLiteral("scrollContentY")).toDouble() < midMaxY,
+             QJsonObject{{QStringLiteral("expectedY"), midExpectedY},
+                         {QStringLiteral("maxY"), midMaxY},
+                         {QStringLiteral("status"), midInputStatus}});
+
+    request(QStringLiteral("testSetText"), {{QStringLiteral("text"), scrollText}});
+    request(QStringLiteral("testSetSelection"),
+            {{QStringLiteral("start"), 0}, {QStringLiteral("end"), 0}});
+    setScrollY(0);
+    QThread::msleep(50);
+    keyPress(QStringLiteral("x"));
+    QThread::msleep(50);
+    const QJsonObject topInputStatus = editorStatus();
+    addCheck(checks, details, QStringLiteral("inputVisibleAboveBottomDoesNotScroll"),
+             std::abs(topInputStatus.value(QStringLiteral("scrollContentY")).toDouble()) < 1.5
+                 && editorText().startsWith(QStringLiteral("x")),
+             topInputStatus);
+
+    request(QStringLiteral("testSetText"), {{QStringLiteral("text"), scrollText}});
+    request(QStringLiteral("testSetSelection"),
+            {{QStringLiteral("start"), scrollMidCursor},
+             {QStringLiteral("end"), scrollMidCursor}});
+    setScrollY(0);
+    QThread::msleep(50);
+    keyPress({}, QStringLiteral("Down"));
+    QThread::msleep(50);
+    const QJsonObject arrowMoveStatus = editorStatus();
+    const double arrowMoveY =
+        arrowMoveStatus.value(QStringLiteral("scrollContentY")).toDouble();
+    keyPress(QStringLiteral("x"));
+    QThread::msleep(50);
+    const QJsonObject afterArrowTypeStatus = editorStatus();
+    const double arrowTypeY =
+        afterArrowTypeStatus.value(QStringLiteral("scrollContentY")).toDouble();
+    const double arrowTypeMaxY =
+        afterArrowTypeStatus.value(QStringLiteral("scrollContentHeight")).toDouble()
+        - afterArrowTypeStatus.value(QStringLiteral("scrollViewportHeight")).toDouble();
+    addCheck(checks, details, QStringLiteral("arrowMoveUsesMinimalFollowNotAnchor"),
+             arrowMoveY > 0.0 && arrowMoveY < arrowTypeY && arrowTypeY <= arrowTypeMaxY,
+             QJsonObject{{QStringLiteral("arrowY"), arrowMoveY},
+                         {QStringLiteral("typedY"), arrowTypeY},
+                         {QStringLiteral("maxY"), arrowTypeMaxY},
+                         {QStringLiteral("arrowStatus"), arrowMoveStatus}});
+
+    request(QStringLiteral("testSetText"), {{QStringLiteral("text"), scrollText}});
+    request(QStringLiteral("testSetSelection"),
+            {{QStringLiteral("start"), scrollEndCursor},
+             {QStringLiteral("end"), scrollEndCursor}});
+    setScrollY(0);
+    QThread::msleep(50);
+    keyPress(QStringLiteral("x"));
+    QThread::msleep(50);
+    const QJsonObject beforeUndoInput = editorStatus();
+    request(QStringLiteral("testUndo"));
+    QThread::msleep(50);
+    const QJsonObject afterUndoInput = editorStatus();
+    addCheck(checks, details, QStringLiteral("undoRestoresScrollWithInput"),
+             afterUndoInput.value(QStringLiteral("textLength")).toInt()
+                    == scrollEndCursor
+                 && std::abs(afterUndoInput.value(QStringLiteral("scrollContentY")).toDouble())
+                        < 1.5
+                 && editorText() == scrollText,
+             QJsonObject{{QStringLiteral("before"), beforeUndoInput},
+                         {QStringLiteral("after"), afterUndoInput}});
+
+    request(QStringLiteral("testSetText"), {{QStringLiteral("text"), scrollText}});
+    request(QStringLiteral("testSetSelection"),
+            {{QStringLiteral("start"), scrollEndCursor},
+             {QStringLiteral("end"), scrollEndCursor}});
+    setScrollY(0);
+    QThread::msleep(50);
+    keyPress(QStringLiteral("x"));
+    QThread::msleep(50);
+    const QJsonObject afterFirstEndInput = editorStatus();
+    const double firstEndMaxY =
+        afterFirstEndInput.value(QStringLiteral("scrollContentHeight")).toDouble()
+        - afterFirstEndInput.value(QStringLiteral("scrollViewportHeight")).toDouble();
+    // 段尾首次触底触发一次滚到底（max）；随后同一行继续输入不再触发。
+    keyPress(QStringLiteral("y"));
+    QThread::msleep(50);
+    const QJsonObject afterSecondEndInput = editorStatus();
+    // 回车新增一行后光标仍远离底边，同样不触发（间歇式，而非钉在 1/3）。
+    keyPress({}, QStringLiteral("Enter"));
+    QThread::msleep(50);
+    const QJsonObject afterEndEnter = editorStatus();
+    addCheck(checks, details, QStringLiteral("endInputScrollIsIntermittent"),
+             std::abs(afterFirstEndInput.value(QStringLiteral("scrollContentY")).toDouble()
+                      - firstEndMaxY) < 1.5
+                 && std::abs(afterSecondEndInput.value(QStringLiteral("scrollContentY")).toDouble()
+                             - firstEndMaxY) < 1.5
+                 && std::abs(afterEndEnter.value(QStringLiteral("scrollContentY")).toDouble()
+                             - firstEndMaxY) < 1.5
+                 && afterSecondEndInput.value(QStringLiteral("textLength")).toInt()
+                    == scrollEndCursor + 2,
+             QJsonObject{{QStringLiteral("maxY"), firstEndMaxY},
+                         {QStringLiteral("afterFirst"), afterFirstEndInput},
+                         {QStringLiteral("afterSecond"), afterSecondEndInput},
+                         {QStringLiteral("afterEnter"), afterEndEnter}});
+
+    // 继续连续回车，光标从视口上 1/3 自然下落，再次触底时才再次触发。
+    int endEnterCount = 0;
+    for (; endEnterCount < 39; ++endEnterCount) {
+        keyPress({}, QStringLiteral("Enter"));
+        // 与真实输入节奏一致（大于自动滚动检查的 40ms 延迟），
+        // 保证每笔输入各有一条滚动记录，撤销链逐级对齐。
+        QThread::msleep(50);
+    }
+    const QJsonObject afterManyEnters = editorStatus();
+    int remainingEndUndos = 0;
+    while (remainingEndUndos < 50 && editorText() != scrollText) {
+        request(QStringLiteral("testUndo"));
+        QThread::msleep(15);
+        ++remainingEndUndos;
+    }
+    const QJsonObject afterFullEndUndo = editorStatus();
+    addCheck(checks, details, QStringLiteral("endInputScrollReTriggersAndUndoChainRestores"),
+             afterManyEnters.value(QStringLiteral("scrollContentY")).toDouble()
+                    > firstEndMaxY
+                 && remainingEndUndos == 42
+                 && std::abs(afterFullEndUndo.value(QStringLiteral("scrollContentY")).toDouble())
+                        < 1.5
+                 && editorText() == scrollText,
+             QJsonObject{{QStringLiteral("maxY"), firstEndMaxY},
+                         {QStringLiteral("afterEnters"), afterManyEnters},
+                         {QStringLiteral("undoCount"), remainingEndUndos},
+                         {QStringLiteral("afterFullUndo"), afterFullEndUndo}});
+
+    // 两级撤销：第二笔输入（回车新增一行）让底边下移并触发滚动，
+    // 逐级撤销各自恢复输入前位置。
+    request(QStringLiteral("testSetText"), {{QStringLiteral("text"), scrollText}});
+    request(QStringLiteral("testSetSelection"),
+            {{QStringLiteral("start"), scrollEndCursor},
+             {QStringLiteral("end"), scrollEndCursor}});
+    setScrollY(0);
+    QThread::msleep(50);
+    keyPress(QStringLiteral("x"));
+    QThread::msleep(50);
+    const QJsonObject firstScrolledInput = editorStatus();
+    const double bottomEdgeY =
+        firstScrolledInput.value(QStringLiteral("editorContentHeight")).toDouble()
+        - firstScrolledInput.value(QStringLiteral("scrollViewportHeight")).toDouble();
+    setScrollY(bottomEdgeY);
+    QThread::msleep(20);
+    keyPress({}, QStringLiteral("Enter"));
+    QThread::msleep(50);
+    const QJsonObject secondScrolledInput = editorStatus();
+    request(QStringLiteral("testUndo"));
+    QThread::msleep(50);
+    const QJsonObject firstUndo = editorStatus();
+    request(QStringLiteral("testUndo"));
+    QThread::msleep(50);
+    const QJsonObject secondUndo = editorStatus();
+    addCheck(checks, details, QStringLiteral("undoRestoresEachScrolledInput"),
+             secondScrolledInput.value(QStringLiteral("scrollContentY")).toDouble()
+                    > bottomEdgeY
+                 && std::abs(firstUndo.value(QStringLiteral("scrollContentY")).toDouble()
+                             - bottomEdgeY) < 1.5
+                 && firstUndo.value(QStringLiteral("textLength")).toInt()
+                    == scrollEndCursor + 1
+                 && std::abs(secondUndo.value(QStringLiteral("scrollContentY")).toDouble())
+                        < 1.5
+                 && editorText() == scrollText,
+             QJsonObject{{QStringLiteral("bottomEdgeY"), bottomEdgeY},
+                         {QStringLiteral("first"), firstScrolledInput},
+                         {QStringLiteral("second"), secondScrolledInput},
+                         {QStringLiteral("firstUndo"), firstUndo},
+                         {QStringLiteral("secondUndo"), secondUndo}});
+
+    request(QStringLiteral("testSetText"), {{QStringLiteral("text"), scrollText}});
+    request(QStringLiteral("testSetSelection"),
+            {{QStringLiteral("start"), scrollEndCursor},
+             {QStringLiteral("end"), scrollEndCursor}});
+    setScrollY(300);
+    QThread::msleep(50);
+    keyPress(QStringLiteral("x"));
+    QThread::msleep(50);
+    const QJsonObject scrolledToBottom = editorStatus();
+    // 把光标移到开头会让 QML 最小可见跟随把视图滚回顶部，正好验证
+    // “未触发滚动的输入”不会在撤销时误恢复滚动位置。
+    request(QStringLiteral("testSetSelection"),
+            {{QStringLiteral("start"), 0}, {QStringLiteral("end"), 0}});
+    keyPress(QStringLiteral("y"));
+    QThread::msleep(50);
+    const QJsonObject afterNonScrolledInput = editorStatus();
+    request(QStringLiteral("testUndo"));
+    QThread::msleep(50);
+    const QJsonObject afterNonScrolledUndo = editorStatus();
+    request(QStringLiteral("testUndo"));
+    QThread::msleep(50);
+    const QJsonObject afterScrolledUndo = editorStatus();
+    addCheck(checks, details, QStringLiteral("undoSkipsNonScrolledInput"),
+             std::abs(afterNonScrolledInput.value(QStringLiteral("scrollContentY")).toDouble())
+                    < 1.5
+                 && std::abs(afterNonScrolledUndo.value(QStringLiteral("scrollContentY")).toDouble())
+                        < 1.5
+                 && std::abs(afterScrolledUndo.value(QStringLiteral("scrollContentY")).toDouble()
+                             - 300.0) < 1.5
+                 && editorText() == scrollText,
+             QJsonObject{{QStringLiteral("bottom"), scrolledToBottom},
+                         {QStringLiteral("nonScrolled"), afterNonScrolledInput},
+                         {QStringLiteral("nonScrolledUndo"), afterNonScrolledUndo},
+                         {QStringLiteral("scrolledUndo"), afterScrolledUndo}});
+
+    request(QStringLiteral("testSetText"), {{QStringLiteral("text"), scrollText}});
+    request(QStringLiteral("testSetSelection"),
+            {{QStringLiteral("start"), scrollEndCursor},
+             {QStringLiteral("end"), scrollEndCursor}});
+    setScrollY(0);
+    QThread::msleep(50);
+    inputMethodCommit(QStringLiteral("中文"));
+    QThread::msleep(80);
+    const QJsonObject imeScrollStatus = editorStatus();
+    const QString imeCommittedText = editorText();
+    const double imeMaxY =
+        imeScrollStatus.value(QStringLiteral("scrollContentHeight")).toDouble()
+        - imeScrollStatus.value(QStringLiteral("scrollViewportHeight")).toDouble();
+    request(QStringLiteral("testUndo"));
+    QThread::msleep(80);
+    const QJsonObject imeUndoStatus = editorStatus();
+    addCheck(checks, details, QStringLiteral("imeCommitAtEndScrollsAndUndoRestores"),
+             std::abs(imeScrollStatus.value(QStringLiteral("scrollContentY")).toDouble()
+                      - imeMaxY) < 1.5
+                 && imeCommittedText == scrollText + QStringLiteral("中文")
+                 && std::abs(imeUndoStatus.value(QStringLiteral("scrollContentY")).toDouble())
+                        < 1.5
+                 && editorText() == scrollText,
+             QJsonObject{{QStringLiteral("maxY"), imeMaxY},
+                         {QStringLiteral("committed"), imeScrollStatus},
+                         {QStringLiteral("undo"), imeUndoStatus}});
+
+    request(QStringLiteral("testSetText"), {{QStringLiteral("text"), scrollText}});
+    request(QStringLiteral("testSetSelection"),
+            {{QStringLiteral("start"), scrollEndCursor},
+             {QStringLiteral("end"), scrollEndCursor}});
+    setScrollY(endMaxY);
+    QThread::msleep(50);
+    const QJsonObject beforePagedInput = editorStatus();
+    const double pagedMaxY =
+        beforePagedInput.value(QStringLiteral("scrollContentHeight")).toDouble()
+        - beforePagedInput.value(QStringLiteral("scrollViewportHeight")).toDouble();
+    keyPress(QStringLiteral("x"));
+    QThread::msleep(50);
+    const QJsonObject pagedIntoBlankInput = editorStatus();
+    addCheck(checks, details, QStringLiteral("inputAtEndAfterPagingIntoBlankStaysBottom"),
+             std::abs(pagedIntoBlankInput.value(QStringLiteral("scrollContentY")).toDouble()
+                      - pagedMaxY) < 1.5
+                 && editorText() == scrollText + QStringLiteral("x"),
+             QJsonObject{{QStringLiteral("maxY"), pagedMaxY},
+                         {QStringLiteral("after"), pagedIntoBlankInput}});
 
     // --- CJK Fix: Performance Scaling Record ---
     const QString perfSmall = buildPerfDocument(20000);
