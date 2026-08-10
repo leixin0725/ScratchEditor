@@ -34,7 +34,10 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\run-editing-te
 
 - 单实例常驻窗口；生产 IPC 只开放白名单命令，测试命令仅对 `--test-mode` 隔离实例可用。
 - 外部编辑使用 `--wait <path>` 文件模式，UTF-8 读回写，绕过剪贴板与常驻 IPC。
-- 主题配置以 `config/markdown-style.json` 为单一事实来源；窗口与快捷键配置在 `settings.ini`；测试使用隔离 INI。
+- UI/动画设计令牌以 `config/ui.json`（JSONC，可注释）为模板与默认值来源；
+  界面强调色以 `config/markdown-style.json` 为单一事实来源；用户覆盖值
+  （窗口几何、快捷键、外观、状态面板等）保存在 `settings.ini`（schema 2）；
+  测试使用隔离 INI 与隔离 `SCRATCHEDITOR_UI_CONFIG`。
 
 ## 必须遵守的规则
 

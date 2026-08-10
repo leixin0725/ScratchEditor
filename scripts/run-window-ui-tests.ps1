@@ -167,7 +167,36 @@ $restarted = $null
 
 try {
     Stop-IsolatedInstance
+    $legacySettingsText = @'
+[meta]
+schemaVersion=1
+[appearance]
+theme=dark
+[editor]
+fontFamily=Microsoft YaHei UI
+fontPointSize=13
+[ui]
+animationsEnabled=true
+[statusPanel]
+fontSize=10
+showDelayMs=300
+hideDelayMs=250
+maxWidth=360
+'@
+    $utf8WithoutBom = New-Object System.Text.UTF8Encoding($false)
+    [System.IO.File]::WriteAllText($settingsFile, $legacySettingsText, $utf8WithoutBom)
     $started = Start-IsolatedInstance
+    $migrated = Send-IpcCommand -Command "status"
+    $migratedText = Get-Content -LiteralPath $settingsFile -Raw -Encoding UTF8
+    $migrationPassed = (
+        [int]$migrated.settingsSchemaVersion -eq 2 -and
+        $migratedText.Contains("[appearance]") -and
+        $migratedText.Contains("fontFamily=Microsoft YaHei UI") -and
+        $migratedText.Contains("fontPointSize=13") -and
+        $migratedText.Contains("animationsEnabled=true") -and
+        -not $migratedText.Contains("[editor]") -and
+        -not $migratedText.Contains("[ui]")
+    )
     $reset = Send-IpcCommand -Command "testResetSettings"
     $initial = Send-IpcCommand -Command "status"
     $expectedGeometry = [ordered]@{
@@ -211,10 +240,11 @@ try {
         (Test-Path -LiteralPath $settingsFile) -and
         $persisted.settingsFile -eq $settingsFile -and
         $configText.Contains("[appearance]") -and
-        $configText.Contains("[editor]") -and
         $configText.Contains("[shortcuts]") -and
-        $configText.Contains("[ui]") -and
-        $configText.Contains("[window]")
+        $configText.Contains("[statusPanel]") -and
+        $configText.Contains("[window]") -and
+        -not $configText.Contains("[editor]") -and
+        -not $configText.Contains("[ui]")
     )
     $null = Send-IpcCommand -Command "testResetSettings"
 
@@ -235,6 +265,7 @@ try {
     $checks = [ordered]@{
         windowUiBehavior = ($windowUiRun.ExitCode -eq 0 -and [bool]$windowUiBehavior.allPassed)
         appearanceAndGeometryPersistence = $persistencePassed
+        settingsSchemaMigration = $migrationPassed
         centralizedIniConfiguration = $centralFilePassed
         lazySettingsPage = [bool]$windowUiBehavior.checks.lazySettingsPage
         deferredFeaturesExcluded = [bool]$windowUiBehavior.checks.deferredFeaturesExcluded

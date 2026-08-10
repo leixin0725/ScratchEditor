@@ -3,10 +3,12 @@ import QtQuick
 Window {
     id: root
 
-    width: 920
-    height: 640
-    minimumWidth: 500
-    minimumHeight: 320
+    readonly property var uiConfig: controller.uiConfig
+
+    width: uiConfig.window.defaultWidth
+    height: uiConfig.window.defaultHeight
+    minimumWidth: uiConfig.window.minimumWidth
+    minimumHeight: uiConfig.window.minimumHeight
     visible: false
     color: themeBackgroundColor
     title: controller.externalFileMode && controller.externalFileName.length > 0
@@ -14,9 +16,9 @@ Window {
            : "ScratchEditor"
     flags: Qt.Tool | Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint
 
-    readonly property int dragZoneHeight: 52
-    readonly property int marginSize: 18
-    readonly property int resizeMargin: 8
+    readonly property int dragZoneHeight: uiConfig.layout.dragZoneHeight
+    readonly property int marginSize: uiConfig.layout.margin
+    readonly property int resizeMargin: uiConfig.layout.resizeMargin
     readonly property int edgeDragWidth: marginSize - resizeMargin
     readonly property bool cornerResizeEnabled: true
     readonly property bool edgeDragEnabled: true
@@ -26,40 +28,51 @@ Window {
     readonly property bool settingsPageLoaded: settingsLoader.active
     readonly property bool settingsPageVisible: settingsLoader.active
     readonly property bool darkTheme: controller.theme !== "light"
-    readonly property color themeBackgroundColor: darkTheme ? "#252525" : "#f7f8fa"
-    readonly property color themeEditorSurfaceColor: darkTheme ? "#292929" : "#ffffff"
+    readonly property var uiThemeColors: uiConfig.palette[darkTheme ? "dark" : "light"]
+    readonly property color themeBackgroundColor: uiThemeColors.background
+    readonly property color themeEditorSurfaceColor: uiThemeColors.editorSurface
     readonly property color themeHeaderColor: themeBackgroundColor
-    readonly property color themePanelColor: darkTheme ? "#292929" : "#ffffff"
-    readonly property color themeFieldColor: darkTheme ? "#1d1d1d" : "#f5f7fa"
-    readonly property color themeTextColor: darkTheme ? "#f2f2f2" : "#24292f"
-    readonly property color themeStrongTextColor: darkTheme ? "#ffffff" : "#111111"
-    readonly property color themeMutedTextColor: darkTheme ? "#9a9a9a" : "#57606a"
-    readonly property color themeBorderColor: darkTheme ? "#505050" : "#d0d7de"
-    readonly property color themeButtonColor: darkTheme ? "#393939" : "#eaeef2"
+    readonly property color themePanelColor: uiThemeColors.panel
+    readonly property color themeFieldColor: uiThemeColors.field
+    readonly property color themeTextColor: uiThemeColors.text
+    readonly property color themeStrongTextColor: uiThemeColors.strongText
+    readonly property color themeMutedTextColor: uiThemeColors.mutedText
+    readonly property color themeBorderColor: uiThemeColors.border
+    readonly property color themeButtonColor: uiThemeColors.button
     readonly property color themeAccentColor: controller.themeAccentColor
     readonly property color themeAccentTextColor: controller.themeAccentTextColor
     readonly property color themeFocusColor: themeAccentColor
     readonly property color themeSelectionColor: themeAccentColor
     readonly property color themeSelectedTextColor: themeAccentTextColor
     readonly property color selectionDragColor: themeAccentColor
-    readonly property color themeDangerColor: darkTheme ? "#ff8a80" : "#cf222e"
+    readonly property color themeDangerColor: uiThemeColors.danger
+    readonly property color themeDangerTextColor: uiThemeColors.dangerText
+    readonly property color themeButtonAccentTextColor: uiThemeColors.buttonAccentText
+    readonly property color overlayColor: uiThemeColors.overlay
+    readonly property color themeScrollbarThumbActiveColor: uiThemeColors.scrollbarThumbActive
+    readonly property color themeScrollbarThumbIdleColor: uiThemeColors.scrollbarThumbIdle
     readonly property color panelAccentColor: themeAccentColor
     readonly property color panelAccentTextColor: themeAccentTextColor
-    readonly property int commandPaletteMaximumWidth: 620
+    readonly property int commandPaletteMaximumWidth: uiConfig.panels.commandPalette.maxWidth
     readonly property color markdownTextColor: controller.markdownTextColor
-    readonly property string uiFontFamily: "Microsoft YaHei UI"
-    readonly property int transitionDuration: controller.animationsEnabled ? 120 : 0
+    readonly property string uiFontFamily: uiConfig.fonts.family
+    readonly property string uiMonospaceFontFamily: uiConfig.fonts.monospaceFamily
+    readonly property int transitionDuration:
+        controller.animationsEnabled ? uiConfig.animation.transitionDuration : 0
     readonly property int scrollAnimationDurationMs: controller.animationsEnabled ? 160 : 0
-    readonly property int historyTriggerWidth: 12
-    readonly property int historyHoverOpenDelayMs: 100
-    readonly property int historyHoverCloseDelayMs: 250
+    readonly property int historyTriggerWidth: uiConfig.panels.history.triggerWidth
+    readonly property int historyHoverOpenDelayMs: uiConfig.animation.historyHoverOpenDelay
+    readonly property int historyHoverCloseDelayMs: uiConfig.animation.historyHoverCloseDelay
     property bool historyPanelOpen: false
     property bool historyPanelOpenedByCommand: false
     property bool historyRevealHovered: false
     property bool historyPanelHovered: false
-    readonly property real historyPanelWidth: Math.max(200, Math.min(360, root.width / 3))
+    readonly property real historyPanelWidth:
+        Math.max(uiConfig.panels.history.minWidth,
+                 Math.min(uiConfig.panels.history.maxWidth, root.width / 3))
     readonly property bool historyPanelOverlay:
-        (root.width - root.marginSize * 2 - historyPanelWidth) < 320
+        (root.width - root.marginSize * 2 - historyPanelWidth)
+        < uiConfig.panels.history.overlayThreshold
     readonly property real editorVisibleWidth:
         root.width - root.marginSize * 2
         - (historyPanelOpen && !historyPanelOverlay ? historyPanelWidth : 0)
@@ -310,7 +323,7 @@ Window {
 
     Timer {
         id: scrollMetricsTimer
-        interval: 60
+        interval: uiConfig.animation.scrollRefreshInterval
         repeat: false
         onTriggered: root.refreshScrollMetrics()
     }
@@ -508,7 +521,7 @@ Window {
                   : "临时编辑器"
             color: root.themeStrongTextColor
             font.family: root.uiFontFamily
-            font.pointSize: 11
+            font.pointSize: uiConfig.fonts.heading
             font.weight: Font.DemiBold
         }
 
@@ -517,13 +530,14 @@ Window {
             anchors.right: parent.right
             anchors.rightMargin: root.marginSize - root.resizeMargin
             anchors.verticalCenter: parent.verticalCenter
-            width: Math.min(360, parent.width * 0.55)
+            width: Math.min(uiConfig.panels.statusText.maxWidth,
+                            parent.width * uiConfig.panels.statusText.maxWidthRatio)
             horizontalAlignment: Text.AlignRight
             elide: Text.ElideLeft
             text: controller.statusHealthy ? controller.statusPanelSummary : controller.statusMessage
             color: controller.statusHealthy ? root.themeMutedTextColor : root.themeDangerColor
             font.family: root.uiFontFamily
-            font.pointSize: 9
+            font.pointSize: uiConfig.fonts.small
 
             HoverHandler {
                 onHoveredChanged: {
@@ -543,22 +557,24 @@ Window {
             id: statusPanel
             z: 40
             anchors.top: statusText.bottom
-            anchors.topMargin: 6
+            anchors.topMargin: uiConfig.panels.statusPanel.topGap
             anchors.right: statusText.right
             width: Math.min(controller.statusPanelMaxWidth,
-                            header.width - statusText.x - 6)
-            height: Math.min(contentHeight, root.height - y - 12)
-            radius: 5
+                            header.width - statusText.x - uiConfig.panels.statusPanel.topGap)
+            height: Math.min(contentHeight,
+                             root.height - y - uiConfig.panels.statusPanel.bottomGap)
+            radius: uiConfig.layout.radiusMedium
             color: root.themePanelColor
             border.color: root.themeBorderColor
-            border.width: 1
+            border.width: uiConfig.layout.borderWidth
             visible: root.statusPanelOpen
             opacity: root.statusPanelOpen ? 1 : 0
             clip: true
 
             property real contentHeight: (controller.statusHealthy
                                           ? normalColumn.implicitHeight
-                                          : errorText.implicitHeight) + 20
+                                          : errorText.implicitHeight)
+                                         + uiConfig.panels.statusPanel.padding
 
             Behavior on opacity {
                 NumberAnimation { duration: root.transitionDuration; easing.type: Easing.OutCubic }
@@ -582,8 +598,8 @@ Window {
             Column {
                 id: normalColumn
                 anchors.fill: parent
-                anchors.margins: 10
-                spacing: 5
+                anchors.margins: uiConfig.panels.statusPanel.margins
+                spacing: uiConfig.panels.statusPanel.spacing
                 visible: controller.statusHealthy
 
                 Repeater {
@@ -618,7 +634,7 @@ Window {
                 Text {
                     id: errorText
                     anchors.fill: parent
-                    anchors.margins: 10
+                    anchors.margins: uiConfig.panels.statusPanel.margins
                     text: root.statusCopyFeedback ? "已复制" : controller.statusMessage
                     color: root.statusCopyFeedback ? root.themeAccentColor : root.themeDangerColor
                     font.family: root.uiFontFamily
@@ -651,13 +667,15 @@ Window {
         z: 60
         visible: false
         x: Math.round((root.width - width) / 2)
-        y: root.dragZoneHeight + 8
-        width: Math.min(760, root.width - 48)
-        height: root.replaceMode ? 104 : 66
-        radius: 4
+        y: root.dragZoneHeight + uiConfig.panels.find.gap
+        width: Math.min(uiConfig.panels.find.maxWidth,
+                        root.width - uiConfig.panels.find.widthInset)
+        height: root.replaceMode ? uiConfig.panels.find.heightReplace
+                                 : uiConfig.panels.find.heightSingle
+        radius: uiConfig.layout.radiusNormal
         color: root.themePanelColor
         border.color: root.themeBorderColor
-        border.width: 1
+        border.width: uiConfig.layout.borderWidth
         opacity: visible ? 1 : 0
 
         Behavior on opacity {
@@ -670,25 +688,25 @@ Window {
 
         Rectangle {
             id: findFieldFrame
-            x: 12
-            y: 10
-            width: findPanel.width - 328
-            height: 32
-            radius: 3
+            x: uiConfig.panels.find.paddingX
+            y: uiConfig.panels.find.paddingY
+            width: findPanel.width - uiConfig.panels.find.controlsWidth
+            height: uiConfig.layout.controlHeightSmall
+            radius: uiConfig.layout.radiusSmall
             color: root.themeFieldColor
             border.color: findInput.activeFocus ? root.themeFocusColor : root.themeBorderColor
 
             TextInput {
                 id: findInput
                 anchors.fill: parent
-                anchors.leftMargin: 9
-                anchors.rightMargin: 9
+                anchors.leftMargin: uiConfig.layout.spacingInput
+                anchors.rightMargin: uiConfig.layout.spacingInput
                 verticalAlignment: TextInput.AlignVCenter
                 color: root.themeTextColor
                 selectionColor: root.themeSelectionColor
                 selectedTextColor: root.themeSelectedTextColor
                 font.family: root.uiFontFamily
-                font.pointSize: 10
+                font.pointSize: uiConfig.fonts.normal
                 selectByMouse: true
                 clip: true
 
@@ -701,19 +719,19 @@ Window {
         Rectangle {
             id: caseSensitiveToggle
             property bool enabledValue: false
-            x: findFieldFrame.x + findFieldFrame.width + 8
-            y: 10
-            width: 42
-            height: 32
-            radius: 3
+            x: findFieldFrame.x + findFieldFrame.width + uiConfig.panels.find.gap
+            y: uiConfig.panels.find.paddingY
+            width: uiConfig.panels.find.caseSensitiveWidth
+            height: uiConfig.layout.controlHeightSmall
+            radius: uiConfig.layout.radiusSmall
             color: enabledValue ? root.themeAccentColor : root.themeButtonColor
 
             Text {
                 anchors.centerIn: parent
                 text: "Aa"
                 color: root.themeStrongTextColor
-                font.family: "Cascadia Mono"
-                font.pointSize: 9
+                font.family: root.uiMonospaceFontFamily
+                font.pointSize: uiConfig.fonts.small
             }
 
             MouseArea {
@@ -724,13 +742,20 @@ Window {
         }
 
         Rectangle {
-            x: caseSensitiveToggle.x + caseSensitiveToggle.width + 8
-            y: 10
-            width: 54
-            height: 32
-            radius: 3
+            id: findPrevButton
+            x: caseSensitiveToggle.x + caseSensitiveToggle.width
+               + uiConfig.panels.find.gap
+            y: uiConfig.panels.find.paddingY
+            width: uiConfig.panels.find.prevWidth
+            height: uiConfig.layout.controlHeightSmall
+            radius: uiConfig.layout.radiusSmall
             color: root.themeButtonColor
-            Text { anchors.centerIn: parent; text: "上一个"; color: root.themeTextColor; font.pointSize: 9 }
+            Text {
+                anchors.centerIn: parent
+                text: "上一个"
+                color: root.themeTextColor
+                font.pointSize: uiConfig.fonts.small
+            }
             MouseArea {
                 anchors.fill: parent
                 cursorShape: Qt.PointingHandCursor
@@ -739,13 +764,19 @@ Window {
         }
 
         Rectangle {
-            x: caseSensitiveToggle.x + caseSensitiveToggle.width + 70
-            y: 10
-            width: 54
-            height: 32
-            radius: 3
+            id: findNextButton
+            x: findPrevButton.x + findPrevButton.width + uiConfig.panels.find.gap
+            y: uiConfig.panels.find.paddingY
+            width: uiConfig.panels.find.nextWidth
+            height: uiConfig.layout.controlHeightSmall
+            radius: uiConfig.layout.radiusSmall
             color: root.themeAccentColor
-            Text { anchors.centerIn: parent; text: "下一个"; color: "#ffffff"; font.pointSize: 9 }
+            Text {
+                anchors.centerIn: parent
+                text: "下一个"
+                color: root.themeButtonAccentTextColor
+                font.pointSize: uiConfig.fonts.small
+            }
             MouseArea {
                 anchors.fill: parent
                 cursorShape: Qt.PointingHandCursor
@@ -754,13 +785,19 @@ Window {
         }
 
         Rectangle {
-            x: findPanel.width - 42
-            y: 10
-            width: 30
-            height: 32
-            radius: 3
+            id: findCloseButton
+            x: findPanel.width - uiConfig.panels.find.rightInset
+            y: uiConfig.panels.find.paddingY
+            width: uiConfig.panels.find.closeWidth
+            height: uiConfig.layout.controlHeightSmall
+            radius: uiConfig.layout.radiusSmall
             color: root.themeButtonColor
-            Text { anchors.centerIn: parent; text: "×"; color: root.themeTextColor; font.pointSize: 13 }
+            Text {
+                anchors.centerIn: parent
+                text: "×"
+                color: root.themeTextColor
+                font.pointSize: uiConfig.fonts.title
+            }
             MouseArea {
                 anchors.fill: parent
                 cursorShape: Qt.PointingHandCursor
@@ -771,25 +808,26 @@ Window {
         Rectangle {
             id: replaceFieldFrame
             visible: root.replaceMode
-            x: 12
-            y: 52
+            x: uiConfig.panels.find.paddingX
+            y: uiConfig.panels.find.paddingY + uiConfig.layout.controlHeightSmall
+               + uiConfig.panels.find.rowGap
             width: findFieldFrame.width
-            height: 32
-            radius: 3
+            height: uiConfig.layout.controlHeightSmall
+            radius: uiConfig.layout.radiusSmall
             color: root.themeFieldColor
             border.color: replaceInput.activeFocus ? root.themeFocusColor : root.themeBorderColor
 
             TextInput {
                 id: replaceInput
                 anchors.fill: parent
-                anchors.leftMargin: 9
-                anchors.rightMargin: 9
+                anchors.leftMargin: uiConfig.layout.spacingInput
+                anchors.rightMargin: uiConfig.layout.spacingInput
                 verticalAlignment: TextInput.AlignVCenter
                 color: root.themeTextColor
                 selectionColor: root.themeSelectionColor
                 selectedTextColor: root.themeSelectedTextColor
                 font.family: root.uiFontFamily
-                font.pointSize: 10
+                font.pointSize: uiConfig.fonts.normal
                 selectByMouse: true
                 clip: true
                 Keys.onEscapePressed: root.hideFindPanel()
@@ -797,14 +835,20 @@ Window {
         }
 
         Rectangle {
+            id: replaceCurrentButton
             visible: root.replaceMode
-            x: replaceFieldFrame.x + replaceFieldFrame.width + 8
-            y: 52
-            width: 70
-            height: 32
-            radius: 3
+            x: replaceFieldFrame.x + replaceFieldFrame.width + uiConfig.panels.find.gap
+            y: replaceFieldFrame.y
+            width: uiConfig.panels.find.actionWidth
+            height: uiConfig.layout.controlHeightSmall
+            radius: uiConfig.layout.radiusSmall
             color: root.themeButtonColor
-            Text { anchors.centerIn: parent; text: "替换当前"; color: root.themeTextColor; font.pointSize: 9 }
+            Text {
+                anchors.centerIn: parent
+                text: "替换当前"
+                color: root.themeTextColor
+                font.pointSize: uiConfig.fonts.small
+            }
             MouseArea {
                 anchors.fill: parent
                 cursorShape: Qt.PointingHandCursor
@@ -817,14 +861,21 @@ Window {
         }
 
         Rectangle {
+            id: replaceAllButton
             visible: root.replaceMode
-            x: replaceFieldFrame.x + replaceFieldFrame.width + 86
-            y: 52
-            width: 70
-            height: 32
-            radius: 3
+            x: replaceCurrentButton.x + replaceCurrentButton.width
+               + uiConfig.panels.find.gap
+            y: replaceFieldFrame.y
+            width: uiConfig.panels.find.actionWidth
+            height: uiConfig.layout.controlHeightSmall
+            radius: uiConfig.layout.radiusSmall
             color: root.themeAccentColor
-            Text { anchors.centerIn: parent; text: "全部替换"; color: "#ffffff"; font.pointSize: 9 }
+            Text {
+                anchors.centerIn: parent
+                text: "全部替换"
+                color: root.themeButtonAccentTextColor
+                font.pointSize: uiConfig.fonts.small
+            }
             MouseArea {
                 anchors.fill: parent
                 cursorShape: Qt.PointingHandCursor
@@ -838,15 +889,17 @@ Window {
         }
 
         Text {
-            x: findPanel.width - 154
-            y: root.replaceMode ? 86 : 47
-            width: 142
+            x: findPanel.width - uiConfig.panels.find.statusWidth
+               - uiConfig.panels.find.paddingX
+            y: root.replaceMode ? uiConfig.panels.find.statusYReplace
+                                : uiConfig.panels.find.statusY
+            width: uiConfig.panels.find.statusWidth
             horizontalAlignment: Text.AlignRight
             elide: Text.ElideLeft
             text: root.searchStatus
             color: root.themeMutedTextColor
             font.family: root.uiFontFamily
-            font.pointSize: 8
+            font.pointSize: uiConfig.fonts.caption
         }
     }
 
@@ -883,9 +936,13 @@ Window {
         // 删除触顶保持期间开启弹性底部缓冲：contentHeight 不小于
         // contentY + 视口高，避免内容收缩时 Flickable 把视口钳制回新 max，
         // 让光标随删除自然上移、再次触顶才触发镜像滚动。
-        contentHeight: Math.max(height, editor.contentHeight + (root.inputScrollHoldBottom
-            ? Math.max(height * 2 / 3, editorViewport.contentY + height - editor.contentHeight)
-            : height * 2 / 3))
+        // editorContentBottomGap 作为最小留白值参与计算（默认远小于 2/3 页）。
+        contentHeight: Math.max(
+            height,
+            editor.contentHeight + (root.inputScrollHoldBottom
+                ? Math.max(Math.max(height * 2 / 3, uiConfig.layout.editorContentBottomGap),
+                           editorViewport.contentY + height - editor.contentHeight)
+                : Math.max(height * 2 / 3, uiConfig.layout.editorContentBottomGap)))
         pixelAligned: true
 
         Behavior on x { NumberAnimation { duration: root.transitionDuration } }
@@ -926,10 +983,11 @@ Window {
                 selectionDragPosition >= 0
                     ? positionToRectangle(selectionDragPosition)
                     : Qt.rect(0, 0, 0, 0)
-            x: 12
-            y: 8
-            width: editorViewport.width - 24
-            height: Math.max(editorViewport.height - 16, contentHeight)
+            x: uiConfig.layout.editorPaddingX
+            y: uiConfig.layout.editorPaddingY
+            width: editorViewport.width - uiConfig.layout.editorPaddingX * 2
+            height: Math.max(
+                editorViewport.height - uiConfig.layout.editorPaddingY * 2, contentHeight)
             color: root.markdownTextColor
             selectionColor: root.themeSelectionColor
             selectedTextColor: root.themeSelectedTextColor
@@ -966,7 +1024,7 @@ Window {
                 z: 2
                 x: Math.round(editor.selectionDragRectangle.x)
                 y: Math.round(editor.selectionDragRectangle.y)
-                width: 2
+                width: uiConfig.layout.selectionCursorWidth
                 height: Math.max(1, editor.selectionDragRectangle.height)
                 visible: editor.selectionDragPosition >= 0
                 color: root.selectionDragColor
@@ -1028,7 +1086,7 @@ Window {
                 height: parent.height
                 color: root.themePanelColor
                 border.color: root.themeBorderColor
-                border.width: 1
+                border.width: uiConfig.layout.borderWidth
 
                 Behavior on x {
                     NumberAnimation { duration: root.transitionDuration; easing.type: Easing.OutCubic }
@@ -1044,22 +1102,22 @@ Window {
 
                 Text {
                     id: historyTitle
-                    x: 14
-                    y: 12
+                    x: uiConfig.panels.history.titleX
+                    y: uiConfig.panels.history.titleY
                     text: "剪贴板历史"
                     color: root.themeStrongTextColor
                     font.family: root.uiFontFamily
-                    font.pointSize: 11
+                    font.pointSize: uiConfig.fonts.heading
                     font.weight: Font.DemiBold
                 }
 
                 Rectangle {
                     id: historySearchFrame
-                    x: 12
-                    y: 40
-                    width: parent.width - 24
-                    height: 34
-                    radius: 4
+                    x: uiConfig.panels.history.searchX
+                    y: uiConfig.panels.history.searchY
+                    width: parent.width - uiConfig.panels.history.searchInsetX
+                    height: uiConfig.layout.controlHeightNormal
+                    radius: uiConfig.layout.radiusNormal
                     color: root.themeFieldColor
                     border.color: historyQuery.activeFocus
                                   ? root.themeFocusColor : root.themeBorderColor
@@ -1067,12 +1125,12 @@ Window {
                     TextInput {
                         id: historyQuery
                         anchors.fill: parent
-                        anchors.margins: 8
+                        anchors.margins: uiConfig.panels.history.inputMargin
                         color: root.themeTextColor
                         selectionColor: root.themeSelectionColor
                         selectedTextColor: root.themeSelectedTextColor
                         font.family: root.uiFontFamily
-                        font.pointSize: 9
+                        font.pointSize: uiConfig.fonts.small
                         clip: true
                         onTextChanged: controller.setClipboardHistoryFilter(text)
                         Keys.onDownPressed: function(event) {
@@ -1091,24 +1149,24 @@ Window {
 
                     Text {
                         anchors.left: parent.left
-                        anchors.leftMargin: 8
+                        anchors.leftMargin: uiConfig.panels.history.inputMargin
                         anchors.verticalCenter: parent.verticalCenter
                         visible: historyQuery.text.length === 0
                         text: "搜索完整文本"
                         color: root.themeMutedTextColor
                         font.family: root.uiFontFamily
-                        font.pointSize: 9
+                        font.pointSize: uiConfig.fonts.small
                     }
                 }
 
                 ListView {
                     id: historyList
-                    x: 8
-                    y: 82
-                    width: parent.width - 16
-                    height: parent.height - 132
+                    x: uiConfig.panels.history.listX
+                    y: uiConfig.panels.history.listY
+                    width: parent.width - uiConfig.panels.history.listInsetX
+                    height: parent.height - uiConfig.panels.history.listBottomInset
                     clip: true
-                    spacing: 4
+                    spacing: uiConfig.layout.spacingSmall
                     model: controller.clipboardHistoryModel
                     currentIndex: count > 0 ? Math.max(0, currentIndex) : -1
                     onCountChanged: {
@@ -1128,36 +1186,39 @@ Window {
                         property string itemId: historyId
                         width: historyList.width
                         height: controller.historyCardHeight
-                        radius: 4
+                        radius: uiConfig.layout.radiusNormal
                         color: root.historySelectedId === historyId
                                ? root.themeButtonColor : "transparent"
                         border.color: root.historySelectedId === historyId
                                       ? root.themeAccentColor : "transparent"
 
                         Text {
-                            x: 8
-                            y: 4
-                            width: parent.width - 16
-                            height: parent.height - 22
+                            x: uiConfig.panels.history.cardTextX
+                            y: uiConfig.panels.history.cardTextY
+                            width: parent.width - uiConfig.panels.history.cardTextInsetX
+                            height: parent.height - uiConfig.panels.history.cardMetaHeight
                             text: historyRow.previewText
                             color: root.themeTextColor
                             font.family: root.uiFontFamily
-                            font.pointSize: 9
+                            font.pointSize: uiConfig.fonts.small
                             wrapMode: Text.Wrap
-                            maximumLineCount: Math.max(1, Math.min(
-                                3, Math.floor((parent.height - 22) / 18)))
+                            maximumLineCount: Math.max(
+                                1, Math.min(uiConfig.panels.history.cardMaxLines,
+                                            Math.floor((parent.height
+                                                        - uiConfig.panels.history.cardMetaHeight)
+                                                       / uiConfig.panels.history.cardLineHeight)))
                             elide: Text.ElideRight
                         }
                         Text {
-                            x: 8
-                            y: parent.height - 16
-                            width: parent.width - 16
+                            x: uiConfig.panels.history.cardTextX
+                            y: parent.height - uiConfig.panels.history.cardMetaBottomGap
+                            width: parent.width - uiConfig.panels.history.cardTextInsetX
                             text: new Date(historyRow.capturedAtMs).toLocaleString(
                                       Qt.locale(), Locale.ShortFormat)
                                   + " · " + historyRow.characterCount + " 字"
                             color: root.themeMutedTextColor
                             font.family: root.uiFontFamily
-                            font.pointSize: 8
+                            font.pointSize: uiConfig.fonts.caption
                             elide: Text.ElideRight
                         }
                         MouseArea {
@@ -1179,22 +1240,27 @@ Window {
                           ? controller.clipboardHistoryError : "暂无剪贴板历史"
                     color: controller.clipboardHistoryError.length > 0
                            ? root.themeDangerColor : root.themeMutedTextColor
-                    width: historyList.width - 24
+                    width: historyList.width - uiConfig.panels.history.emptyTextInsetX
                     wrapMode: Text.Wrap
                     horizontalAlignment: Text.AlignHCenter
                     font.family: root.uiFontFamily
-                    font.pointSize: 9
+                    font.pointSize: uiConfig.fonts.small
                 }
 
                 Rectangle {
-                    x: 12
+                    x: uiConfig.panels.history.footerMarginX
                     anchors.bottom: parent.bottom
-                    anchors.bottomMargin: 10
-                    width: 72
-                    height: 30
-                    radius: 4
+                    anchors.bottomMargin: uiConfig.panels.history.footerBottomGap
+                    width: uiConfig.panels.history.footerButtonWidth
+                    height: uiConfig.layout.controlHeightCompact
+                    radius: uiConfig.layout.radiusNormal
                     color: root.themeButtonColor
-                    Text { anchors.centerIn: parent; text: "删除"; color: root.themeTextColor; font.pointSize: 9 }
+                    Text {
+                        anchors.centerIn: parent
+                        text: "删除"
+                        color: root.themeTextColor
+                        font.pointSize: uiConfig.fonts.small
+                    }
                     MouseArea {
                         anchors.fill: parent
                         enabled: root.historySelectedId.length > 0
@@ -1203,14 +1269,19 @@ Window {
                 }
                 Rectangle {
                     anchors.right: parent.right
-                    anchors.rightMargin: 12
+                    anchors.rightMargin: uiConfig.panels.history.footerMarginX
                     anchors.bottom: parent.bottom
-                    anchors.bottomMargin: 10
-                    width: 72
-                    height: 30
-                    radius: 4
+                    anchors.bottomMargin: uiConfig.panels.history.footerBottomGap
+                    width: uiConfig.panels.history.footerButtonWidth
+                    height: uiConfig.layout.controlHeightCompact
+                    radius: uiConfig.layout.radiusNormal
                     color: root.themeButtonColor
-                    Text { anchors.centerIn: parent; text: "清空"; color: root.themeDangerColor; font.pointSize: 9 }
+                    Text {
+                        anchors.centerIn: parent
+                        text: "清空"
+                        color: root.themeDangerColor
+                        font.pointSize: uiConfig.fonts.small
+                    }
                     MouseArea { anchors.fill: parent; onClicked: controller.requestClearClipboardHistory() }
                 }
             }
@@ -1250,29 +1321,39 @@ Window {
         z: 95
         anchors.fill: parent
         visible: controller.historyLoadConfirmationVisible
-        color: "#88000000"
+        color: root.overlayColor
         Rectangle {
             anchors.centerIn: parent
-            width: Math.min(420, parent.width - 48)
-            height: 140
-            radius: 6
+            width: Math.min(uiConfig.panels.dialog.maxWidth,
+                            parent.width - uiConfig.panels.dialog.widthInset)
+            height: uiConfig.panels.dialog.height
+            radius: uiConfig.layout.radiusLarge
             color: root.themePanelColor
             border.color: root.themeBorderColor
             Text {
-                anchors.top: parent.top; anchors.topMargin: 24
+                anchors.top: parent.top
+                anchors.topMargin: uiConfig.panels.dialog.titleTop
                 anchors.horizontalCenter: parent.horizontalCenter
                 text: "放弃当前修改并载入历史？"
                 color: root.themeTextColor; font.family: root.uiFontFamily
             }
             Rectangle {
-                x: 54; y: 82; width: 120; height: 34; radius: 4
+                x: uiConfig.panels.dialog.buttonSide
+                y: uiConfig.panels.dialog.buttonY
+                width: uiConfig.panels.dialog.buttonWidth
+                height: uiConfig.layout.controlHeightNormal
+                radius: uiConfig.layout.radiusNormal
                 color: root.themeButtonColor
                 Text { anchors.centerIn: parent; text: "取消"; color: root.themeTextColor }
                 MouseArea { anchors.fill: parent; onClicked: controller.cancelLoadClipboardHistory() }
             }
             Rectangle {
-                anchors.right: parent.right; anchors.rightMargin: 54
-                y: 82; width: 120; height: 34; radius: 4
+                anchors.right: parent.right
+                anchors.rightMargin: uiConfig.panels.dialog.buttonSide
+                y: uiConfig.panels.dialog.buttonY
+                width: uiConfig.panels.dialog.buttonWidth
+                height: uiConfig.layout.controlHeightNormal
+                radius: uiConfig.layout.radiusNormal
                 color: root.themeAccentColor
                 Text { anchors.centerIn: parent; text: "载入"; color: root.themeAccentTextColor }
                 MouseArea { anchors.fill: parent; onClicked: controller.confirmLoadClipboardHistory() }
@@ -1284,31 +1365,45 @@ Window {
         z: 95
         anchors.fill: parent
         visible: controller.historyClearConfirmationVisible
-        color: "#88000000"
+        color: root.overlayColor
         Rectangle {
             anchors.centerIn: parent
-            width: Math.min(420, parent.width - 48)
-            height: 140
-            radius: 6
+            width: Math.min(uiConfig.panels.dialog.maxWidth,
+                            parent.width - uiConfig.panels.dialog.widthInset)
+            height: uiConfig.panels.dialog.height
+            radius: uiConfig.layout.radiusLarge
             color: root.themePanelColor
             border.color: root.themeBorderColor
             Text {
-                anchors.top: parent.top; anchors.topMargin: 24
+                anchors.top: parent.top
+                anchors.topMargin: uiConfig.panels.dialog.titleTop
                 anchors.horizontalCenter: parent.horizontalCenter
                 text: "确认清空全部剪贴板历史？"
                 color: root.themeTextColor; font.family: root.uiFontFamily
             }
             Rectangle {
-                x: 54; y: 82; width: 120; height: 34; radius: 4
+                x: uiConfig.panels.dialog.buttonSide
+                y: uiConfig.panels.dialog.buttonY
+                width: uiConfig.panels.dialog.buttonWidth
+                height: uiConfig.layout.controlHeightNormal
+                radius: uiConfig.layout.radiusNormal
                 color: root.themeButtonColor
                 Text { anchors.centerIn: parent; text: "取消"; color: root.themeTextColor }
                 MouseArea { anchors.fill: parent; onClicked: controller.cancelClearClipboardHistory() }
             }
             Rectangle {
-                anchors.right: parent.right; anchors.rightMargin: 54
-                y: 82; width: 120; height: 34; radius: 4
+                anchors.right: parent.right
+                anchors.rightMargin: uiConfig.panels.dialog.buttonSide
+                y: uiConfig.panels.dialog.buttonY
+                width: uiConfig.panels.dialog.buttonWidth
+                height: uiConfig.layout.controlHeightNormal
+                radius: uiConfig.layout.radiusNormal
                 color: root.themeDangerColor
-                Text { anchors.centerIn: parent; text: "清空"; color: "white" }
+                Text {
+                    anchors.centerIn: parent
+                    text: "清空"
+                    color: root.themeDangerTextColor
+                }
                 MouseArea { anchors.fill: parent; onClicked: controller.confirmClearClipboardHistory() }
             }
         }
@@ -1352,22 +1447,21 @@ Window {
         z: 20
         // Keep the opaque thumb in the reserved margin so it does not force a
         // blended render pass over the large text scene.
-        x: root.width - root.marginSize + 2
+        x: root.width - root.marginSize + uiConfig.layout.scrollbarOffset
         y: editorViewport.y
             + (editorViewport.contentY
                / Math.max(1, editorViewport.contentHeight - editorViewport.height))
               * Math.max(0, editorViewport.height - height)
-        width: 5
+        width: uiConfig.layout.scrollbarWidth
         height: Math.max(
-            28,
+            uiConfig.layout.scrollbarMinHeight,
             editorViewport.height * editorViewport.height
                 / Math.max(editorViewport.height, root.scrollContentHeight)
         )
-        radius: 0
         visible: root.scrollContentHeight > editorViewport.height + 0.5
         color: scrollHover.hovered || editorViewport.movingVertically
-               ? (root.darkTheme ? "#8b8b8b" : "#6e7781")
-               : (root.darkTheme ? "#555555" : "#afb8c1")
+               ? root.themeScrollbarThumbActiveColor
+               : root.themeScrollbarThumbIdleColor
 
         Behavior on color {
             ColorAnimation { duration: root.transitionDuration }
@@ -1411,10 +1505,10 @@ Window {
         visible: false
         z: 10
         x: root.marginSize
-        y: root.dragZoneHeight - 4
-        width: 40
-        height: 2
-        radius: 1
+        y: root.dragZoneHeight - uiConfig.animation.probeYOffset
+        width: uiConfig.animation.probeWidth
+        height: uiConfig.animation.probeHeight
+        radius: uiConfig.animation.probeRadius
         color: root.themeAccentColor
     }
 
@@ -1423,7 +1517,7 @@ Window {
         target: animationProbe
         from: root.marginSize
         to: Math.max(root.marginSize, root.width - root.marginSize - animationProbe.width)
-        duration: 1000
+        duration: uiConfig.animation.benchmarkDuration
         easing.type: Easing.Linear
         onFinished: {
             animationProbe.visible = false
@@ -1446,14 +1540,17 @@ Window {
             id: settingsRoot
             focus: true
             opacity: 0
-            property string draftTheme: "dark"
+            property string draftTheme: uiConfig.preferences.theme
             property string draftFontFamily: ""
-            property int draftFontPointSize: 13
-            property bool draftAnimationsEnabled: true
-            property int draftStatusPanelFontSize: 10
-            property int draftStatusPanelShowDelayMs: 300
-            property int draftStatusPanelHideDelayMs: 250
-            property int draftStatusPanelMaxWidth: 360
+            property int draftFontPointSize: uiConfig.fonts.editorDefaultSize
+            property bool draftAnimationsEnabled: uiConfig.preferences.animationsEnabled
+            property int draftStatusPanelFontSize: uiConfig.panels.statusPanel.defaultFontSize
+            property int draftStatusPanelShowDelayMs:
+                uiConfig.panels.statusPanel.defaultShowDelayMs
+            property int draftStatusPanelHideDelayMs:
+                uiConfig.panels.statusPanel.defaultHideDelayMs
+            property int draftStatusPanelMaxWidth:
+                uiConfig.panels.statusPanel.defaultMaxWidth
             property string saveStatus: ""
 
             Behavior on opacity {
@@ -1506,7 +1603,7 @@ Window {
 
             Rectangle {
                 anchors.fill: parent
-                color: "#88000000"
+                color: root.overlayColor
                 MouseArea {
                     anchors.fill: parent
                     onClicked: root.closeSettings()
@@ -1517,12 +1614,14 @@ Window {
                 id: settingsPanel
                 x: Math.round((parent.width - width) / 2)
                 y: Math.round((parent.height - height) / 2)
-                width: Math.min(640, parent.width - 40)
-                height: Math.min(430, parent.height - 32)
-                radius: 7
+                width: Math.min(uiConfig.panels.settingsPage.maxWidth,
+                                parent.width - uiConfig.panels.settingsPage.widthInset)
+                height: Math.min(uiConfig.panels.settingsPage.maxHeight,
+                                 parent.height - uiConfig.panels.settingsPage.heightInset)
+                radius: uiConfig.layout.radiusXLarge
                 color: root.themePanelColor
                 border.color: root.themeBorderColor
-                border.width: 1
+                border.width: uiConfig.layout.borderWidth
 
                 Behavior on color {
                     ColorAnimation { duration: root.transitionDuration }
@@ -1535,25 +1634,25 @@ Window {
                 }
 
                 Text {
-                    x: 20
-                    y: 16
+                    x: uiConfig.panels.settingsPage.paddingX
+                    y: uiConfig.panels.settingsPage.titleY
                     text: "设置"
                     color: root.themeStrongTextColor
                     font.family: root.uiFontFamily
-                    font.pointSize: 13
+                    font.pointSize: uiConfig.fonts.title
                     font.weight: Font.DemiBold
                 }
 
                 Text {
                     anchors.right: parent.right
-                    anchors.rightMargin: 18
-                    y: 18
+                    anchors.rightMargin: uiConfig.panels.settingsPage.closeMarginX
+                    y: uiConfig.panels.settingsPage.titleY
                     text: "×"
                     color: root.themeMutedTextColor
-                    font.pointSize: 13
+                    font.pointSize: uiConfig.fonts.title
                     MouseArea {
                         anchors.fill: parent
-                        anchors.margins: -8
+                        anchors.margins: uiConfig.panels.settingsPage.closeHitInset
                         cursorShape: Qt.PointingHandCursor
                         onClicked: root.closeSettings()
                     }
@@ -1561,12 +1660,12 @@ Window {
 
                 Flickable {
                     id: settingsContent
-                    x: 20
-                    y: 52
-                    width: parent.width - 40
-                    height: parent.height - 112
+                    x: uiConfig.panels.settingsPage.paddingX
+                    y: uiConfig.panels.settingsPage.contentY
+                    width: parent.width - uiConfig.panels.settingsPage.paddingX * 2
+                    height: parent.height - uiConfig.panels.settingsPage.contentBottomInset
                     contentWidth: width
-                    contentHeight: 425
+                    contentHeight: uiConfig.panels.settingsPage.contentHeight
                     clip: true
                     boundsBehavior: Flickable.StopAtBounds
 
@@ -1576,20 +1675,21 @@ Window {
 
                         Text {
                             x: 0
-                            y: 8
-                            width: 118
+                            y: uiConfig.panels.settingsPage.rowHeight * 0
+                               + uiConfig.panels.settingsPage.labelYOffset
+                            width: uiConfig.panels.settingsPage.labelWidth
                             text: "主题"
                             color: root.themeTextColor
                             font.family: root.uiFontFamily
-                            font.pointSize: 10
+                            font.pointSize: uiConfig.fonts.normal
                         }
 
                         Rectangle {
-                            x: 126
-                            y: 0
-                            width: 86
-                            height: 34
-                            radius: 4
+                            x: uiConfig.panels.settingsPage.columnX
+                            y: uiConfig.panels.settingsPage.rowHeight * 0
+                            width: uiConfig.panels.settingsPage.controlWidth
+                            height: uiConfig.layout.controlHeightNormal
+                            radius: uiConfig.layout.radiusNormal
                             color: settingsRoot.draftTheme === "dark"
                                    ? root.panelAccentColor : root.themeButtonColor
                             border.color: root.themeBorderColor
@@ -1608,11 +1708,13 @@ Window {
                         }
 
                         Rectangle {
-                            x: 220
-                            y: 0
-                            width: 86
-                            height: 34
-                            radius: 4
+                            x: uiConfig.panels.settingsPage.columnX
+                               + uiConfig.panels.settingsPage.controlWidth
+                               + uiConfig.layout.spacingMedium
+                            y: uiConfig.panels.settingsPage.rowHeight * 0
+                            width: uiConfig.panels.settingsPage.controlWidth
+                            height: uiConfig.layout.controlHeightNormal
+                            radius: uiConfig.layout.radiusNormal
                             color: settingsRoot.draftTheme === "light"
                                    ? root.panelAccentColor : root.themeButtonColor
                             border.color: root.themeBorderColor
@@ -1632,34 +1734,35 @@ Window {
 
                         Text {
                             x: 0
-                            y: 57
-                            width: 118
+                            y: uiConfig.panels.settingsPage.rowHeight * 1
+                               + uiConfig.panels.settingsPage.labelYOffset
+                            width: uiConfig.panels.settingsPage.labelWidth
                             text: "编辑字体"
                             color: root.themeTextColor
                             font.family: root.uiFontFamily
-                            font.pointSize: 10
+                            font.pointSize: uiConfig.fonts.normal
                         }
 
                         Rectangle {
-                            x: 126
-                            y: 48
-                            width: parent.width - 126
-                            height: 34
-                            radius: 4
+                            x: uiConfig.panels.settingsPage.columnX
+                            y: uiConfig.panels.settingsPage.rowHeight * 1
+                            width: parent.width - uiConfig.panels.settingsPage.columnX
+                            height: uiConfig.layout.controlHeightNormal
+                            radius: uiConfig.layout.radiusNormal
                             color: root.themeFieldColor
                             border.color: fontFamilyInput.activeFocus
                                           ? root.panelAccentColor : root.themeBorderColor
                             TextInput {
                                 id: fontFamilyInput
                                 anchors.fill: parent
-                                anchors.leftMargin: 10
-                                anchors.rightMargin: 10
+                                anchors.leftMargin: uiConfig.layout.spacingLarge
+                                anchors.rightMargin: uiConfig.layout.spacingLarge
                                 verticalAlignment: TextInput.AlignVCenter
                                 color: root.themeTextColor
                                 selectionColor: root.panelAccentColor
                                 selectedTextColor: root.panelAccentTextColor
                                 font.family: root.uiFontFamily
-                                font.pointSize: 10
+                                font.pointSize: uiConfig.fonts.normal
                                 selectByMouse: true
                                 clip: true
                             }
@@ -1667,20 +1770,22 @@ Window {
 
                         Text {
                             x: 0
-                            y: 105
-                            width: 118
-                            text: "字号（9–24）"
+                            y: uiConfig.panels.settingsPage.rowHeight * 2
+                               + uiConfig.panels.settingsPage.labelYOffset
+                            width: uiConfig.panels.settingsPage.labelWidth
+                            text: "字号（" + uiConfig.fonts.editorSizeMin
+                                  + "–" + uiConfig.fonts.editorSizeMax + "）"
                             color: root.themeTextColor
                             font.family: root.uiFontFamily
-                            font.pointSize: 10
+                            font.pointSize: uiConfig.fonts.normal
                         }
 
                         Rectangle {
-                            x: 126
-                            y: 96
-                            width: 86
-                            height: 34
-                            radius: 4
+                            x: uiConfig.panels.settingsPage.columnX
+                            y: uiConfig.panels.settingsPage.rowHeight * 2
+                            width: uiConfig.panels.settingsPage.controlWidth
+                            height: uiConfig.layout.controlHeightNormal
+                            radius: uiConfig.layout.radiusNormal
                             color: root.themeFieldColor
                             border.color: fontSizeInput.activeFocus
                                           ? root.panelAccentColor : root.themeBorderColor
@@ -1693,27 +1798,31 @@ Window {
                                 selectionColor: root.panelAccentColor
                                 selectedTextColor: root.panelAccentTextColor
                                 font.family: root.uiFontFamily
-                                font.pointSize: 10
-                                validator: IntValidator { bottom: 9; top: 24 }
+                                font.pointSize: uiConfig.fonts.normal
+                                validator: IntValidator {
+                                    bottom: uiConfig.fonts.editorSizeMin
+                                    top: uiConfig.fonts.editorSizeMax
+                                }
                             }
                         }
 
                         Text {
                             x: 0
-                            y: 153
-                            width: 118
+                            y: uiConfig.panels.settingsPage.rowHeight * 3
+                               + uiConfig.panels.settingsPage.labelYOffset
+                            width: uiConfig.panels.settingsPage.labelWidth
                             text: "轻量动画"
                             color: root.themeTextColor
                             font.family: root.uiFontFamily
-                            font.pointSize: 10
+                            font.pointSize: uiConfig.fonts.normal
                         }
 
                         Rectangle {
-                            x: 126
-                            y: 144
-                            width: 86
-                            height: 34
-                            radius: 17
+                            x: uiConfig.panels.settingsPage.columnX
+                            y: uiConfig.panels.settingsPage.rowHeight * 3
+                            width: uiConfig.panels.settingsPage.controlWidth
+                            height: uiConfig.layout.controlHeightNormal
+                            radius: uiConfig.layout.radiusPill
                             color: settingsRoot.draftAnimationsEnabled
                                    ? root.panelAccentColor : root.themeButtonColor
                             border.color: root.themeBorderColor
@@ -1723,7 +1832,7 @@ Window {
                                 color: settingsRoot.draftAnimationsEnabled
                                        ? root.panelAccentTextColor : root.themeTextColor
                                 font.family: root.uiFontFamily
-                                font.pointSize: 9
+                                font.pointSize: uiConfig.fonts.small
                             }
                             MouseArea {
                                 anchors.fill: parent
@@ -1735,20 +1844,22 @@ Window {
 
                         Text {
                             x: 0
-                            y: 195
-                            width: 118
-                            text: "面板字号（9–24）"
+                            y: uiConfig.panels.settingsPage.rowHeight * 4
+                               + uiConfig.panels.settingsPage.labelYOffset
+                            width: uiConfig.panels.settingsPage.labelWidth
+                            text: "面板字号（" + uiConfig.panels.statusPanel.fontSizeMin
+                                  + "–" + uiConfig.panels.statusPanel.fontSizeMax + "）"
                             color: root.themeTextColor
                             font.family: root.uiFontFamily
-                            font.pointSize: 10
+                            font.pointSize: uiConfig.fonts.normal
                         }
 
                         Rectangle {
-                            x: 126
-                            y: 186
-                            width: 110
-                            height: 34
-                            radius: 4
+                            x: uiConfig.panels.settingsPage.columnX
+                            y: uiConfig.panels.settingsPage.rowHeight * 4
+                            width: uiConfig.panels.settingsPage.controlWidthWide
+                            height: uiConfig.layout.controlHeightNormal
+                            radius: uiConfig.layout.radiusNormal
                             color: root.themeFieldColor
                             border.color: statusPanelFontSizeInput.activeFocus
                                           ? root.panelAccentColor : root.themeBorderColor
@@ -1761,27 +1872,31 @@ Window {
                                 selectionColor: root.panelAccentColor
                                 selectedTextColor: root.panelAccentTextColor
                                 font.family: root.uiFontFamily
-                                font.pointSize: 10
-                                validator: IntValidator { bottom: 9; top: 24 }
+                                font.pointSize: uiConfig.fonts.normal
+                                validator: IntValidator {
+                                    bottom: uiConfig.panels.statusPanel.fontSizeMin
+                                    top: uiConfig.panels.statusPanel.fontSizeMax
+                                }
                             }
                         }
 
                         Text {
                             x: 0
-                            y: 243
-                            width: 118
+                            y: uiConfig.panels.settingsPage.rowHeight * 5
+                               + uiConfig.panels.settingsPage.labelYOffset
+                            width: uiConfig.panels.settingsPage.labelWidth
                             text: "显示延迟（毫秒）"
                             color: root.themeTextColor
                             font.family: root.uiFontFamily
-                            font.pointSize: 10
+                            font.pointSize: uiConfig.fonts.normal
                         }
 
                         Rectangle {
-                            x: 126
-                            y: 234
-                            width: 110
-                            height: 34
-                            radius: 4
+                            x: uiConfig.panels.settingsPage.columnX
+                            y: uiConfig.panels.settingsPage.rowHeight * 5
+                            width: uiConfig.panels.settingsPage.controlWidthWide
+                            height: uiConfig.layout.controlHeightNormal
+                            radius: uiConfig.layout.radiusNormal
                             color: root.themeFieldColor
                             border.color: statusPanelShowDelayInput.activeFocus
                                           ? root.panelAccentColor : root.themeBorderColor
@@ -1794,27 +1909,31 @@ Window {
                                 selectionColor: root.panelAccentColor
                                 selectedTextColor: root.panelAccentTextColor
                                 font.family: root.uiFontFamily
-                                font.pointSize: 10
-                                validator: IntValidator { bottom: 0; top: 2000 }
+                                font.pointSize: uiConfig.fonts.normal
+                                validator: IntValidator {
+                                    bottom: uiConfig.panels.statusPanel.showDelayMinMs
+                                    top: uiConfig.panels.statusPanel.showDelayMaxMs
+                                }
                             }
                         }
 
                         Text {
                             x: 0
-                            y: 291
-                            width: 118
+                            y: uiConfig.panels.settingsPage.rowHeight * 6
+                               + uiConfig.panels.settingsPage.labelYOffset
+                            width: uiConfig.panels.settingsPage.labelWidth
                             text: "收起延迟（毫秒）"
                             color: root.themeTextColor
                             font.family: root.uiFontFamily
-                            font.pointSize: 10
+                            font.pointSize: uiConfig.fonts.normal
                         }
 
                         Rectangle {
-                            x: 126
-                            y: 282
-                            width: 110
-                            height: 34
-                            radius: 4
+                            x: uiConfig.panels.settingsPage.columnX
+                            y: uiConfig.panels.settingsPage.rowHeight * 6
+                            width: uiConfig.panels.settingsPage.controlWidthWide
+                            height: uiConfig.layout.controlHeightNormal
+                            radius: uiConfig.layout.radiusNormal
                             color: root.themeFieldColor
                             border.color: statusPanelHideDelayInput.activeFocus
                                           ? root.panelAccentColor : root.themeBorderColor
@@ -1827,27 +1946,31 @@ Window {
                                 selectionColor: root.panelAccentColor
                                 selectedTextColor: root.panelAccentTextColor
                                 font.family: root.uiFontFamily
-                                font.pointSize: 10
-                                validator: IntValidator { bottom: 0; top: 3000 }
+                                font.pointSize: uiConfig.fonts.normal
+                                validator: IntValidator {
+                                    bottom: uiConfig.panels.statusPanel.hideDelayMinMs
+                                    top: uiConfig.panels.statusPanel.hideDelayMaxMs
+                                }
                             }
                         }
 
                         Text {
                             x: 0
-                            y: 339
-                            width: 118
+                            y: uiConfig.panels.settingsPage.rowHeight * 7
+                               + uiConfig.panels.settingsPage.labelYOffset
+                            width: uiConfig.panels.settingsPage.labelWidth
                             text: "最大宽度（像素）"
                             color: root.themeTextColor
                             font.family: root.uiFontFamily
-                            font.pointSize: 10
+                            font.pointSize: uiConfig.fonts.normal
                         }
 
                         Rectangle {
-                            x: 126
-                            y: 330
-                            width: 110
-                            height: 34
-                            radius: 4
+                            x: uiConfig.panels.settingsPage.columnX
+                            y: uiConfig.panels.settingsPage.rowHeight * 7
+                            width: uiConfig.panels.settingsPage.controlWidthWide
+                            height: uiConfig.layout.controlHeightNormal
+                            radius: uiConfig.layout.radiusNormal
                             color: root.themeFieldColor
                             border.color: statusPanelMaxWidthInput.activeFocus
                                           ? root.panelAccentColor : root.themeBorderColor
@@ -1860,54 +1983,59 @@ Window {
                                 selectionColor: root.panelAccentColor
                                 selectedTextColor: root.panelAccentTextColor
                                 font.family: root.uiFontFamily
-                                font.pointSize: 10
-                                validator: IntValidator { bottom: 200; top: 800 }
+                                font.pointSize: uiConfig.fonts.normal
+                                validator: IntValidator {
+                                    bottom: uiConfig.panels.statusPanel.maxWidthMin
+                                    top: uiConfig.panels.statusPanel.maxWidthMax
+                                }
                             }
                         }
 
                         Text {
                             x: 0
-                            y: 384
+                            y: uiConfig.panels.settingsPage.contentHeight
+                               - uiConfig.panels.settingsPage.captionTopGap
                             text: "集中配置文件"
                             color: root.themeMutedTextColor
                             font.family: root.uiFontFamily
-                            font.pointSize: 8
+                            font.pointSize: uiConfig.fonts.caption
                         }
 
                         Text {
                             x: 0
-                            y: 405
+                            y: uiConfig.panels.settingsPage.contentHeight
+                               - uiConfig.panels.settingsPage.captionBottomGap
                             width: parent.width
                             text: controller.settingsFile
                             color: root.themeMutedTextColor
-                            font.family: "Cascadia Mono"
-                            font.pointSize: 8
+                            font.family: root.uiMonospaceFontFamily
+                            font.pointSize: uiConfig.fonts.caption
                             elide: Text.ElideMiddle
                         }
                     }
                 }
 
                 Text {
-                    x: 20
+                    x: uiConfig.panels.settingsPage.paddingX
                     anchors.bottom: parent.bottom
-                    anchors.bottomMargin: 19
-                    width: parent.width - 300
+                    anchors.bottomMargin: uiConfig.panels.settingsPage.saveStatusBottomGap
+                    width: parent.width - uiConfig.panels.settingsPage.saveStatusWidthInset
                     text: settingsRoot.saveStatus
                     color: settingsRoot.saveStatus === "设置已保存"
                            ? root.themeMutedTextColor : root.themeDangerColor
                     font.family: root.uiFontFamily
-                    font.pointSize: 9
+                    font.pointSize: uiConfig.fonts.small
                     elide: Text.ElideRight
                 }
 
                 Rectangle {
                     anchors.right: applySettingsButton.left
-                    anchors.rightMargin: 10
+                    anchors.rightMargin: uiConfig.panels.settingsPage.buttonsGap
                     anchors.bottom: parent.bottom
-                    anchors.bottomMargin: 12
-                    width: 92
-                    height: 36
-                    radius: 4
+                    anchors.bottomMargin: uiConfig.panels.settingsPage.buttonsBottomGap
+                    width: uiConfig.panels.settingsPage.actionButtonWidth
+                    height: uiConfig.layout.controlHeightLarge
+                    radius: uiConfig.layout.radiusNormal
                     color: root.themeButtonColor
                     border.color: root.themeBorderColor
                     Text {
@@ -1931,12 +2059,12 @@ Window {
                 Rectangle {
                     id: applySettingsButton
                     anchors.right: parent.right
-                    anchors.rightMargin: 20
+                    anchors.rightMargin: uiConfig.panels.settingsPage.applyRightMargin
                     anchors.bottom: parent.bottom
-                    anchors.bottomMargin: 12
-                    width: 92
-                    height: 36
-                    radius: 4
+                    anchors.bottomMargin: uiConfig.panels.settingsPage.buttonsBottomGap
+                    width: uiConfig.panels.settingsPage.actionButtonWidth
+                    height: uiConfig.layout.controlHeightLarge
+                    radius: uiConfig.layout.radiusNormal
                     color: root.panelAccentColor
                     Text {
                         anchors.centerIn: parent
@@ -2037,7 +2165,7 @@ Window {
 
             Rectangle {
                 anchors.fill: parent
-                color: "#88000000"
+                color: root.overlayColor
                 MouseArea {
                     anchors.fill: parent
                     onClicked: root.closeCommandPalette()
@@ -2047,13 +2175,16 @@ Window {
             Rectangle {
                 id: palettePanel
                 x: Math.round((parent.width - width) / 2)
-                y: Math.max(72, Math.round(parent.height * 0.14))
-                width: Math.min(root.commandPaletteMaximumWidth, parent.width - 64)
-                height: Math.min(500, parent.height - y - 60)
-                radius: 6
+                y: Math.max(uiConfig.panels.commandPalette.minTop,
+                            Math.round(parent.height * uiConfig.panels.commandPalette.topRatio))
+                width: Math.min(root.commandPaletteMaximumWidth,
+                                parent.width - uiConfig.panels.commandPalette.widthInset)
+                height: Math.min(uiConfig.panels.commandPalette.maxHeight,
+                                 parent.height - y - uiConfig.panels.commandPalette.bottomGap)
+                radius: uiConfig.layout.radiusLarge
                 color: root.themePanelColor
                 border.color: root.themeBorderColor
-                border.width: 1
+                border.width: uiConfig.layout.borderWidth
 
                 Behavior on color {
                     ColorAnimation { duration: root.transitionDuration }
@@ -2067,11 +2198,11 @@ Window {
 
                 Rectangle {
                     id: paletteQueryFrame
-                    x: 14
-                    y: 14
-                    width: parent.width - 28
-                    height: 40
-                    radius: 4
+                    x: uiConfig.panels.commandPalette.innerPaddingX
+                    y: uiConfig.panels.commandPalette.innerPaddingY
+                    width: parent.width - uiConfig.panels.commandPalette.insetX
+                    height: uiConfig.layout.controlHeightExtraTall
+                    radius: uiConfig.layout.radiusNormal
                     color: root.themeFieldColor
                     border.color: paletteQuery.activeFocus
                                   ? root.panelAccentColor : root.themeBorderColor
@@ -2079,14 +2210,14 @@ Window {
                     TextInput {
                         id: paletteQuery
                         anchors.fill: parent
-                        anchors.leftMargin: 12
-                        anchors.rightMargin: 12
+                        anchors.leftMargin: uiConfig.panels.commandPalette.textMarginX
+                        anchors.rightMargin: uiConfig.panels.commandPalette.textMarginX
                         verticalAlignment: TextInput.AlignVCenter
                         color: root.themeTextColor
                         selectionColor: root.panelAccentColor
                         selectedTextColor: root.panelAccentTextColor
                         font.family: root.uiFontFamily
-                        font.pointSize: 11
+                        font.pointSize: uiConfig.fonts.heading
                         selectByMouse: true
                         clip: true
                         onTextChanged: paletteRoot.rebuild()
@@ -2119,12 +2250,14 @@ Window {
 
                 ListView {
                     id: commandList
-                    x: 10
-                    y: 66
-                    width: parent.width - 20
-                    height: parent.height - 118
+                    x: uiConfig.panels.commandPalette.listX
+                    y: uiConfig.panels.commandPalette.innerPaddingY
+                       + uiConfig.layout.controlHeightExtraTall
+                       + uiConfig.panels.commandPalette.listTopGap
+                    width: parent.width - uiConfig.panels.commandPalette.listInsetX
+                    height: parent.height - uiConfig.panels.commandPalette.listBottomInset
                     clip: true
-                    spacing: 2
+                    spacing: uiConfig.layout.spacingTight
                     model: paletteRoot.filteredCommands
                     currentIndex: paletteRoot.selectedIndex
 
@@ -2132,31 +2265,31 @@ Window {
                         required property var modelData
                         required property int index
                         width: commandList.width
-                        height: 38
-                        radius: 3
+                        height: uiConfig.layout.controlHeightTall
+                        radius: uiConfig.layout.radiusSmall
                         color: index === paletteRoot.selectedIndex
                                ? root.panelAccentColor : "transparent"
 
                         Text {
                             anchors.left: parent.left
-                            anchors.leftMargin: 10
+                            anchors.leftMargin: uiConfig.panels.commandPalette.rowTextMargin
                             anchors.verticalCenter: parent.verticalCenter
                             text: modelData.title
                             color: index === paletteRoot.selectedIndex
                                    ? root.panelAccentTextColor : root.themeTextColor
                             font.family: root.uiFontFamily
-                            font.pointSize: 10
+                            font.pointSize: uiConfig.fonts.normal
                         }
 
                         Text {
                             anchors.right: parent.right
-                            anchors.rightMargin: 10
+                            anchors.rightMargin: uiConfig.panels.commandPalette.rowTextMargin
                             anchors.verticalCenter: parent.verticalCenter
                             text: modelData.shortcut
                             color: index === paletteRoot.selectedIndex
                                    ? root.panelAccentTextColor : root.themeMutedTextColor
-                            font.family: "Cascadia Mono"
-                            font.pointSize: 9
+                            font.family: root.uiMonospaceFontFamily
+                            font.pointSize: uiConfig.fonts.small
                         }
 
                         MouseArea {
@@ -2172,38 +2305,38 @@ Window {
                 }
 
                 Text {
-                    x: 16
-                    y: parent.height - 38
-                    width: parent.width - 32
+                    x: uiConfig.panels.commandPalette.statusX
+                    y: parent.height - uiConfig.panels.commandPalette.statusYFromBottom
+                    width: parent.width - uiConfig.panels.commandPalette.statusInsetX
                     text: paletteRoot.paletteStatus
                     color: root.themeMutedTextColor
                     elide: Text.ElideRight
                     font.family: root.uiFontFamily
-                    font.pointSize: 8
+                    font.pointSize: uiConfig.fonts.caption
                 }
 
                 Rectangle {
                     id: shortcutEditorFrame
                     visible: false
-                    x: 14
-                    y: parent.height - 86
-                    width: parent.width - 28
-                    height: 38
-                    radius: 4
+                    x: uiConfig.panels.commandPalette.innerPaddingX
+                    y: parent.height - uiConfig.panels.commandPalette.shortcutYFromBottom
+                    width: parent.width - uiConfig.panels.commandPalette.insetX
+                    height: uiConfig.layout.controlHeightTall
+                    radius: uiConfig.layout.radiusNormal
                     color: root.themeFieldColor
                     border.color: root.panelAccentColor
 
                     TextInput {
                         id: shortcutEditor
                         anchors.fill: parent
-                        anchors.leftMargin: 10
-                        anchors.rightMargin: 10
+                        anchors.leftMargin: uiConfig.panels.commandPalette.rowTextMargin
+                        anchors.rightMargin: uiConfig.panels.commandPalette.rowTextMargin
                         verticalAlignment: TextInput.AlignVCenter
                         color: root.themeTextColor
                         selectionColor: root.panelAccentColor
                         selectedTextColor: root.panelAccentTextColor
-                        font.family: "Cascadia Mono"
-                        font.pointSize: 10
+                        font.family: root.uiMonospaceFontFamily
+                        font.pointSize: uiConfig.fonts.normal
                         selectByMouse: true
                         Keys.onReturnPressed: paletteRoot.saveShortcut()
                         Keys.onEnterPressed: paletteRoot.saveShortcut()

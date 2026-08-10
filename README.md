@@ -20,7 +20,9 @@ Qt 6 Quick/QML、C++20 和 CMake；AutoHotkey 继续负责全局快捷键与启�
 - 可直接拖动已有文本选区移动内容，支持跨行落点、边缘自动滚动和单步撤销。
 - 延迟加载设置页、深浅主题、编辑字体/字号，以及同步透明度与居中形变的轻量唤出/关闭动画开关。
 - 右上角动态状态显示：正常显示字数统计（有选区时显示选区/总数），悬停展开状态面板（按配置展示快捷键提示或红色错误详情），错误信息可点击复制；面板字号、悬停/收起延迟与最大宽度可在设置页配置。
-- 窗口、外观和快捷键统一保存在一个带 schema 的 INI 配置文件中。
+- 配置按职责分层管理：`config/ui.json` 统一 UI/动画设计令牌（JSONC，带注释）、
+  `config/markdown-style.json` 管理 Markdown 高亮与强调色，用户覆盖值保存在
+  带 schema 的 `settings.ini`；详细说明见 [`config/README.md`](config/README.md)。
 - 常驻模式监听启动后的纯文本剪贴板变化，并提供加密的本地历史浏览、搜索、回溯编辑、删除与清空。
 - 可作为 Codex 和 pi-coding-agent 的同步外部提示词编辑器（标题标注调用它的 CLI 类型），按文件启动独立瞬态进程。
 
@@ -107,7 +109,14 @@ UTF-16 code unit 精确去重；再次复制完全相同的文本会保留稳定
 - 光标已经位于文档最后一个可视行时，Down 会转到行尾；位于第一个可视行时，Up 会转到行首。
 - `PageUp`/`PageDown` 按一页纯滚动浏览，不移动光标、不改变选区；`Shift+PageUp`/`Shift+PageDown` 同样只滚动。文档末尾下方保留 2/3 页可滚动的空白区（短文档不足一页时不产生滚动）。键盘输入、IME 提交、回车或粘贴使光标碰到/越过视口底边时，自动滚动一次：段中光标行滚到视口上 1/3；光标位于文档末尾时等效于滚到底（2/3 页留白翻出，光标停在上 1/3）。触发后继续输入不会再次触发，光标自然下落，再次触底才再次触发（间歇式）。退格、删除（含选区、结构删除与 `Ctrl+Backspace`/`Ctrl+Delete` 词删除）、剪切、命令面板的「删除整行」「剪切整行」「清空整个编辑区」，以及撤销（视作删除类编辑）使光标碰到/越过视口顶边时，按严格镜像规则自动滚动一次：光标行滚到视口距顶 2/3 处（下 1/3），光标位于文档开头时滚到顶部；继续删除再次触顶才再次触发。撤销与重做视为普通输入/删除共用同一套检查（不预设方向，编辑后光标落在哪条边就按哪条规则处理），不再与输入绑定回滚滚动位置。以上滚动在动画开关开启时使用约 160ms 的轻量平滑动画，关闭时瞬时到位。
 
-## 主题与 Markdown 样式配置
+## 界面与配置管理
+
+全部 UI、动画与窗口显示参数（窗口默认/最小尺寸、布局边距与圆角、字号角色、
+动画时长与延迟、各面板尺寸、深浅两套调色板、窗口锚定间距）集中保存在
+`config/ui.json`。文件为 JSONC 格式，可写 `//` 与 `/* */` 注释；改动后重启
+应用生效。稳定安装首次构建时把模板初始化到
+`%LOCALAPPDATA%\ScratchEditor\ScratchEditor\ui.json`，后续构建不覆盖用户副本；
+测试模式读取构建目录中的模板，也可用 `SCRATCHEDITOR_UI_CONFIG` 指定隔离配置。
 
 配置模板集中保存在 `config/markdown-style.json`。其中 `theme.accentColor` 是界面强调色的单一事实
 来源：设置页、命令面板、焦点边框、文本选区、拖动选区的落点光标和 Markdown 链接都使用该颜色；
@@ -130,7 +139,8 @@ Markdown 样式也由该文件管理。
 ```text
 KeysRedirect.ahk ──命名管道──> %LOCALAPPDATA%\ScratchEditor\AhkEditor\ScratchEditor.exe
 Codex / pi ───────文件模式───> %LOCALAPPDATA%\ScratchEditor\CodexEditor\ScratchEditor.exe
-共享主题配置 ────────────────> %LOCALAPPDATA%\ScratchEditor\ScratchEditor\markdown-style.json
+共享 Markdown 主题配置 ──────> %LOCALAPPDATA%\ScratchEditor\ScratchEditor\markdown-style.json
+共享 UI 设计令牌配置 ────────> %LOCALAPPDATA%\ScratchEditor\ScratchEditor\ui.json
                                              ├─ C++：生命周期、IPC、剪贴板、配置、编辑命令、窗口过渡
                                              └─ QML：编辑器、查找、命令面板、设置页与界面动效
 ```
@@ -233,8 +243,11 @@ IPC 命令让稳定常驻实例自行退出，并在安装后重新启动；这�
 生产 IPC 另提供只读的 `getWindowGeometry` JSON 命令，供外部编辑进程查询常驻实例的
 窗口 resting 几何，以便唤起时避开可能已打开的临时编辑器窗口。
 
-正式配置存放在 Qt `AppConfigLocation` 下的 `settings.ini`。首次创建集中配置时会迁移
-旧 Native Settings 中的窗口几何和快捷键；测试通过独立环境变量使用临时 INI。
+用户可写配置存放在 Qt `AppConfigLocation` 下的 `settings.ini`（schema 版本 2）。
+首次创建集中配置时会迁移旧 Native Settings 中的窗口几何和快捷键；从 schema 1 升级时
+自动把 `editor/fontFamily`、`editor/fontPointSize`、`ui/animationsEnabled`
+迁移到 `appearance/` 段落。测试通过独立环境变量 `SCRATCHEDITOR_SETTINGS_FILE`
+使用临时 INI，不会触碰用户正式配置。
 
 ## CLI 外部编辑器
 

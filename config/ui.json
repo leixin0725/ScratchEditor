@@ -1,0 +1,262 @@
+{
+  // ===== 窗口 =====
+  // 初始与最小尺寸（逻辑像素）。首次启动或没有记忆几何时使用默认尺寸。
+  "window": {
+    "defaultWidth": 920,
+    "defaultHeight": 640,
+    "minimumWidth": 500,
+    "minimumHeight": 320
+  },
+
+  // ===== 通用布局令牌 =====
+  // 被查找面板、历史面板、设置页与命令面板等复用的尺寸与间距。
+  "layout": {
+    "margin": 18,
+    "resizeMargin": 8,
+    "dragZoneHeight": 52,
+    "borderWidth": 1,
+    "spacingInput": 9,
+    "spacingTight": 2,
+    "spacingSmall": 4,
+    "spacingNormal": 5,
+    "spacingMedium": 8,
+    "spacingLarge": 10,
+    "spacingWide": 12,
+    "spacingHuge": 20,
+    "radiusSmall": 3,
+    "radiusNormal": 4,
+    "radiusMedium": 5,
+    "radiusLarge": 6,
+    "radiusXLarge": 7,
+    "radiusPill": 17,
+    "controlHeightCompact": 30,
+    "controlHeightSmall": 32,
+    "controlHeightNormal": 34,
+    "controlHeightLarge": 36,
+    "controlHeightTall": 38,
+    "controlHeightExtraTall": 40,
+    "editorPaddingX": 12,
+    "editorPaddingY": 8,
+    "editorContentBottomGap": 20,
+    "selectionCursorWidth": 2,
+    "scrollbarWidth": 5,
+    "scrollbarMinHeight": 28,
+    "scrollbarOffset": 2
+  },
+
+  // ===== 字体角色（pt）=====
+  // editorDefaultSize 是 settings.ini 中编辑字号设置的默认值来源；
+  // 状态面板字号默认值见 panels.statusPanel.defaultFontSize。
+  "fonts": {
+    "family": "Microsoft YaHei UI",
+    "monospaceFamily": "Cascadia Mono",
+    "title": 13,
+    "heading": 11,
+    "normal": 10,
+    "small": 9,
+    "caption": 8,
+    "editorDefaultSize": 13,
+    "editorSizeMin": 9,
+    "editorSizeMax": 24
+  },
+
+  // ===== 动画与交互延迟（毫秒）=====
+  "animation": {
+    "transitionDuration": 120,
+    "windowShapeScale": 0.98,
+    "historyHoverOpenDelay": 100,
+    "historyHoverCloseDelay": 250,
+    "scrollRefreshInterval": 60,
+    "benchmarkDuration": 1000,
+    "probeWidth": 40,
+    "probeHeight": 2,
+    "probeRadius": 1,
+    "probeYOffset": 4
+  },
+
+  // ===== 面板尺寸与布局 =====
+  "panels": {
+    "statusText": {
+      "maxWidth": 360,
+      "maxWidthRatio": 0.55
+    },
+    "statusPanel": {
+      "padding": 20,
+      "margins": 10,
+      "spacing": 5,
+      "topGap": 6,
+      "bottomGap": 12,
+      "defaultFontSize": 10,
+      "fontSizeMin": 9,
+      "fontSizeMax": 24,
+      "defaultShowDelayMs": 300,
+      "showDelayMinMs": 0,
+      "showDelayMaxMs": 2000,
+      "defaultHideDelayMs": 250,
+      "hideDelayMinMs": 0,
+      "hideDelayMaxMs": 3000,
+      "defaultMaxWidth": 360,
+      "maxWidthMin": 200,
+      "maxWidthMax": 800
+    },
+    "find": {
+      "maxWidth": 760,
+      "widthInset": 48,
+      "heightSingle": 66,
+      "heightReplace": 104,
+      "paddingX": 12,
+      "paddingY": 10,
+      "rowGap": 10,
+      "controlsWidth": 328,
+      "caseSensitiveWidth": 42,
+      "prevWidth": 54,
+      "nextWidth": 54,
+      "closeWidth": 30,
+      "actionWidth": 70,
+      "rightInset": 42,
+      "gap": 8,
+      "statusY": 47,
+      "statusYReplace": 86,
+      "statusWidth": 142
+    },
+    "history": {
+      "triggerWidth": 12,
+      "minWidth": 200,
+      "maxWidth": 360,
+      "overlayThreshold": 320,
+      "cardHeightDefault": 58,
+      "cardHeightMin": 44,
+      "cardHeightMax": 200,
+      "titleX": 14,
+      "titleY": 12,
+      "searchX": 12,
+      "searchY": 40,
+      "searchInsetX": 24,
+      "inputMargin": 8,
+      "listX": 8,
+      "listY": 82,
+      "listInsetX": 16,
+      "listBottomInset": 132,
+      "cardTextX": 8,
+      "cardTextY": 4,
+      "cardTextInsetX": 16,
+      "cardMetaHeight": 22,
+      "cardMetaBottomGap": 16,
+      "cardLineHeight": 18,
+      "cardMaxLines": 3,
+      "emptyTextInsetX": 24,
+      "footerMarginX": 12,
+      "footerBottomGap": 10,
+      "footerButtonWidth": 72
+    },
+    "dialog": {
+      "maxWidth": 420,
+      "widthInset": 48,
+      "height": 140,
+      "titleTop": 24,
+      "buttonY": 82,
+      "buttonWidth": 120,
+      "buttonSide": 54
+    },
+    "commandPalette": {
+      "maxWidth": 620,
+      "minTop": 72,
+      "topRatio": 0.14,
+      "widthInset": 64,
+      "maxHeight": 500,
+      "bottomGap": 60,
+      "innerPaddingX": 14,
+      "innerPaddingY": 14,
+      "insetX": 28,
+      "textMarginX": 12,
+      "listX": 10,
+      "listTopGap": 12,
+      "listInsetX": 20,
+      "listBottomInset": 118,
+      "rowTextMargin": 10,
+      "statusX": 16,
+      "statusYFromBottom": 38,
+      "statusInsetX": 32,
+      "shortcutYFromBottom": 86
+    },
+    "settingsPage": {
+      "maxWidth": 640,
+      "widthInset": 40,
+      "maxHeight": 430,
+      "heightInset": 32,
+      "paddingX": 20,
+      "titleY": 16,
+      "closeMarginX": 18,
+      "closeHitInset": -8,
+      "contentY": 52,
+      "contentHeight": 425,
+      "contentBottomInset": 112,
+      "rowHeight": 48,
+      "labelYOffset": 9,
+      "labelWidth": 118,
+      "columnX": 126,
+      "controlWidth": 86,
+      "controlWidthWide": 110,
+      "captionTopGap": 41,
+      "captionBottomGap": 20,
+      "saveStatusBottomGap": 19,
+      "saveStatusWidthInset": 300,
+      "buttonsGap": 10,
+      "buttonsBottomGap": 12,
+      "actionButtonWidth": 92,
+      "applyRightMargin": 20
+    }
+  },
+
+  // ===== 深浅主题基础调色板 =====
+  // 强调色（accentColor / accentTextColor）仍由 config/markdown-style.json
+  // 统一提供，本文件不重复定义。
+  "palette": {
+    "dark": {
+      "background": "#252525",
+      "editorSurface": "#292929",
+      "panel": "#292929",
+      "field": "#1d1d1d",
+      "text": "#f2f2f2",
+      "strongText": "#ffffff",
+      "mutedText": "#9a9a9a",
+      "border": "#505050",
+      "button": "#393939",
+      "buttonAccentText": "#ffffff",
+      "danger": "#ff8a80",
+      "dangerText": "#ffffff",
+      "overlay": "#88000000",
+      "scrollbarThumbActive": "#8b8b8b",
+      "scrollbarThumbIdle": "#555555"
+    },
+    "light": {
+      "background": "#f7f8fa",
+      "editorSurface": "#ffffff",
+      "panel": "#ffffff",
+      "field": "#f5f7fa",
+      "text": "#24292f",
+      "strongText": "#111111",
+      "mutedText": "#57606a",
+      "border": "#d0d7de",
+      "button": "#eaeef2",
+      "buttonAccentText": "#ffffff",
+      "danger": "#cf222e",
+      "dangerText": "#ffffff",
+      "overlay": "#88000000",
+      "scrollbarThumbActive": "#6e7781",
+      "scrollbarThumbIdle": "#afb8c1"
+    }
+  },
+
+  // ===== 窗口摆放 =====
+  "placement": {
+    "anchorGap": 16
+  },
+
+  // ===== 用户偏好默认值 =====
+  // settings.ini 未覆盖时生效；主题/动画开关可继续在设置页修改。
+  "preferences": {
+    "theme": "dark",
+    "animationsEnabled": true
+  }
+}

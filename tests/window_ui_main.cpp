@@ -234,9 +234,19 @@ int main(int argc, char *argv[])
              initial.value(QStringLiteral("ok")).toBool()
                  && initial.value(QStringLiteral("testMode")).toBool()
                  && initial.value(QStringLiteral("settingsStatus")).toInt() == 0
-                 && initial.value(QStringLiteral("settingsSchemaVersion")).toInt() == 1
+                 && initial.value(QStringLiteral("settingsSchemaVersion")).toInt() == 2
                  && configFile.endsWith(QStringLiteral(".ini"), Qt::CaseInsensitive)
                  && QFileInfo::exists(configFile),
+             initial);
+    addCheck(checks, details, QStringLiteral("uiConfigDefaults"),
+             initial.value(QStringLiteral("uiConfigLoaded")).toBool()
+                 && initial.value(QStringLiteral("uiConfigFile")).toString()
+                        .endsWith(QStringLiteral("ui.json"))
+                 && QFileInfo::exists(
+                        initial.value(QStringLiteral("uiConfigFile")).toString())
+                 && initial.value(QStringLiteral("commandPaletteMaximumWidth")).toInt() == 620
+                 && initial.value(QStringLiteral("historyHoverOpenDelayMs")).toInt() == 100
+                 && initial.value(QStringLiteral("historyHoverCloseDelayMs")).toInt() == 250,
              initial);
     addCheck(checks, details, QStringLiteral("appearanceDefaults"),
              initial.value(QStringLiteral("theme")).toString() == QStringLiteral("dark")
@@ -585,17 +595,17 @@ int main(int argc, char *argv[])
                  && config.value(QStringLiteral("settingsFile")).toString() == configFile
                  && hasKey(keys, QStringLiteral("meta/schemaVersion"))
                  && hasKey(keys, QStringLiteral("appearance/theme"))
-                 && hasKey(keys, QStringLiteral("editor/fontFamily"))
-                 && hasKey(keys, QStringLiteral("editor/fontPointSize"))
-                 && hasKey(keys, QStringLiteral("ui/animationsEnabled"))
+                 && hasKey(keys, QStringLiteral("appearance/fontFamily"))
+                 && hasKey(keys, QStringLiteral("appearance/fontPointSize"))
+                 && hasKey(keys, QStringLiteral("appearance/animationsEnabled"))
                  && hasKey(keys, QStringLiteral("statusPanel/fontSize"))
                  && hasKey(keys, QStringLiteral("statusPanel/showDelayMs"))
                  && hasKey(keys, QStringLiteral("statusPanel/hideDelayMs"))
                  && hasKey(keys, QStringLiteral("statusPanel/maxWidth"))
                  && hasKey(keys, QStringLiteral("shortcuts/toggleBold"))
                  && fileText.contains(QStringLiteral("[appearance]"))
-                 && fileText.contains(QStringLiteral("[editor]"))
-                 && fileText.contains(QStringLiteral("[ui]"))
+                 && !fileText.contains(QStringLiteral("[editor]"))
+                 && !fileText.contains(QStringLiteral("[ui]"))
                  && fileText.contains(QStringLiteral("[statusPanel]"))
                  && fileText.contains(QStringLiteral("[shortcuts]")),
              config);

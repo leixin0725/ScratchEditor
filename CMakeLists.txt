@@ -33,6 +33,8 @@ qt_add_executable(ScratchEditor WIN32
     src/markdownhighlighter.h
     src/markdownstyle.cpp
     src/markdownstyle.h
+    src/uiconfig.cpp
+    src/uiconfig.h
     src/statuspanelhints.h
     src/windowplacement.cpp
     src/windowplacement.h
@@ -48,12 +50,18 @@ qt_add_executable(ScratchEditor WIN32
 set(SCRATCHEDITOR_MARKDOWN_STYLE
     "${CMAKE_CURRENT_SOURCE_DIR}/config/markdown-style.json"
 )
+set(SCRATCHEDITOR_UI_CONFIG
+    "${CMAKE_CURRENT_SOURCE_DIR}/config/ui.json"
+)
 
 add_custom_command(TARGET ScratchEditor POST_BUILD
     COMMAND ${CMAKE_COMMAND} -E make_directory "$<TARGET_FILE_DIR:ScratchEditor>/config"
     COMMAND ${CMAKE_COMMAND} -E copy_if_different
             "${SCRATCHEDITOR_MARKDOWN_STYLE}"
             "$<TARGET_FILE_DIR:ScratchEditor>/config/markdown-style.json"
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            "${SCRATCHEDITOR_UI_CONFIG}"
+            "$<TARGET_FILE_DIR:ScratchEditor>/config/ui.json"
     VERBATIM
 )
 
@@ -204,4 +212,6 @@ install(TARGETS ScratchEditor ScratchEditorPerf ScratchEditorSystemTests Scratch
     RUNTIME DESTINATION .
 )
 
-install(FILES "${SCRATCHEDITOR_MARKDOWN_STYLE}" DESTINATION config)
+install(FILES "${SCRATCHEDITOR_MARKDOWN_STYLE}"
+              "${SCRATCHEDITOR_UI_CONFIG}"
+        DESTINATION config)

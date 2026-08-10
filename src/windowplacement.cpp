@@ -123,7 +123,8 @@ QRect placeNearWindow(const QSize &rememberedSize,
                       const QSize &minimumSize,
                       const QVector<QRect> &screens,
                       const std::optional<QRect> &referenceRect,
-                      const QRect &obstacleRect)
+                      const QRect &obstacleRect,
+                      int anchorGap)
 {
     if (screens.isEmpty()) {
         return QRect(QPoint(0, 0),
@@ -179,18 +180,18 @@ QRect placeNearWindow(const QSize &rememberedSize,
                 candidates.append({rect, anchorOrder});
             }
         };
-        addCandidate(QRect(reference.x() + reference.width() + AnchorGap,
+        addCandidate(QRect(reference.x() + reference.width() + anchorGap,
                            reference.y(), targetSize.width(), targetSize.height()),
                      0);
         addCandidate(QRect(reference.x(),
-                           reference.y() + reference.height() + AnchorGap,
+                           reference.y() + reference.height() + anchorGap,
                            targetSize.width(), targetSize.height()),
                      1);
-        addCandidate(QRect(reference.x() - AnchorGap - targetSize.width(),
+        addCandidate(QRect(reference.x() - anchorGap - targetSize.width(),
                            reference.y(), targetSize.width(), targetSize.height()),
                      2);
         addCandidate(QRect(reference.x(),
-                           reference.y() - AnchorGap - targetSize.height(),
+                           reference.y() - anchorGap - targetSize.height(),
                            targetSize.width(), targetSize.height()),
                      3);
     }
