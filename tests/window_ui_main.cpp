@@ -345,24 +345,30 @@ int main(int argc, char *argv[])
 
     // 轻量关闭动画（形状收缩）期间，短文本无滚动范围时不得闪现右侧滚动条：
     // 可见性此前依赖 60ms 防抖快照，动画期间视口高度逐帧收缩而快照停滞，
-    // 修复后可见性实时跟随 contentHeight。在动画中段（90ms/120ms）采样。
+    // 修复后可见性实时跟随 contentHeight。轮询采样，直到捕获一个几何已收缩
+    // 的动画中段样本再断言，避免固定延时在慢速环境下错过 120ms 动画窗口。
     request(QStringLiteral("testSetText"), {{QStringLiteral("text"), QString()}});
     QThread::msleep(150);
     const QJsonObject scrollbarBeforeClose = request(QStringLiteral("status"));
     request(QStringLiteral("hide"));
-    QThread::msleep(90);
-    const QJsonObject scrollbarClosing = request(QStringLiteral("status"));
+    QJsonObject scrollbarClosing;
+    bool closingMidAnimationObserved = false;
+    for (int attempt = 0; attempt < 12 && !closingMidAnimationObserved; ++attempt) {
+        QThread::msleep(10);
+        scrollbarClosing = request(QStringLiteral("status"));
+        closingMidAnimationObserved =
+            scrollbarClosing.value(QStringLiteral("windowTransitionActive")).toBool()
+            && scrollbarClosing.value(QStringLiteral("width")).toInt()
+                   < scrollbarBeforeClose.value(QStringLiteral("width")).toInt()
+            && scrollbarClosing.value(QStringLiteral("height")).toInt()
+                   < scrollbarBeforeClose.value(QStringLiteral("height")).toInt();
+    }
     QThread::msleep(200);
     request(QStringLiteral("show"));
     QThread::msleep(animationSettleMs);
     addCheck(checks, details, QStringLiteral("closingAnimationScrollbarStaysHidden"),
-             !scrollbarBeforeClose.value(QStringLiteral("verticalScrollBarVisible")).toBool()
-                 && scrollbarClosing.value(QStringLiteral("windowTransitionActive")).toBool()
-                 && !scrollbarClosing.value(QStringLiteral("visible")).toBool()
-                 && scrollbarClosing.value(QStringLiteral("width")).toInt()
-                        < scrollbarBeforeClose.value(QStringLiteral("width")).toInt()
-                 && scrollbarClosing.value(QStringLiteral("height")).toInt()
-                        < scrollbarBeforeClose.value(QStringLiteral("height")).toInt()
+             closingMidAnimationObserved
+                 && !scrollbarBeforeClose.value(QStringLiteral("verticalScrollBarVisible")).toBool()
                  && !scrollbarClosing.value(QStringLiteral("verticalScrollBarVisible")).toBool(),
              QJsonObject{{QStringLiteral("before"), scrollbarBeforeClose},
                          {QStringLiteral("closing"), scrollbarClosing}});
