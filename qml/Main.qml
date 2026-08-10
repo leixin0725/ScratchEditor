@@ -899,9 +899,24 @@ Window {
             easing.type: Easing.OutCubic
         }
 
-        // 用户拖动/甩动时立即停止动画，避免与手势互相打架。
-        onDragStarted: scrollAnimation.stop()
-        onFlickStarted: scrollAnimation.stop()
+        // 用户拖动/甩动时立即停止动画，避免与手势互相打架；
+        // 同时释放删除/撤销保持期间的弹性底部缓冲，手动滚动后由下一次检查重新判定。
+        onDragStarted: {
+            scrollAnimation.stop()
+            root.inputScrollHoldBottom = false
+        }
+        onFlickStarted: {
+            scrollAnimation.stop()
+            root.inputScrollHoldBottom = false
+        }
+
+        // 滚轮手动滚动同样释放弹性缓冲；target 为 null 时不自动操纵对象，
+        // blocking 为 false 时不吞掉滚轮事件，Flickable 内置滚轮滚动不受影响。
+        WheelHandler {
+            target: null
+            blocking: false
+            onWheel: root.inputScrollHoldBottom = false
+        }
 
         TextEdit {
             id: editor

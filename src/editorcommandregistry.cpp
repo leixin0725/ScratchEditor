@@ -1813,14 +1813,6 @@ void EditorCommandRegistry::checkInputAutoScroll()
     ++m_inputScrollDiag.checkCount;
     m_inputScrollDiag.overrideDetected = false;
     m_inputScrollDiag.didScroll = false;
-    // 撤销/重做按既有语义处理：视图随内容收缩自然停在新的底部，
-    // 结束此前删除触顶保持期间开启的弹性底部缓冲。
-    if (m_inputScrollDiag.lastKind == QStringLiteral("undo")
-        || m_inputScrollDiag.lastKind == QStringLiteral("redo")) {
-        if (m_window) {
-            m_window->setProperty("inputScrollHoldBottom", false);
-        }
-    }
     InputScrollEvent event;
     event.type = QStringLiteral("check");
     event.kind = m_inputScrollDiag.lastKind;
@@ -1964,14 +1956,12 @@ void EditorCommandRegistry::checkInputAutoScroll()
             });
         } else if (documentLength < m_inputPreTextLength
                    && currentY >= maximumY - 0.5
-                   && m_inputPreScrollY > maximumY + 0.5
-                   && m_inputScrollDiag.lastKind != QStringLiteral("undo")
-                   && m_inputScrollDiag.lastKind != QStringLiteral("redo")) {
-            // 删除使内容收缩时，Flickable 会把视口自动下钳制到新的最大位置，
+                   && m_inputPreScrollY > maximumY + 0.5) {
+            // 删除/撤销/重做使内容收缩时，Flickable 会把视口自动下钳制到新的最大位置，
             // 导致末尾光标始终停在上 1/3、永远不触顶（镜像触发失效）。
             // 这里恢复输入前的视口位置（保持不动），让光标随删除自然上移，
-            // 越过顶边时再由顶规则间歇触发。撤销/重做按既有语义处理：
-            // 视图随内容收缩自然停在新的底部，不做保持。
+            // 越过顶边时再由顶规则间歇触发。撤销/重做视为删除类编辑，
+            // 与删除共用同一套保持与顶镜像规则。
             if (m_window) {
                 // 开启弹性底部缓冲：contentHeight 保持不小于
                 // contentY + 视口高，Flickable 不会把视口钳制回新 max。
