@@ -1572,13 +1572,26 @@ bool EditorCommandRegistry::handleEditorEvent(QEvent *event)
             && modifiers.testFlag(Qt::ControlModifier)
             && !modifiers.testFlag(Qt::AltModifier)
             && !modifiers.testFlag(Qt::MetaModifier);
-        if (ctrlWordDelete
-            && !m_editor->property("inputMethodComposing").toBool()) {
-            if (m_editor->property("selectionStart").toInt()
-                != m_editor->property("selectionEnd").toInt()) {
+        if (ctrlWordDelete) {
+            const QString wordDeleteKind = keyEvent->key() == Qt::Key_Backspace
+                ? QStringLiteral("wordBackspace")
+                : QStringLiteral("wordDelete");
+            beginInputAutoScrollTracking(wordDeleteKind);
+            if (m_editor->property("inputMethodComposing").toBool()) {
+                // IME 组合中不拦截：交给 TextEdit 原生处理，仅登记滚动检查。
+                queueInputAutoScrollCheck();
                 return false;
             }
-            return deleteByCjkAwareWord(keyEvent->key() == Qt::Key_Backspace);
+            if (m_editor->property("selectionStart").toInt()
+                != m_editor->property("selectionEnd").toInt()) {
+                // 有选区：交给 TextEdit 原生删除选区。
+                queueInputAutoScrollCheck();
+                return false;
+            }
+            const bool deleted = deleteByCjkAwareWord(
+                keyEvent->key() == Qt::Key_Backspace);
+            queueInputAutoScrollCheck();
+            return deleted;
         }
         const bool tabPressed = keyEvent->key() == Qt::Key_Tab
             || keyEvent->key() == Qt::Key_Backtab;
@@ -1588,23 +1601,6 @@ bool EditorCommandRegistry::handleEditorEvent(QEvent *event)
         const bool plainDelete = keyEvent->key() == Qt::Key_Delete
             && !(modifiers & (Qt::ShiftModifier | Qt::ControlModifier
                               | Qt::AltModifier | Qt::MetaModifier));
-        // Ctrl+Backspace / Ctrl+Delete 词删除由 TextEdit 原生处理，
-        // 这里只登记并参与自动滚动检查。
-        const bool ctrlWordBackspace = keyEvent->key() == Qt::Key_Backspace
-            && modifiers.testFlag(Qt::ControlModifier)
-            && !modifiers.testFlag(Qt::AltModifier)
-            && !modifiers.testFlag(Qt::MetaModifier);
-        const bool ctrlWordDelete = keyEvent->key() == Qt::Key_Delete
-            && modifiers.testFlag(Qt::ControlModifier)
-            && !modifiers.testFlag(Qt::AltModifier)
-            && !modifiers.testFlag(Qt::MetaModifier);
-        if (ctrlWordBackspace || ctrlWordDelete) {
-            beginInputAutoScrollTracking(ctrlWordBackspace
-                                             ? QStringLiteral("wordBackspace")
-                                             : QStringLiteral("wordDelete"));
-            queueInputAutoScrollCheck();
-            return false;
-        }
         if (plainBackspace) {
             beginInputAutoScrollTracking(QStringLiteral("backspace"));
             if (handleSpecialBackspace() || handleStructuralDelete(true)) {
@@ -2124,6 +2120,8 @@ bool EditorCommandRegistry::performRedo()
     const bool invoked = QMetaObject::invokeMethod(m_editor, "redo");
     queueInputAutoScrollCheck();
     return invoked;
+}
+
 bool EditorCommandRegistry::moveByCjkAwareWord(bool left, bool keepSelection)
 {
     if (!m_editor || !m_document) {
