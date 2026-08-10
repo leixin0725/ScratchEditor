@@ -2893,6 +2893,85 @@ int main(int argc, char *argv[])
                 QStringLiteral("$$\n```\n$$\n中文 A"), liveFormulaWithFenceText,
                 liveFormulaWithFenceStatus);
 
+    // --- 悬空右边界空格回收：ASCII 自动空格后输入 CJK ---
+    {
+        setTextAndSelection(QStringLiteral("中文中文"), 2, 2);
+        keyPress(QStringLiteral("a"), QStringLiteral("a"));
+        keyPress(QStringLiteral("b"), QStringLiteral("b"));
+        keyPress(QStringLiteral("c"), QStringLiteral("c"));
+        inputMethodCommit(QStringLiteral("新的中文"));
+        QThread::msleep(30);
+        const QString trailingCjkText = editorText();
+        const QJsonObject trailingCjkStatus = editorStatus();
+        addCjkCheck(checks, details, QStringLiteral("liveAsciiTrailingCjkCommit"),
+                    trailingCjkText == QStringLiteral("中文 abc 新的中文中文")
+                        && trailingCjkStatus.value(QStringLiteral("cursorPosition")).toInt() == 11,
+                    QStringLiteral("中文中文@2 + abc + IME 新的中文"),
+                    QStringLiteral("IME commit CJK after ASCII run"),
+                    QStringLiteral("中文 abc 新的中文中文"), trailingCjkText,
+                    trailingCjkStatus);
+
+        request(QStringLiteral("testUndo"));
+        QThread::msleep(30);
+        const QString trailingCjkUndone = editorText();
+        addCheck(checks, details, QStringLiteral("liveAsciiTrailingCjkUndo"),
+                 trailingCjkUndone == QStringLiteral("中文 abc 中文"),
+                 QJsonObject{{QStringLiteral("undone"), trailingCjkUndone}});
+    }
+
+    setTextAndSelection(QStringLiteral("中文 abc 中文"), 6, 6);
+    inputMethodCommit(QStringLiteral("新"));
+    QThread::msleep(30);
+    const QString singleCjkText = editorText();
+    const QJsonObject singleCjkStatus = editorStatus();
+    addCjkCheck(checks, details, QStringLiteral("liveTrailingSpaceSingleCjkCommit"),
+                singleCjkText == QStringLiteral("中文 abc 新中文")
+                    && singleCjkStatus.value(QStringLiteral("cursorPosition")).toInt() == 8,
+                QStringLiteral("中文 abc 中文@6 + IME 新"),
+                QStringLiteral("IME commit single CJK before trailing space"),
+                QStringLiteral("中文 abc 新中文"), singleCjkText, singleCjkStatus);
+
+    setTextAndSelection(QStringLiteral("中文 abc 中文"), 6, 6);
+    inputMethodCommit(QStringLiteral("def"));
+    QThread::msleep(30);
+    const QString asciiCommitText = editorText();
+    const QJsonObject asciiCommitStatus = editorStatus();
+    addCjkCheck(checks, details, QStringLiteral("liveTrailingSpaceAsciiKeeps"),
+                asciiCommitText == QStringLiteral("中文 abcdef 中文")
+                    && asciiCommitStatus.value(QStringLiteral("cursorPosition")).toInt() == 9,
+                QStringLiteral("中文 abc 中文@6 + IME def"),
+                QStringLiteral("IME commit ASCII before trailing space"),
+                QStringLiteral("中文 abcdef 中文"), asciiCommitText, asciiCommitStatus);
+
+    setTextAndSelection(QStringLiteral("中文中文"), 2, 2);
+    keyPress(QStringLiteral("a"), QStringLiteral("a"));
+    keyPress(QStringLiteral("b"), QStringLiteral("b"));
+    keyPress(QStringLiteral("c"), QStringLiteral("c"));
+    inputMethodCommit(QStringLiteral("新的中文"));
+    QThread::msleep(30);
+    keyPress(QStringLiteral("d"), QStringLiteral("d"));
+    QThread::msleep(30);
+    const QString nextAsciiText = editorText();
+    const QJsonObject nextAsciiStatus = editorStatus();
+    addCjkCheck(checks, details, QStringLiteral("liveTrailingSpaceNextAscii"),
+                nextAsciiText == QStringLiteral("中文 abc 新的中文 d 中文")
+                    && nextAsciiStatus.value(QStringLiteral("cursorPosition")).toInt() == 13,
+                QStringLiteral("中文中文@2 + abc + IME 新的中文 + d"),
+                QStringLiteral("ASCII after CJK-then-CJK merge"),
+                QStringLiteral("中文 abc 新的中文 d 中文"), nextAsciiText, nextAsciiStatus);
+
+    setTextAndSelection(QStringLiteral("中文 abc 123"), 6, 6);
+    inputMethodCommit(QStringLiteral("新"));
+    QThread::msleep(30);
+    const QString beforeAsciiText = editorText();
+    const QJsonObject beforeAsciiStatus = editorStatus();
+    addCjkCheck(checks, details, QStringLiteral("liveTrailingSpaceBeforeAsciiNoRemove"),
+                beforeAsciiText == QStringLiteral("中文 abc 新 123")
+                    && beforeAsciiStatus.value(QStringLiteral("cursorPosition")).toInt() == 8,
+                QStringLiteral("中文 abc 123@6 + IME 新"),
+                QStringLiteral("IME commit CJK before ASCII content"),
+                QStringLiteral("中文 abc 新 123"), beforeAsciiText, beforeAsciiStatus);
+
     // --- CJK Fix: Selection Wrapping via KeyPress (WRAP-001..007) ---
     cjkExpect(checks, details, QStringLiteral("wrapKeyParen"),
               QStringLiteral("中文"), 0, 2, QStringLiteral("key ( on CJK selection"),

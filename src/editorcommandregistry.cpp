@@ -3744,7 +3744,27 @@ void EditorCommandRegistry::applyAutoSpacing(
                            }),
             insertions.end());
     }
-    if (insertions.isEmpty()) {
+
+    // 回收“悬空”右边界空格：ASCII 自动空格把光标停在右外侧空格之前，若本次输入
+    // 以 CJK 结尾且该空格两侧已变成 CJK-CJK，则空格不再需要，随本次输入一并清除
+    // （例如 `中文 abc` 后输入 `新的中文` 得到 `中文 abc 新的中文`，而不是
+    // `中文 abc 新的中文 中文`）。保护区与未闭合分隔符段内不执行清除。
+    bool trailingInsideUnclosed = false;
+    for (const CjkText::ProtectedSpan &span : analysis.unclosedInlineSpans) {
+        if (span.outerStart < footprint.end && footprint.end < span.outerEnd) {
+            trailingInsideUnclosed = true;
+            break;
+        }
+    }
+    const bool removeTrailingSpace =
+        footprint.start < footprint.end
+        && footprint.end + 1 < text.size()
+        && text.at(footprint.end) == QLatin1Char(' ')
+        && CjkText::isCjk(text.at(footprint.end - 1))
+        && CjkText::isCjk(text.at(footprint.end + 1))
+        && !CjkText::isPositionProtected(analysis, footprint.end)
+        && !trailingInsideUnclosed;
+    if (insertions.isEmpty() && !removeTrailingSpace) {
         return;
     }
 
@@ -3757,14 +3777,35 @@ void EditorCommandRegistry::applyAutoSpacing(
         insertionCursor.insertText(QStringLiteral(" "));
     }
 
+    int trailingRemovalIndex = -1;
+    if (removeTrailingSpace) {
+        trailingRemovalIndex =
+            CjkText::positionAfterInsertions(footprint.end, insertions, false);
+        QTextCursor removalCursor(m_document);
+        removalCursor.setPosition(trailingRemovalIndex);
+        removalCursor.setPosition(trailingRemovalIndex + 1, QTextCursor::KeepAnchor);
+        removalCursor.removeSelectedText();
+    }
+
     // 光标恰位于插入点时保持在其左侧：右外侧自动空格属于“已输入片段之后”的边界，
     // 光标停在空格之前可让后续连续 ASCII 输入并入同一片段，而不是被逐个空格拆开。
-    const int newCursor =
+    int newCursor =
         CjkText::positionAfterInsertions(cursorPosition, insertions, false);
-    const int newSelectionStart =
+    int newSelectionStart =
         CjkText::positionAfterInsertions(selectionStart, insertions, false);
-    const int newSelectionEnd =
+    int newSelectionEnd =
         CjkText::positionAfterInsertions(selectionEnd, insertions, true);
+    if (trailingRemovalIndex >= 0) {
+        if (newCursor > trailingRemovalIndex) {
+            --newCursor;
+        }
+        if (newSelectionStart > trailingRemovalIndex) {
+            --newSelectionStart;
+        }
+        if (newSelectionEnd > trailingRemovalIndex) {
+            --newSelectionEnd;
+        }
+    }
     if (selectionStart != selectionEnd) {
         selectRangeWithActiveEnd(newSelectionStart, newSelectionEnd,
                                  cursorPosition == selectionEnd ? newSelectionEnd
