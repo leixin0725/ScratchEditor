@@ -689,12 +689,62 @@ int main(int argc, char *argv[])
                  && wideHistory.value(QStringLiteral("editorVisibleWidth")).toDouble() >= 320.0,
              wideHistory);
 
+    // 动画开启、历史面板打开（推挤模式）时缩放：编辑区必须即时跟随窗口边缘，
+    // 不允许 x/width 的 Behavior 逐帧重启动画造成滞后追赶（修复前 30ms 处差值约 20px）。
+    request(QStringLiteral("testSetGeometry"),
+            {{QStringLiteral("x"), 100}, {QStringLiteral("y"), 100},
+             {QStringLiteral("width"), 960}, {QStringLiteral("height"), 660}});
+    QThread::msleep(30);
+    const QJsonObject resizedOpenHistory = request(QStringLiteral("status"));
+    const double openWidthDiff = qAbs(resizedOpenHistory.value(
+        QStringLiteral("editorViewportWidth")).toDouble()
+        - resizedOpenHistory.value(QStringLiteral("editorVisibleWidth")).toDouble());
+    addCheck(checks, details, QStringLiteral("editorResizeFollowsInstantlyOpen"),
+             resizedOpenHistory.value(QStringLiteral("historyPanelOpen")).toBool()
+                 && !resizedOpenHistory.value(QStringLiteral("historyPanelOverlay")).toBool()
+                 && openWidthDiff <= 1.0,
+             QJsonObject{{QStringLiteral("viewportWidth"),
+                          resizedOpenHistory.value(
+                              QStringLiteral("editorViewportWidth")).toDouble()},
+                         {QStringLiteral("editorVisibleWidth"),
+                          resizedOpenHistory.value(
+                              QStringLiteral("editorVisibleWidth")).toDouble()},
+                         {QStringLiteral("diff"), openWidthDiff}});
+    request(QStringLiteral("testSetGeometry"),
+            {{QStringLiteral("x"), 100}, {QStringLiteral("y"), 100},
+             {QStringLiteral("width"), 920}, {QStringLiteral("height"), 640}});
+    QThread::msleep(180);
+
     execute(QStringLiteral("clipboardHistory"));
     QThread::msleep(150);
     const QJsonObject toggledClosedHistory = request(QStringLiteral("status"));
     addCheck(checks, details, QStringLiteral("historyCommandTogglesClosed"),
              !toggledClosedHistory.value(QStringLiteral("historyPanelOpen")).toBool(),
              toggledClosedHistory);
+    // 动画开启、历史面板闭合时缩放：宽度同样必须即时跟随（修复前 30ms 处差值约 30px）。
+    request(QStringLiteral("testSetGeometry"),
+            {{QStringLiteral("x"), 100}, {QStringLiteral("y"), 100},
+             {QStringLiteral("width"), 960}, {QStringLiteral("height"), 660}});
+    QThread::msleep(30);
+    const QJsonObject resizedClosedHistory = request(QStringLiteral("status"));
+    const double closedWidthDiff = qAbs(resizedClosedHistory.value(
+        QStringLiteral("editorViewportWidth")).toDouble()
+        - resizedClosedHistory.value(QStringLiteral("editorVisibleWidth")).toDouble());
+    addCheck(checks, details, QStringLiteral("editorResizeFollowsInstantlyClosed"),
+             !resizedClosedHistory.value(QStringLiteral("historyPanelOpen")).toBool()
+                 && closedWidthDiff <= 1.0,
+             QJsonObject{{QStringLiteral("viewportWidth"),
+                          resizedClosedHistory.value(
+                              QStringLiteral("editorViewportWidth")).toDouble()},
+                         {QStringLiteral("editorVisibleWidth"),
+                          resizedClosedHistory.value(
+                              QStringLiteral("editorVisibleWidth")).toDouble()},
+                         {QStringLiteral("diff"), closedWidthDiff}});
+    request(QStringLiteral("testSetGeometry"),
+            {{QStringLiteral("x"), 100}, {QStringLiteral("y"), 100},
+             {QStringLiteral("width"), 920}, {QStringLiteral("height"), 640}});
+    QThread::msleep(180);
+
     execute(QStringLiteral("clipboardHistory"));
     QThread::msleep(150);
     const QJsonObject toggledReopenedHistory = request(QStringLiteral("status"));

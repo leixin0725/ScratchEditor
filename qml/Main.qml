@@ -67,15 +67,27 @@ Window {
     property bool historyPanelOpenedByCommand: false
     property bool historyRevealHovered: false
     property bool historyPanelHovered: false
+    // 历史面板开/合的布局进度：几何直接绑定进度，缩放时即时跟随，
+    // 只有开/合切换时由 Behavior 动画，避免窗口缩放期间逐帧重启动画。
+    property real historyLayoutProgress: historyPanelOpen ? 1 : 0
+
+    Behavior on historyLayoutProgress {
+        NumberAnimation {
+            duration: root.transitionDuration
+            easing.type: Easing.OutCubic
+        }
+    }
     readonly property real historyPanelWidth:
         Math.max(uiConfig.panels.history.minWidth,
                  Math.min(uiConfig.panels.history.maxWidth, root.width / 3))
     readonly property bool historyPanelOverlay:
         (root.width - root.marginSize * 2 - historyPanelWidth)
         < uiConfig.panels.history.overlayThreshold
+    readonly property real editorHorizontalShift:
+        historyPanelOverlay ? 0 : historyLayoutProgress * historyPanelWidth
     readonly property real editorVisibleWidth:
-        root.width - root.marginSize * 2
-        - (historyPanelOpen && !historyPanelOverlay ? historyPanelWidth : 0)
+        root.width - root.marginSize * 2 - editorHorizontalShift
+    readonly property real editorViewportWidth: editorViewport.width
     readonly property bool historyPanelLoaded:
         historyPanelLoader.active && historyPanelLoader.item !== null
     readonly property real historyPanelEdgeIntrusion:
@@ -907,9 +919,7 @@ Window {
 
     Rectangle {
         id: editorSurface
-        x: root.marginSize
-           + (root.historyPanelOpen && !root.historyPanelOverlay
-              ? root.historyPanelWidth : 0)
+        x: root.marginSize + root.editorHorizontalShift
         y: root.dragZoneHeight
         width: root.editorVisibleWidth
         height: root.height - root.dragZoneHeight - root.marginSize
@@ -918,15 +928,11 @@ Window {
         Behavior on color {
             ColorAnimation { duration: root.transitionDuration }
         }
-        Behavior on x { NumberAnimation { duration: root.transitionDuration } }
-        Behavior on width { NumberAnimation { duration: root.transitionDuration } }
     }
 
     Flickable {
         id: editorViewport
-        x: root.marginSize
-           + (root.historyPanelOpen && !root.historyPanelOverlay
-              ? root.historyPanelWidth : 0)
+        x: root.marginSize + root.editorHorizontalShift
         y: root.dragZoneHeight
         width: root.editorVisibleWidth
         height: root.height - root.dragZoneHeight - root.marginSize
@@ -946,9 +952,6 @@ Window {
                            editorViewport.contentY + height - editor.contentHeight)
                 : Math.max(height * 2 / 3, uiConfig.layout.editorContentBottomGap)))
         pixelAligned: true
-
-        Behavior on x { NumberAnimation { duration: root.transitionDuration } }
-        Behavior on width { NumberAnimation { duration: root.transitionDuration } }
 
         NumberAnimation {
             id: scrollAnimation

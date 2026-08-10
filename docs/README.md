@@ -5,6 +5,10 @@
 
 ## 更新记录
 
+  - `2026-08-10`：修复轻量动画开启时窗口缩放导致编辑区（缓冲区）边缘“迟钝→加速”追赶的问题——
+    编辑区几何改为直接绑定布局进度（`historyLayoutProgress`），缩放期间即时跟随窗口边缘，
+    历史面板开/合仍保留滑动动画；window-ui 测试新增
+    `editorResizeFollowsInstantlyOpen`/`editorResizeFollowsInstantlyClosed` 回归检查。
   - `2026-08-10`：修复唤出窗口时历史面板右边缘在左边框与编辑区域交界处闪现的问题——
     历史面板闭合滑动改为只在开/合状态切换时动画，窗口缩放期间右缘即时跟随、不外露；
     window-ui 测试新增闭合态缩放回归检查（`historyClosedResizeKeepsEdgeClipped`）。
