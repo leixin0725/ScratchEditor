@@ -331,6 +331,112 @@ bool isSoftSeparator(QChar ch)
     return halfwidthSeps.contains(ch.unicode());
 }
 
+namespace {
+
+enum class WordCharClass {
+    Separator,
+    LatinWord,
+    CjkRun,
+};
+
+bool isSupplementaryCjkCodePoint(char32_t codePoint)
+{
+    // CJK 扩展 B–H 与兼容补充平面（代理对编码，不在 isCjk 的 BMP 范围内）。
+    return codePoint >= 0x20000 && codePoint <= 0x323AF;
+}
+
+// 返回 index 处字符占用的 UTF-16 code unit 数（配对的代理视为 2，其余为 1）。
+int charUnitLengthAt(const QString &text, int index)
+{
+    const char16_t unit = text.at(index).unicode();
+    if (QChar::isHighSurrogate(unit) && index + 1 < text.size()
+        && QChar::isLowSurrogate(text.at(index + 1).unicode())) {
+        return 2;
+    }
+    return 1;
+}
+
+// 返回以 endExclusive 为右边界的前一个字符占用的 UTF-16 code unit 数。
+int charUnitLengthBefore(const QString &text, int endExclusive)
+{
+    if (endExclusive <= 0) {
+        return 0;
+    }
+    const char16_t last = text.at(endExclusive - 1).unicode();
+    if (QChar::isLowSurrogate(last) && endExclusive >= 2
+        && QChar::isHighSurrogate(text.at(endExclusive - 2).unicode())) {
+        return 2;
+    }
+    return 1;
+}
+
+// 返回 index 处字符（代理对视为一个原子单元）的词类别。
+WordCharClass wordCharClassAt(const QString &text, int index)
+{
+    const char16_t unit = text.at(index).unicode();
+    // 若 index 指向代理对的低位单元，按前一个高位单元归属，保持原子性。
+    if (QChar::isLowSurrogate(unit) && index > 0
+        && QChar::isHighSurrogate(text.at(index - 1).unicode())) {
+        return wordCharClassAt(text, index - 1);
+    }
+    const int units = charUnitLengthAt(text, index);
+    char32_t codePoint = unit;
+    if (units == 2) {
+        codePoint = QChar::surrogateToUcs4(unit, text.at(index + 1).unicode());
+    }
+    if (isSupplementaryCjkCodePoint(codePoint)) {
+        return WordCharClass::CjkRun;
+    }
+    if (QChar::isHighSurrogate(unit) || QChar::isLowSurrogate(unit)) {
+        // 未配对的代理（或非汉字补充平面字符）按分隔符处理。
+        return WordCharClass::Separator;
+    }
+    const QChar ch(static_cast<char16_t>(codePoint));
+    if (ch == u'_' || ch.isLetterOrNumber()) {
+        return isCjk(ch) ? WordCharClass::CjkRun : WordCharClass::LatinWord;
+    }
+    return WordCharClass::Separator;
+}
+
+// 返回以 endExclusive 为右边界的前一个字符（代理对原子）的词类别。
+WordCharClass wordCharClassBefore(const QString &text, int endExclusive)
+{
+    return wordCharClassAt(text,
+                           endExclusive - charUnitLengthBefore(text, endExclusive));
+}
+
+// 从 start 向右跳过同一类连续字符，返回 run 的 exclusive 右边界。
+int endOfWordRun(const QString &text, int start)
+{
+    const int size = text.size();
+    const WordCharClass cls = wordCharClassAt(text, start);
+    int i = start + charUnitLengthAt(text, start);
+    while (i < size && wordCharClassAt(text, i) == cls) {
+        i += charUnitLengthAt(text, i);
+    }
+    return i;
+}
+
+// 从 endExclusive 向左跳过同一类连续字符，返回 run 的 inclusive 左边界。
+int startOfWordRun(const QString &text, int endExclusive)
+{
+    const WordCharClass cls = wordCharClassBefore(text, endExclusive);
+    int i = endExclusive - charUnitLengthBefore(text, endExclusive);
+    while (i > 0 && wordCharClassBefore(text, i) == cls) {
+        i -= charUnitLengthBefore(text, i);
+    }
+    return i;
+}
+
+// 分隔符中只有空白（空格、换行、制表符等）不属于“可单独选中的标点”。
+bool isSeparatorWhitespace(const QString &text, int index)
+{
+    const QChar ch = text.at(index);
+    return !ch.isHighSurrogate() && !ch.isLowSurrogate() && ch.isSpace();
+}
+
+} // namespace
+
 DocumentAnalysis analyzeDocument(const QString &text)
 {
     DocumentAnalysis analysis;
@@ -580,6 +686,210 @@ int positionAfterInsertions(int originalPosition,
         }
     }
     return shifted;
+}
+
+int moveWordBoundary(const QString &text, int position, int direction)
+{
+    const int size = text.size();
+    position = qBound(0, position, size);
+    if (size == 0) {
+        return 0;
+    }
+
+    if (direction > 0) {
+        if (position >= size) {
+            return size;
+        }
+        if (wordCharClassAt(text, position) == WordCharClass::Separator) {
+            int i = position;
+            while (i < size
+                   && wordCharClassAt(text, i) == WordCharClass::Separator) {
+                i += charUnitLengthAt(text, i);
+            }
+            return i;
+        }
+        return endOfWordRun(text, position);
+    }
+
+    if (position <= 0) {
+        return 0;
+    }
+    if (wordCharClassBefore(text, position) == WordCharClass::Separator) {
+        int i = position;
+        while (i > 0
+               && wordCharClassBefore(text, i) == WordCharClass::Separator) {
+            i -= charUnitLengthBefore(text, i);
+        }
+        if (i <= 0) {
+            return 0;
+        }
+        return startOfWordRun(text, i);
+    }
+    return startOfWordRun(text, position);
+}
+
+WordRange wordRangeAt(const QString &text, int position)
+{
+    const int size = text.size();
+    position = qBound(0, position, size);
+    if (size == 0) {
+        return {0, 0};
+    }
+
+    const auto punctuationToken = [&](int index) -> WordRange {
+        const char16_t unit = text.at(index).unicode();
+        if (QChar::isLowSurrogate(unit) && index > 0
+            && QChar::isHighSurrogate(text.at(index - 1).unicode())) {
+            return {index - 1, index + 1};
+        }
+        if (isSeparatorWhitespace(text, index)) {
+            return {index, index};
+        }
+        return {index, index + charUnitLengthAt(text, index)};
+    };
+
+    // 优先取 position 右侧字符所在的词；右侧是分隔符时再尝试左侧；
+    // 两侧都是分隔符时，单个标点（含代理对）归入自身，空白不选中。
+    if (position < size) {
+        const WordCharClass cls = wordCharClassAt(text, position);
+        if (cls != WordCharClass::Separator) {
+            const int end = endOfWordRun(text, position);
+            return {startOfWordRun(text, end), end};
+        }
+        if (!isSeparatorWhitespace(text, position)) {
+            return punctuationToken(position);
+        }
+    }
+    if (position > 0) {
+        const int units = charUnitLengthBefore(text, position);
+        const WordCharClass cls = wordCharClassBefore(text, position);
+        if (cls != WordCharClass::Separator) {
+            const int start = startOfWordRun(text, position);
+            return {start, position};
+        }
+        if (!isSeparatorWhitespace(text, position - units)) {
+            return {position - units, position};
+        }
+    }
+    return {position, position};
+}
+
+WordRange wordRangeForCursor(const QString &text, int position)
+{
+    const int size = text.size();
+    position = qBound(0, position, size);
+
+    // 与原生“无选区按词包裹”的边界习惯一致：只有空白算“空侧”，
+    // 标点不算；两侧都空时返回空范围（如 `a big ` 的结尾）。
+    const bool emptyOnLeft = position == 0 || text.at(position - 1).isSpace();
+    const bool emptyOnRight = position == size || text.at(position).isSpace();
+    if (emptyOnLeft && emptyOnRight) {
+        return {position, position};
+    }
+
+    const auto runRangeOf = [&](int charIndex) -> WordRange {
+        const int end = endOfWordRun(text, charIndex);
+        return {startOfWordRun(text, end), end};
+    };
+    const auto isWordRun = [&](const WordRange &range) {
+        return range.start < range.end
+            && wordCharClassAt(text, range.start) != WordCharClass::Separator;
+    };
+
+    const bool haveLeft = !emptyOnLeft;
+    const bool haveRight = !emptyOnRight;
+    const WordRange left = haveLeft ? runRangeOf(position - 1) : WordRange{};
+    const WordRange right = haveRight ? runRangeOf(position) : WordRange{};
+
+    if (haveLeft && haveRight) {
+        if (left.start == right.start && left.end == right.end) {
+            return left;
+        }
+        // 标点与词相邻时优先取词；两个词相邻（如 `abc今天`）时按
+        // “光标位于左侧词尾”的惯例取左侧。
+        const bool leftIsWord = isWordRun(left);
+        const bool rightIsWord = isWordRun(right);
+        if (leftIsWord && !rightIsWord) {
+            return left;
+        }
+        if (rightIsWord && !leftIsWord) {
+            return right;
+        }
+        return left;
+    }
+    if (haveLeft) {
+        return left;
+    }
+    return right;
+}
+
+WordRange wordDeletionRange(const QString &text, int position, bool backwards)
+{
+    const int size = text.size();
+    position = qBound(0, position, size);
+
+    if (backwards) {
+        if (position <= 0) {
+            return {position, position};
+        }
+        if (wordCharClassBefore(text, position) != WordCharClass::Separator) {
+            // 光标在词内/词尾：删除光标前的词内部分。
+            return {startOfWordRun(text, position), position};
+        }
+        // 光标在分隔符后：分隔符段不含换行时连同前一个词一起删除
+        // （与 Ctrl+Backspace 常见行为一致）；含换行时只删除分隔符段，
+        // 避免把上一行的词一并删掉。
+        int sepStart = position;
+        while (sepStart > 0
+               && wordCharClassBefore(text, sepStart) == WordCharClass::Separator) {
+            sepStart -= charUnitLengthBefore(text, sepStart);
+        }
+        bool hasNewline = false;
+        for (int i = sepStart; i < position; ++i) {
+            if (text.at(i) == u'\n') {
+                hasNewline = true;
+                break;
+            }
+        }
+        if (!hasNewline && sepStart > 0) {
+            return {startOfWordRun(text, sepStart), position};
+        }
+        return {sepStart, position};
+    }
+
+    if (position >= size) {
+        return {position, position};
+    }
+    if (wordCharClassAt(text, position) == WordCharClass::Separator) {
+        // 光标在分隔符上：只删除分隔符段。
+        int sepEnd = position;
+        while (sepEnd < size
+               && wordCharClassAt(text, sepEnd) == WordCharClass::Separator) {
+            sepEnd += charUnitLengthAt(text, sepEnd);
+        }
+        return {position, sepEnd};
+    }
+    // 光标在词内/词首：删除词及其后的分隔符段（与 Ctrl+Delete 常见行为一致）。
+    int end = endOfWordRun(text, position);
+    while (end < size
+           && wordCharClassAt(text, end) == WordCharClass::Separator) {
+        end += charUnitLengthAt(text, end);
+    }
+    return {position, end};
+}
+
+bool spanContainsCjk(const QString &text, int start, int end)
+{
+    start = qMax(0, start);
+    end = qMin(end, text.size());
+    int i = start;
+    while (i < end) {
+        if (wordCharClassAt(text, i) == WordCharClass::CjkRun) {
+            return true;
+        }
+        i += charUnitLengthAt(text, i);
+    }
+    return false;
 }
 
 } // namespace CjkText

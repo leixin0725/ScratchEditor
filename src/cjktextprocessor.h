@@ -35,6 +35,11 @@ struct BoundaryRange {
     int last = 0;  // inclusive；first > last 表示空
 };
 
+struct WordRange {
+    int start = 0; // inclusive
+    int end = 0;   // exclusive；start == end 表示空
+};
+
 bool isCjk(QChar ch);
 bool isAsciiAlnum(QChar ch);
 bool isSoftSeparator(QChar ch);
@@ -50,5 +55,10 @@ std::pair<QString, QString> resolveSelectionPair(
 int positionAfterInsertions(int originalPosition,
                             const QVector<int> &insertions,
                             bool includeInsertionAtPosition);
+int moveWordBoundary(const QString &text, int position, int direction);
+WordRange wordRangeAt(const QString &text, int position);
+WordRange wordRangeForCursor(const QString &text, int position);
+WordRange wordDeletionRange(const QString &text, int position, bool backwards);
+bool spanContainsCjk(const QString &text, int start, int end);
 
 } // namespace CjkText

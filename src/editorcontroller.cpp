@@ -1606,6 +1606,40 @@ void EditorController::buildCommandHandlers()
             response.insert(QStringLiteral("text"), m_editor->property("text").toString());
             sendResponse(r.socket, response, r.startedNs, r.requestId);
         }}},
+        {QStringLiteral("testDoubleClick"), {Gate::Test, [this](const DispatchRequest &r) {
+            // 合成一次左键双击：坐标取自 position 的光标矩形中心，直接投递给
+            // 编辑器 item（与 testKeyPress 同类），用于验证中英文词选区的落点。
+            const int position = r.request.value(QStringLiteral("position")).toInt();
+            QRectF clickRectangle;
+            const bool clickLocated = QMetaObject::invokeMethod(
+                m_editor, "positionToRectangle", Qt::DirectConnection,
+                Q_RETURN_ARG(QRectF, clickRectangle), Q_ARG(int, position));
+            QJsonObject response = statusObject();
+            bool eventsAccepted = false;
+            if (clickLocated) {
+                if (auto *item = qobject_cast<QQuickItem *>(m_editor.data())) {
+                    const QPointF local = clickRectangle.center();
+                    const QPointF scene = item->mapToScene(local);
+                    const QPointF global = item->mapToGlobal(local);
+                    QMouseEvent doubleClickEvent(QEvent::MouseButtonDblClick, local, scene,
+                                                 global, Qt::LeftButton, Qt::LeftButton,
+                                                 Qt::NoModifier);
+                    doubleClickEvent.setTimestamp(0);
+                    eventsAccepted = QCoreApplication::sendEvent(m_editor,
+                                                                 &doubleClickEvent);
+                    item->ungrabMouse();
+                }
+            }
+            response.insert(QStringLiteral("command"), r.command);
+            response.insert(QStringLiteral("eventsAccepted"), eventsAccepted);
+            response.insert(QStringLiteral("selectionStart"),
+                            m_editor->property("selectionStart").toInt());
+            response.insert(QStringLiteral("selectionEnd"),
+                            m_editor->property("selectionEnd").toInt());
+            response.insert(QStringLiteral("cursorPosition"),
+                            m_editor->property("cursorPosition").toInt());
+            sendResponse(r.socket, response, r.startedNs, r.requestId);
+        }}},
         {QStringLiteral("testUndo"), {Gate::Test, [this](const DispatchRequest &r) {
             // 与真实 Ctrl+Z 走同一路径：撤销视为普通编辑，共用自动滚动检查。
             const bool invoked = m_commands ? m_commands->performUndo() : false;
@@ -1640,6 +1674,10 @@ void EditorController::buildCommandHandlers()
                 key = Qt::Key_PageUp;
             } else if (keyName == QStringLiteral("PageDown")) {
                 key = Qt::Key_PageDown;
+            } else if (keyName == QStringLiteral("Left")) {
+                key = Qt::Key_Left;
+            } else if (keyName == QStringLiteral("Right")) {
+                key = Qt::Key_Right;
             } else if (keyName == QStringLiteral("Backspace")) {
                 key = Qt::Key_Backspace;
             } else if (keyName == QStringLiteral("Delete")) {
@@ -1672,6 +1710,12 @@ void EditorController::buildCommandHandlers()
             response.insert(QStringLiteral("command"), r.command);
             response.insert(QStringLiteral("accepted"), accepted);
             response.insert(QStringLiteral("text"), m_editor->property("text").toString());
+            response.insert(QStringLiteral("cursorPosition"),
+                            m_editor->property("cursorPosition").toInt());
+            response.insert(QStringLiteral("selectionStart"),
+                            m_editor->property("selectionStart").toInt());
+            response.insert(QStringLiteral("selectionEnd"),
+                            m_editor->property("selectionEnd").toInt());
             sendResponse(r.socket, response, r.startedNs, r.requestId);
         }}},
         {QStringLiteral("testInputMethodCommit"), {Gate::Test, [this](const DispatchRequest &r) {
