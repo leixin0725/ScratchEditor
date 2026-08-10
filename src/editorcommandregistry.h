@@ -142,6 +142,7 @@ private:
     void beginInputAutoScrollTracking(const QString &kind);
     void queueInputAutoScrollCheck();
     void checkInputAutoScroll();
+    void animateViewportScrollTo(QQuickItem *viewport, qreal targetY);
 
     struct InputScrollDiagnostics {
         QString lastKind;

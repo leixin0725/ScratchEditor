@@ -334,6 +334,22 @@ int main(int argc, char *argv[])
     QJsonObject details;
 
     const QJsonObject initial = request(QStringLiteral("status"));
+    // 滚动位置断言按瞬时语义编写，这里先关闭动画保证确定性；
+    // 动画本身的中间态与落定行为由 window-ui 套件在窗口可见时验证。
+    const QJsonObject scrollAnimationsOff = request(
+        QStringLiteral("testApplyAppearance"),
+        {{QStringLiteral("theme"), initial.value(QStringLiteral("theme")).toString()},
+         {QStringLiteral("fontFamily"),
+          initial.value(QStringLiteral("editorFontFamily")).toString()},
+         {QStringLiteral("fontPointSize"),
+          initial.value(QStringLiteral("editorFontPointSize")).toInt()},
+         {QStringLiteral("animationsEnabled"), false}});
+    addCheck(checks, details, QStringLiteral("editingScrollAnimationsDisabled"),
+             scrollAnimationsOff.value(QStringLiteral("applied")).toBool()
+                 && !scrollAnimationsOff.value(QStringLiteral("animationsEnabled")).toBool()
+                 && scrollAnimationsOff.value(QStringLiteral("transitionDuration")).toInt() == 0,
+             scrollAnimationsOff);
+
     addCheck(checks, details, QStringLiteral("registryAndHighlighter"),
              initial.value(QStringLiteral("ok")).toBool()
                  && initial.value(QStringLiteral("testMode")).toBool()

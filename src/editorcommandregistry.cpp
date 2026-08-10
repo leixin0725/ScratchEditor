@@ -1505,7 +1505,7 @@ bool EditorCommandRegistry::handleEditorEvent(QEvent *event)
                     ? viewportHeight : -viewportHeight;
                 const qreal requestedY = qBound<qreal>(0.0, currentY + delta, maximumY);
                 if (!qFuzzyCompare(requestedY + 1.0, currentY + 1.0)) {
-                    viewport->setProperty("contentY", requestedY);
+                    animateViewportScrollTo(viewport, requestedY);
                 }
             }
             return true;
@@ -1901,7 +1901,7 @@ void EditorCommandRegistry::checkInputAutoScroll()
                     0.0, editorY + cursorRect.y() - viewportHeight / 3.0, maximumY);
             }
             if (!qFuzzyCompare(targetY + 1.0, currentY + 1.0)) {
-                viewport->setProperty("contentY", targetY);
+                animateViewportScrollTo(viewport, targetY);
             }
             m_inputScrollDiag.targetY = targetY;
             event.targetY = targetY;
@@ -1930,7 +1930,7 @@ void EditorCommandRegistry::checkInputAutoScroll()
                     maximumY);
             }
             if (!qFuzzyCompare(targetY + 1.0, currentY + 1.0)) {
-                viewport->setProperty("contentY", targetY);
+                animateViewportScrollTo(viewport, targetY);
             }
             m_inputScrollDiag.targetY = targetY;
             event.targetY = targetY;
@@ -1939,8 +1939,11 @@ void EditorCommandRegistry::checkInputAutoScroll()
             event.didScroll = didScroll;
         }
         if (triggered) {
-            // 触发后采样落定位置，检测是否被后续逻辑（如延迟的光标跟随）覆盖。
-            QTimer::singleShot(50, this, [this] {
+            // 触发后采样落定位置，检测是否被后续逻辑（如延迟的光标跟随）覆盖；
+            // 动画开启时顺延到动画结束后再采样，避免把动画中间态误判为覆盖。
+            const int settleDelayMs = 50
+                + (m_window ? m_window->property("scrollAnimationDurationMs").toInt() : 0);
+            QTimer::singleShot(settleDelayMs, this, [this] {
                 if (QQuickItem *vp = editorViewport()) {
                     m_inputScrollDiag.settleY = vp->property("contentY").toReal();
                     InputScrollEvent settleEvent;
@@ -2253,6 +2256,20 @@ QQuickItem *EditorCommandRegistry::editorViewport() const
         }
     }
     return nullptr;
+}
+
+void EditorCommandRegistry::animateViewportScrollTo(QQuickItem *viewport, qreal targetY)
+{
+    // 优先走 QML 侧轻量动画（动画开关关闭时直接落位）；
+    // 若 QML 函数不可用（异常场景）则回退为瞬时滚动，保持原有行为。
+    if (!m_window) {
+        viewport->setProperty("contentY", targetY);
+        return;
+    }
+    m_window->setProperty("requestedScrollY", targetY);
+    if (!QMetaObject::invokeMethod(m_window, "animateScrollTo")) {
+        viewport->setProperty("contentY", targetY);
+    }
 }
 
 void EditorCommandRegistry::beginSelectionDrag(int selectionStart, int selectionEnd,

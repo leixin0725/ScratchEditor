@@ -49,6 +49,7 @@ Window {
     readonly property color markdownTextColor: controller.markdownTextColor
     readonly property string uiFontFamily: "Microsoft YaHei UI"
     readonly property int transitionDuration: controller.animationsEnabled ? 120 : 0
+    readonly property int scrollAnimationDurationMs: controller.animationsEnabled ? 160 : 0
     readonly property int historyTriggerWidth: 12
     readonly property int historyHoverOpenDelayMs: 100
     readonly property int historyHoverCloseDelayMs: 250
@@ -82,6 +83,25 @@ Window {
 
     function scrollToBottom() {
         editorViewport.contentY = Math.max(0, editorViewport.contentHeight - editorViewport.height)
+    }
+
+    property real requestedScrollY: -1
+
+    // PageUp/PageDown 与输入触底/删除触顶的自动滚动共用同一个动画入口：
+    // 动画开启时从当前位置平滑滑到目标，关闭时直接落位。
+    function animateScrollTo() {
+        const targetY = requestedScrollY
+        const maximumY = Math.max(0, editorViewport.contentHeight - editorViewport.height)
+        const clampedY = Math.max(0, Math.min(maximumY, targetY))
+        scrollAnimation.stop()
+        if (root.scrollAnimationDurationMs <= 0
+                || Math.abs(clampedY - editorViewport.contentY) < 0.5) {
+            editorViewport.contentY = clampedY
+            return
+        }
+        scrollAnimation.from = editorViewport.contentY
+        scrollAnimation.to = clampedY
+        scrollAnimation.start()
     }
 
     function resetScroll() {
@@ -871,6 +891,18 @@ Window {
         Behavior on x { NumberAnimation { duration: root.transitionDuration } }
         Behavior on width { NumberAnimation { duration: root.transitionDuration } }
 
+        NumberAnimation {
+            id: scrollAnimation
+            target: editorViewport
+            property: "contentY"
+            duration: root.scrollAnimationDurationMs
+            easing.type: Easing.OutCubic
+        }
+
+        // 用户拖动/甩动时立即停止动画，避免与手势互相打架。
+        onDragStarted: scrollAnimation.stop()
+        onFlickStarted: scrollAnimation.stop()
+
         TextEdit {
             id: editor
             objectName: "scratchText"
@@ -1337,6 +1369,7 @@ Window {
             property real grabOffset: 0
 
             onPressed: function(mouse) {
+                scrollAnimation.stop()
                 grabOffset = mouse.y
             }
             onPositionChanged: function(mouse) {

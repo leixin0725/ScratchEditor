@@ -61,6 +61,16 @@ QJsonObject execute(const QString &commandId)
                    {{QStringLiteral("commandId"), commandId}});
 }
 
+QJsonObject keyPress(const QString &text = {}, const QString &key = {}, bool shift = false,
+                     const QString &modifiers = {})
+{
+    return request(QStringLiteral("testKeyPress"),
+                   {{QStringLiteral("text"), text},
+                    {QStringLiteral("key"), key},
+                    {QStringLiteral("shift"), shift},
+                    {QStringLiteral("modifiers"), modifiers}});
+}
+
 QJsonObject historyAction(const QString &action, const QString &value = {})
 {
     return request(QStringLiteral("testClipboardHistoryUiAction"),
@@ -369,6 +379,95 @@ int main(int argc, char *argv[])
     addCheck(checks, details, QStringLiteral("clipboardReplacedContentCursorAtEnd"),
              secondClipboard.value(QStringLiteral("cursorPosition")).toInt() == 6,
              secondClipboard);
+
+    // --- 翻页与自动滚动轻量动画（窗口可见、动画默认开启时验证中间态与落定） ---
+    QString scrollAnimText;
+    scrollAnimText.reserve(4096);
+    for (int i = 0; i < 80; ++i) {
+        scrollAnimText += QStringLiteral("line-%1 abcdefghij klmnopqrstuvwxyz\n")
+                              .arg(i, 2, 10, QLatin1Char('0'));
+    }
+    request(QStringLiteral("show"));
+    QThread::msleep(120);
+    request(QStringLiteral("testSetText"), {{QStringLiteral("text"), scrollAnimText}});
+    request(QStringLiteral("testSetSelection"),
+            {{QStringLiteral("start"), 0}, {QStringLiteral("end"), 0}});
+    request(QStringLiteral("testSetScrollY"), {{QStringLiteral("contentY"), 0}});
+    QThread::msleep(60);
+    const QJsonObject animPageBase = request(QStringLiteral("status"));
+    const double animPageTarget = qMin(
+        animPageBase.value(QStringLiteral("scrollViewportHeight")).toDouble(),
+        animPageBase.value(QStringLiteral("scrollContentHeight")).toDouble()
+            - animPageBase.value(QStringLiteral("scrollViewportHeight")).toDouble());
+    keyPress({}, QStringLiteral("PageDown"));
+    QThread::msleep(40);
+    const QJsonObject animPageMid = request(QStringLiteral("status"));
+    QThread::msleep(300);
+    const QJsonObject animPageSettled = request(QStringLiteral("status"));
+    addCheck(checks, details, QStringLiteral("pageDownScrollAnimatesAndSettles"),
+             animPageMid.value(QStringLiteral("animationsEnabled")).toBool()
+                 && animPageMid.value(QStringLiteral("scrollContentY")).toDouble() > 0.5
+                 && animPageMid.value(QStringLiteral("scrollContentY")).toDouble()
+                    < animPageTarget - 0.5
+                 && qAbs(animPageSettled.value(QStringLiteral("scrollContentY")).toDouble()
+                         - animPageTarget) < 1.5,
+             QJsonObject{{QStringLiteral("targetY"), animPageTarget},
+                         {QStringLiteral("mid"), animPageMid},
+                         {QStringLiteral("settled"), animPageSettled}});
+
+    request(QStringLiteral("testSetText"), {{QStringLiteral("text"), scrollAnimText}});
+    request(QStringLiteral("testSetSelection"),
+            {{QStringLiteral("start"), scrollAnimText.size()},
+             {QStringLiteral("end"), scrollAnimText.size()}});
+    request(QStringLiteral("testSetScrollY"), {{QStringLiteral("contentY"), 0}});
+    QThread::msleep(60);
+    keyPress(QStringLiteral("x"));
+    QThread::msleep(60);
+    const QJsonObject animAutoMid = request(QStringLiteral("status"));
+    const double animAutoMaxY =
+        animAutoMid.value(QStringLiteral("scrollContentHeight")).toDouble()
+        - animAutoMid.value(QStringLiteral("scrollViewportHeight")).toDouble();
+    QThread::msleep(300);
+    const QJsonObject animAutoSettled = request(QStringLiteral("status"));
+    addCheck(checks, details, QStringLiteral("autoScrollAnimatesAndSettles"),
+             animAutoMid.value(QStringLiteral("animationsEnabled")).toBool()
+                 && animAutoMid.value(QStringLiteral("scrollContentY")).toDouble() > 0.5
+                 && animAutoMid.value(QStringLiteral("scrollContentY")).toDouble()
+                    < animAutoMaxY - 0.5
+                 && qAbs(animAutoSettled.value(QStringLiteral("scrollContentY")).toDouble()
+                         - animAutoMaxY) < 1.5,
+             QJsonObject{{QStringLiteral("maxY"), animAutoMaxY},
+                         {QStringLiteral("mid"), animAutoMid},
+                         {QStringLiteral("settled"), animAutoSettled}});
+
+    const QJsonObject animOffApplied = request(
+        QStringLiteral("testApplyAppearance"),
+        {{QStringLiteral("theme"), QStringLiteral("light")},
+         {QStringLiteral("fontFamily"), QStringLiteral("Microsoft YaHei UI")},
+         {QStringLiteral("fontPointSize"), 15},
+         {QStringLiteral("animationsEnabled"), false}});
+    QThread::msleep(60);
+    request(QStringLiteral("testSetText"), {{QStringLiteral("text"), scrollAnimText}});
+    request(QStringLiteral("testSetSelection"),
+            {{QStringLiteral("start"), 0}, {QStringLiteral("end"), 0}});
+    request(QStringLiteral("testSetScrollY"), {{QStringLiteral("contentY"), 0}});
+    QThread::msleep(60);
+    const QJsonObject animOffBase = request(QStringLiteral("status"));
+    const double animOffTarget = qMin(
+        animOffBase.value(QStringLiteral("scrollViewportHeight")).toDouble(),
+        animOffBase.value(QStringLiteral("scrollContentHeight")).toDouble()
+            - animOffBase.value(QStringLiteral("scrollViewportHeight")).toDouble());
+    keyPress({}, QStringLiteral("PageDown"));
+    QThread::msleep(20);
+    const QJsonObject animOffStatus = request(QStringLiteral("status"));
+    addCheck(checks, details, QStringLiteral("scrollAnimationDisabledIsInstant"),
+             animOffApplied.value(QStringLiteral("applied")).toBool()
+                 && !animOffStatus.value(QStringLiteral("animationsEnabled")).toBool()
+                 && qAbs(animOffStatus.value(QStringLiteral("scrollContentY")).toDouble()
+                         - animOffTarget) < 1.5,
+             QJsonObject{{QStringLiteral("targetY"), animOffTarget},
+                         {QStringLiteral("applied"), animOffApplied},
+                         {QStringLiteral("status"), animOffStatus}});
 
     const QJsonObject opened = execute(QStringLiteral("settings"));
     addCheck(checks, details, QStringLiteral("lazySettingsPage"),
