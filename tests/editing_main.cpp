@@ -3822,16 +3822,22 @@ int main(int argc, char *argv[])
     QThread::msleep(50);
     const QJsonObject beforeUndoInput = editorStatus();
     request(QStringLiteral("testUndo"));
-    QThread::msleep(50);
+    QThread::msleep(80);
     const QJsonObject afterUndoInput = editorStatus();
-    addCheck(checks, details, QStringLiteral("undoRestoresScrollWithInput"),
+    const double undoInputMaxY =
+        afterUndoInput.value(QStringLiteral("scrollContentHeight")).toDouble()
+        - afterUndoInput.value(QStringLiteral("scrollViewportHeight")).toDouble();
+    // 撤销不再回滚滚动位置：视图停在当前底部，只恢复文本。
+    addCheck(checks, details, QStringLiteral("undoAfterEndInputKeepsViewAtBottom"),
              afterUndoInput.value(QStringLiteral("textLength")).toInt()
                     == scrollEndCursor
-                 && std::abs(afterUndoInput.value(QStringLiteral("scrollContentY")).toDouble())
-                        < 1.5
+                 && std::abs(afterUndoInput.value(QStringLiteral("scrollContentY")).toDouble()
+                             - undoInputMaxY) < 1.5
+                 && afterUndoInput.value(QStringLiteral("scrollContentY")).toDouble() > 0.0
                  && editorText() == scrollText,
              QJsonObject{{QStringLiteral("before"), beforeUndoInput},
-                         {QStringLiteral("after"), afterUndoInput}});
+                         {QStringLiteral("after"), afterUndoInput},
+                         {QStringLiteral("maxY"), undoInputMaxY}});
 
     request(QStringLiteral("testSetText"), {{QStringLiteral("text"), scrollText}});
     request(QStringLiteral("testSetSelection"),
@@ -3882,21 +3888,28 @@ int main(int argc, char *argv[])
         QThread::msleep(15);
         ++remainingEndUndos;
     }
+    QThread::msleep(60);
     const QJsonObject afterFullEndUndo = editorStatus();
-    addCheck(checks, details, QStringLiteral("endInputScrollReTriggersAndUndoChainRestores"),
+    const double fullUndoMaxY =
+        afterFullEndUndo.value(QStringLiteral("scrollContentHeight")).toDouble()
+        - afterFullEndUndo.value(QStringLiteral("scrollViewportHeight")).toDouble();
+    // 撤销链不再逐级回滚滚动位置：文本全部撤销后视图仍停在当前底部。
+    addCheck(checks, details, QStringLiteral("endInputScrollReTriggersAndUndoChainKeepsView"),
              afterManyEnters.value(QStringLiteral("scrollContentY")).toDouble()
                     > firstEndMaxY
                  && remainingEndUndos == 42
-                 && std::abs(afterFullEndUndo.value(QStringLiteral("scrollContentY")).toDouble())
-                        < 1.5
+                 && std::abs(afterFullEndUndo.value(QStringLiteral("scrollContentY")).toDouble()
+                             - fullUndoMaxY) < 1.5
+                 && afterFullEndUndo.value(QStringLiteral("scrollContentY")).toDouble() > 0.0
                  && editorText() == scrollText,
              QJsonObject{{QStringLiteral("maxY"), firstEndMaxY},
                          {QStringLiteral("afterEnters"), afterManyEnters},
                          {QStringLiteral("undoCount"), remainingEndUndos},
-                         {QStringLiteral("afterFullUndo"), afterFullEndUndo}});
+                         {QStringLiteral("afterFullUndo"), afterFullEndUndo},
+                         {QStringLiteral("fullUndoMaxY"), fullUndoMaxY}});
 
-    // 两级撤销：第二笔输入（回车新增一行）让底边下移并触发滚动，
-    // 逐级撤销各自恢复输入前位置。
+    // 两级撤销：第二笔输入（回车新增一行）让底边下移并触发滚动；
+    // 撤销只恢复文本，视图随内容收缩自然停在新的底部。
     request(QStringLiteral("testSetText"), {{QStringLiteral("text"), scrollText}});
     request(QStringLiteral("testSetSelection"),
             {{QStringLiteral("start"), scrollEndCursor},
@@ -3920,56 +3933,46 @@ int main(int argc, char *argv[])
     request(QStringLiteral("testUndo"));
     QThread::msleep(50);
     const QJsonObject secondUndo = editorStatus();
-    addCheck(checks, details, QStringLiteral("undoRestoresEachScrolledInput"),
+    const double secondUndoMaxY =
+        secondUndo.value(QStringLiteral("scrollContentHeight")).toDouble()
+        - secondUndo.value(QStringLiteral("scrollViewportHeight")).toDouble();
+    addCheck(checks, details, QStringLiteral("undoKeepsViewWhileTextRestores"),
              secondScrolledInput.value(QStringLiteral("scrollContentY")).toDouble()
                     > bottomEdgeY
-                 && std::abs(firstUndo.value(QStringLiteral("scrollContentY")).toDouble()
-                             - bottomEdgeY) < 1.5
                  && firstUndo.value(QStringLiteral("textLength")).toInt()
                     == scrollEndCursor + 1
-                 && std::abs(secondUndo.value(QStringLiteral("scrollContentY")).toDouble())
-                        < 1.5
+                 && secondUndo.value(QStringLiteral("textLength")).toInt()
+                    == scrollEndCursor
+                 && std::abs(secondUndo.value(QStringLiteral("scrollContentY")).toDouble()
+                             - secondUndoMaxY) < 1.5
+                 && secondUndo.value(QStringLiteral("scrollContentY")).toDouble() > 0.0
                  && editorText() == scrollText,
              QJsonObject{{QStringLiteral("bottomEdgeY"), bottomEdgeY},
                          {QStringLiteral("first"), firstScrolledInput},
                          {QStringLiteral("second"), secondScrolledInput},
                          {QStringLiteral("firstUndo"), firstUndo},
-                         {QStringLiteral("secondUndo"), secondUndo}});
+                         {QStringLiteral("secondUndo"), secondUndo},
+                         {QStringLiteral("secondUndoMaxY"), secondUndoMaxY}});
 
     request(QStringLiteral("testSetText"), {{QStringLiteral("text"), scrollText}});
     request(QStringLiteral("testSetSelection"),
-            {{QStringLiteral("start"), scrollEndCursor},
-             {QStringLiteral("end"), scrollEndCursor}});
-    setScrollY(300);
-    QThread::msleep(50);
-    keyPress(QStringLiteral("x"));
-    QThread::msleep(50);
-    const QJsonObject scrolledToBottom = editorStatus();
-    // 把光标移到开头会让 QML 最小可见跟随把视图滚回顶部，正好验证
-    // “未触发滚动的输入”不会在撤销时误恢复滚动位置。
-    request(QStringLiteral("testSetSelection"),
             {{QStringLiteral("start"), 0}, {QStringLiteral("end"), 0}});
+    setScrollY(0);
+    QThread::msleep(50);
     keyPress(QStringLiteral("y"));
     QThread::msleep(50);
-    const QJsonObject afterNonScrolledInput = editorStatus();
+    const QJsonObject topTypedStatus = editorStatus();
     request(QStringLiteral("testUndo"));
-    QThread::msleep(50);
-    const QJsonObject afterNonScrolledUndo = editorStatus();
-    request(QStringLiteral("testUndo"));
-    QThread::msleep(50);
-    const QJsonObject afterScrolledUndo = editorStatus();
-    addCheck(checks, details, QStringLiteral("undoSkipsNonScrolledInput"),
-             std::abs(afterNonScrolledInput.value(QStringLiteral("scrollContentY")).toDouble())
-                    < 1.5
-                 && std::abs(afterNonScrolledUndo.value(QStringLiteral("scrollContentY")).toDouble())
+    QThread::msleep(80);
+    const QJsonObject topUndoStatus = editorStatus();
+    // 光标可见时撤销不触发任何滚动（既无回滚也无顶边锚定）。
+    addCheck(checks, details, QStringLiteral("undoVisibleCursorKeepsView"),
+             std::abs(topTypedStatus.value(QStringLiteral("scrollContentY")).toDouble()) < 1.5
+                 && std::abs(topUndoStatus.value(QStringLiteral("scrollContentY")).toDouble())
                         < 1.5
-                 && std::abs(afterScrolledUndo.value(QStringLiteral("scrollContentY")).toDouble()
-                             - 300.0) < 1.5
                  && editorText() == scrollText,
-             QJsonObject{{QStringLiteral("bottom"), scrolledToBottom},
-                         {QStringLiteral("nonScrolled"), afterNonScrolledInput},
-                         {QStringLiteral("nonScrolledUndo"), afterNonScrolledUndo},
-                         {QStringLiteral("scrolledUndo"), afterScrolledUndo}});
+             QJsonObject{{QStringLiteral("typed"), topTypedStatus},
+                         {QStringLiteral("undo"), topUndoStatus}});
 
     request(QStringLiteral("testSetText"), {{QStringLiteral("text"), scrollText}});
     request(QStringLiteral("testSetSelection"),
@@ -3987,16 +3990,22 @@ int main(int argc, char *argv[])
     request(QStringLiteral("testUndo"));
     QThread::msleep(80);
     const QJsonObject imeUndoStatus = editorStatus();
-    addCheck(checks, details, QStringLiteral("imeCommitAtEndScrollsAndUndoRestores"),
+    const double imeUndoMaxY =
+        imeUndoStatus.value(QStringLiteral("scrollContentHeight")).toDouble()
+        - imeUndoStatus.value(QStringLiteral("scrollViewportHeight")).toDouble();
+    // IME 提交触底照常滚到底；撤销只恢复文本，视图停在底部不回跳。
+    addCheck(checks, details, QStringLiteral("imeCommitAtEndScrollsAndUndoKeepsView"),
              std::abs(imeScrollStatus.value(QStringLiteral("scrollContentY")).toDouble()
                       - imeMaxY) < 1.5
                  && imeCommittedText == scrollText + QStringLiteral("中文")
-                 && std::abs(imeUndoStatus.value(QStringLiteral("scrollContentY")).toDouble())
-                        < 1.5
+                 && std::abs(imeUndoStatus.value(QStringLiteral("scrollContentY")).toDouble()
+                             - imeUndoMaxY) < 1.5
+                 && imeUndoStatus.value(QStringLiteral("scrollContentY")).toDouble() > 0.0
                  && editorText() == scrollText,
              QJsonObject{{QStringLiteral("maxY"), imeMaxY},
                          {QStringLiteral("committed"), imeScrollStatus},
-                         {QStringLiteral("undo"), imeUndoStatus}});
+                         {QStringLiteral("undo"), imeUndoStatus},
+                         {QStringLiteral("undoMaxY"), imeUndoMaxY}});
 
     request(QStringLiteral("testSetText"), {{QStringLiteral("text"), scrollText}});
     request(QStringLiteral("testSetSelection"),
@@ -4017,6 +4026,295 @@ int main(int argc, char *argv[])
                  && editorText() == scrollText + QStringLiteral("x"),
              QJsonObject{{QStringLiteral("maxY"), pagedMaxY},
                          {QStringLiteral("after"), pagedIntoBlankInput}});
+
+    // --- 删除触顶自动滚动（严格镜像）与撤销/重做统一检查 ---
+    const QString scrollLine =
+        QStringLiteral("line-40 abcdefghij klmnopqrstuvwxyz\n");
+    const int scrollTopCursor = scrollText.indexOf(QStringLiteral("line-40"));
+    const int scrollSelectionStart = scrollText.indexOf(QStringLiteral("line-40"));
+    const int scrollSelectionEnd = scrollText.indexOf(QStringLiteral("line-50"));
+
+    // 退格使光标位于视口顶边之上：先由 QML 最小跟随滚到顶边，
+    // 再由统一检查把光标行锚定到视口距顶 2/3 处（下 1/3）。
+    request(QStringLiteral("testSetText"), {{QStringLiteral("text"), scrollText}});
+    request(QStringLiteral("testSetSelection"),
+            {{QStringLiteral("start"), scrollTopCursor},
+             {QStringLiteral("end"), scrollTopCursor}});
+    setScrollY(pageMaxY);
+    QThread::msleep(30);
+    keyPress({}, QStringLiteral("Backspace"));
+    QThread::msleep(80);
+    const QJsonObject deleteTopStatus = editorStatus();
+    const double deleteTopExpectedY =
+        deleteTopStatus.value(QStringLiteral("editorContentOffsetY")).toDouble()
+        + deleteTopStatus.value(QStringLiteral("cursorRectY")).toDouble()
+        - deleteTopStatus.value(QStringLiteral("scrollViewportHeight")).toDouble() * 2.0 / 3.0;
+    const double deleteTopMaxY =
+        deleteTopStatus.value(QStringLiteral("scrollContentHeight")).toDouble()
+        - deleteTopStatus.value(QStringLiteral("scrollViewportHeight")).toDouble();
+    addCheck(checks, details, QStringLiteral("deleteTouchTopAnchorsToLowerThird"),
+             deleteTopStatus.value(QStringLiteral("textLength")).toInt()
+                    == scrollEndCursor - 1
+                 && deleteTopStatus.value(QStringLiteral("cursorPosition")).toInt()
+                    == scrollTopCursor - 1
+                 && deleteTopExpectedY > 50.0
+                 && std::abs(deleteTopStatus.value(QStringLiteral("scrollContentY")).toDouble()
+                             - deleteTopExpectedY) < 3.0
+                 && deleteTopStatus.value(QStringLiteral("scrollContentY")).toDouble()
+                    < deleteTopMaxY,
+             QJsonObject{{QStringLiteral("expectedY"), deleteTopExpectedY},
+                         {QStringLiteral("maxY"), deleteTopMaxY},
+                         {QStringLiteral("status"), deleteTopStatus}});
+
+    // 间歇式：锚定后继续退格不重复触发；重新让光标越过顶边才再次触发。
+    const double deleteAnchorY =
+        deleteTopStatus.value(QStringLiteral("scrollContentY")).toDouble();
+    keyPress({}, QStringLiteral("Backspace"));
+    QThread::msleep(60);
+    keyPress({}, QStringLiteral("Backspace"));
+    QThread::msleep(60);
+    const QJsonObject deleteNonTriggerStatus = editorStatus();
+    setScrollY(pageMaxY);
+    QThread::msleep(30);
+    const QJsonObject deleteReCrossStatus = editorStatus();
+    keyPress({}, QStringLiteral("Backspace"));
+    QThread::msleep(80);
+    const QJsonObject deleteReTriggerStatus = editorStatus();
+    const double deleteReTriggerExpectedY =
+        deleteReTriggerStatus.value(QStringLiteral("editorContentOffsetY")).toDouble()
+        + deleteReTriggerStatus.value(QStringLiteral("cursorRectY")).toDouble()
+        - deleteReTriggerStatus.value(QStringLiteral("scrollViewportHeight")).toDouble()
+            * 2.0 / 3.0;
+    addCheck(checks, details, QStringLiteral("deleteTopScrollIsIntermittent"),
+             std::abs(deleteNonTriggerStatus.value(QStringLiteral("scrollContentY")).toDouble()
+                      - deleteAnchorY) < 1.5
+                 && deleteReCrossStatus.value(QStringLiteral("scrollContentY")).toDouble()
+                    > deleteAnchorY + 100.0
+                 && std::abs(deleteReTriggerStatus.value(QStringLiteral("scrollContentY")).toDouble()
+                             - deleteReTriggerExpectedY) < 3.0,
+             QJsonObject{{QStringLiteral("anchorY"), deleteAnchorY},
+                         {QStringLiteral("nonTrigger"), deleteNonTriggerStatus},
+                         {QStringLiteral("reCross"), deleteReCrossStatus},
+                         {QStringLiteral("reTrigger"), deleteReTriggerStatus},
+                         {QStringLiteral("expectedY"), deleteReTriggerExpectedY}});
+
+    // 光标位于文档开头时退格不改变文本：统一检查 early return 不触发
+    // 锚定，仅保留 QML 最小可见跟随（光标回到视口内）。
+    request(QStringLiteral("testSetText"), {{QStringLiteral("text"), scrollText}});
+    request(QStringLiteral("testSetSelection"),
+            {{QStringLiteral("start"), 0}, {QStringLiteral("end"), 0}});
+    setScrollY(pageMaxY);
+    QThread::msleep(30);
+    const QJsonObject startBeforeDelete = editorStatus();
+    keyPress({}, QStringLiteral("Backspace"));
+    QThread::msleep(80);
+    const QJsonObject startAfterDelete = editorStatus();
+    addCheck(checks, details, QStringLiteral("deleteAtDocumentStartDoesNotScroll"),
+             startAfterDelete.value(QStringLiteral("textLength")).toInt()
+                    == startBeforeDelete.value(QStringLiteral("textLength")).toInt()
+                 && std::abs(startAfterDelete.value(QStringLiteral("scrollContentY")).toDouble())
+                        < 1.5,
+             QJsonObject{{QStringLiteral("before"), startBeforeDelete},
+                         {QStringLiteral("after"), startAfterDelete}});
+
+    // 带选区删除：光标落在选区起点，越过视口顶边时触发同一锚定。
+    request(QStringLiteral("testSetText"), {{QStringLiteral("text"), scrollText}});
+    request(QStringLiteral("testSetSelection"),
+            {{QStringLiteral("start"), scrollSelectionStart},
+             {QStringLiteral("end"), scrollSelectionEnd}});
+    setScrollY(pageMaxY);
+    QThread::msleep(30);
+    keyPress({}, QStringLiteral("Delete"));
+    QThread::msleep(80);
+    const QJsonObject selectionDeleteStatus = editorStatus();
+    const double selectionDeleteExpectedY =
+        selectionDeleteStatus.value(QStringLiteral("editorContentOffsetY")).toDouble()
+        + selectionDeleteStatus.value(QStringLiteral("cursorRectY")).toDouble()
+        - selectionDeleteStatus.value(QStringLiteral("scrollViewportHeight")).toDouble()
+            * 2.0 / 3.0;
+    addCheck(checks, details, QStringLiteral("selectionDeleteAboveTopAnchors"),
+             selectionDeleteStatus.value(QStringLiteral("cursorPosition")).toInt()
+                    == scrollSelectionStart
+                 && selectionDeleteStatus.value(QStringLiteral("textLength")).toInt()
+                    == scrollEndCursor - (scrollSelectionEnd - scrollSelectionStart)
+                 && std::abs(selectionDeleteStatus.value(QStringLiteral("scrollContentY")).toDouble()
+                             - selectionDeleteExpectedY) < 3.0,
+             QJsonObject{{QStringLiteral("expectedY"), selectionDeleteExpectedY},
+                         {QStringLiteral("status"), selectionDeleteStatus}});
+
+    // 命令面板“删除整行”同样纳入触顶检查。
+    request(QStringLiteral("testSetText"), {{QStringLiteral("text"), scrollText}});
+    request(QStringLiteral("testSetSelection"),
+            {{QStringLiteral("start"), scrollTopCursor},
+             {QStringLiteral("end"), scrollTopCursor}});
+    setScrollY(pageMaxY);
+    QThread::msleep(30);
+    execute(QStringLiteral("deleteLine"));
+    QThread::msleep(80);
+    const QJsonObject deleteLineStatus = editorStatus();
+    const double deleteLineExpectedY =
+        deleteLineStatus.value(QStringLiteral("editorContentOffsetY")).toDouble()
+        + deleteLineStatus.value(QStringLiteral("cursorRectY")).toDouble()
+        - deleteLineStatus.value(QStringLiteral("scrollViewportHeight")).toDouble() * 2.0 / 3.0;
+    addCheck(checks, details, QStringLiteral("deleteLineCommandScrolls"),
+             deleteLineStatus.value(QStringLiteral("cursorPosition")).toInt()
+                    == scrollTopCursor
+                 && deleteLineStatus.value(QStringLiteral("textLength")).toInt()
+                    == scrollEndCursor - scrollLine.size()
+                 && std::abs(deleteLineStatus.value(QStringLiteral("scrollContentY")).toDouble()
+                             - deleteLineExpectedY) < 3.0,
+             QJsonObject{{QStringLiteral("expectedY"), deleteLineExpectedY},
+                         {QStringLiteral("status"), deleteLineStatus}});
+
+    // 剪切（Ctrl+X 带选区）触发同一检查。
+    request(QStringLiteral("testSetText"), {{QStringLiteral("text"), scrollText}});
+    request(QStringLiteral("testSetSelection"),
+            {{QStringLiteral("start"), scrollSelectionStart},
+             {QStringLiteral("end"), scrollSelectionEnd}});
+    setClipboard(QString());
+    setScrollY(pageMaxY);
+    QThread::msleep(30);
+    keyPress({}, QStringLiteral("X"), false, QStringLiteral("ctrl"));
+    QThread::msleep(80);
+    const QJsonObject cutStatus = editorStatus();
+    const double cutExpectedY =
+        cutStatus.value(QStringLiteral("editorContentOffsetY")).toDouble()
+        + cutStatus.value(QStringLiteral("cursorRectY")).toDouble()
+        - cutStatus.value(QStringLiteral("scrollViewportHeight")).toDouble() * 2.0 / 3.0;
+    addCheck(checks, details, QStringLiteral("cutSelectionScrolls"),
+             cutStatus.value(QStringLiteral("textLength")).toInt()
+                    == scrollEndCursor - (scrollSelectionEnd - scrollSelectionStart)
+                 && std::abs(cutStatus.value(QStringLiteral("scrollContentY")).toDouble()
+                             - cutExpectedY) < 3.0,
+             QJsonObject{{QStringLiteral("expectedY"), cutExpectedY},
+                         {QStringLiteral("status"), cutStatus}});
+
+    // Ctrl+Backspace 词删除（TextEdit 原生处理）同样纳入检查。
+    request(QStringLiteral("testSetText"), {{QStringLiteral("text"), scrollText}});
+    request(QStringLiteral("testSetSelection"),
+            {{QStringLiteral("start"), scrollTopCursor + 20},
+             {QStringLiteral("end"), scrollTopCursor + 20}});
+    setScrollY(pageMaxY);
+    QThread::msleep(30);
+    const QJsonObject wordBeforeStatus = editorStatus();
+    keyPress({}, QStringLiteral("Backspace"), false, QStringLiteral("ctrl"));
+    QThread::msleep(80);
+    const QJsonObject wordDeleteStatus = editorStatus();
+    const double wordDeleteExpectedY =
+        wordDeleteStatus.value(QStringLiteral("editorContentOffsetY")).toDouble()
+        + wordDeleteStatus.value(QStringLiteral("cursorRectY")).toDouble()
+        - wordDeleteStatus.value(QStringLiteral("scrollViewportHeight")).toDouble() * 2.0 / 3.0;
+    addCheck(checks, details, QStringLiteral("wordDeleteScrolls"),
+             wordDeleteStatus.value(QStringLiteral("textLength")).toInt()
+                    < wordBeforeStatus.value(QStringLiteral("textLength")).toInt()
+                 && std::abs(wordDeleteStatus.value(QStringLiteral("scrollContentY")).toDouble()
+                             - wordDeleteExpectedY) < 3.0,
+             QJsonObject{{QStringLiteral("before"), wordBeforeStatus},
+                         {QStringLiteral("expectedY"), wordDeleteExpectedY},
+                         {QStringLiteral("after"), wordDeleteStatus}});
+
+    // 撤销/重做与删除/输入共用同一套检查：撤销大段粘贴后光标越过顶边
+    // 按删除规则锚定；重做恢复粘贴后光标越过底边按输入规则锚定。
+    QString scrollPasteBlock;
+    scrollPasteBlock.reserve(1024);
+    for (int i = 0; i < 20; ++i) {
+        scrollPasteBlock += QStringLiteral("paste-line-%1 abcdefghij klmnopqrstuvwxyz\n")
+                                .arg(i, 2, 10, QLatin1Char('0'));
+    }
+    request(QStringLiteral("testSetText"), {{QStringLiteral("text"), scrollText}});
+    request(QStringLiteral("testSetSelection"),
+            {{QStringLiteral("start"), scrollTopCursor},
+             {QStringLiteral("end"), scrollTopCursor}});
+    setClipboard(scrollPasteBlock);
+    setScrollY(0);
+    QThread::msleep(30);
+    keyPress({}, QStringLiteral("V"), false, QStringLiteral("ctrl"));
+    QThread::msleep(80);
+    const QJsonObject pastedStatus = editorStatus();
+    setScrollY(pageMaxY);
+    QThread::msleep(30);
+    request(QStringLiteral("testUndo"));
+    QThread::msleep(80);
+    const QJsonObject pasteUndoStatus = editorStatus();
+    // 智能整行粘贴为一次撤销；Qt 撤销后光标落在何处（插入点或文档开头）
+    // 不预设，按实际光标位置计算顶边锚定期望（文档开头时自然夹取到 0）。
+    const double pasteUndoExpectedY = qMax(
+        0.0, pasteUndoStatus.value(QStringLiteral("editorContentOffsetY")).toDouble()
+                 + pasteUndoStatus.value(QStringLiteral("cursorRectY")).toDouble()
+                 - pasteUndoStatus.value(QStringLiteral("scrollViewportHeight")).toDouble()
+                     * 2.0 / 3.0);
+    addCheck(checks, details, QStringLiteral("undoJumpsAboveTopAnchorsLikeDelete"),
+             pasteUndoStatus.value(QStringLiteral("textLength")).toInt() == scrollEndCursor
+                 && std::abs(pasteUndoStatus.value(QStringLiteral("scrollContentY")).toDouble()
+                             - pasteUndoExpectedY) < 3.0
+                 && editorText() == scrollText,
+             QJsonObject{{QStringLiteral("pasted"), pastedStatus},
+                         {QStringLiteral("expectedY"), pasteUndoExpectedY},
+                         {QStringLiteral("undo"), pasteUndoStatus}});
+
+    request(QStringLiteral("testRedo"));
+    QThread::msleep(80);
+    const QJsonObject pasteRedoStatus = editorStatus();
+    const double pasteRedoMaxY =
+        pasteRedoStatus.value(QStringLiteral("scrollContentHeight")).toDouble()
+        - pasteRedoStatus.value(QStringLiteral("scrollViewportHeight")).toDouble();
+    // 重做恢复粘贴后光标越过底边，按输入规则锚定到视口上 1/3。
+    const double pasteRedoExpectedY = qBound(
+        0.0, pasteRedoStatus.value(QStringLiteral("editorContentOffsetY")).toDouble()
+                 + pasteRedoStatus.value(QStringLiteral("cursorRectY")).toDouble()
+                 - pasteRedoStatus.value(QStringLiteral("scrollViewportHeight")).toDouble()
+                     / 3.0,
+        pasteRedoMaxY);
+    addCheck(checks, details, QStringLiteral("redoJumpsBelowBottomAnchorsLikeInput"),
+             pasteRedoStatus.value(QStringLiteral("textLength")).toInt()
+                    == scrollEndCursor + scrollPasteBlock.size()
+                 && std::abs(pasteRedoStatus.value(QStringLiteral("scrollContentY")).toDouble()
+                             - pasteRedoExpectedY) < 3.0
+                 && pasteRedoStatus.value(QStringLiteral("scrollContentY")).toDouble()
+                    < pasteRedoMaxY,
+             QJsonObject{{QStringLiteral("expectedY"), pasteRedoExpectedY},
+                         {QStringLiteral("maxY"), pasteRedoMaxY},
+                         {QStringLiteral("redo"), pasteRedoStatus}});
+
+    // 末尾删除（视图位于 max、光标在上 1/3）：弹性底部缓冲保持视图不动，
+    // 光标随删除自然上移，避免 Flickable 钳制导致“触顶失败”。
+    request(QStringLiteral("testSetText"), {{QStringLiteral("text"), scrollText}});
+    request(QStringLiteral("testSetSelection"),
+            {{QStringLiteral("start"), scrollEndCursor},
+             {QStringLiteral("end"), scrollEndCursor}});
+    setScrollY(0);
+    QThread::msleep(50);
+    keyPress(QStringLiteral("x"));
+    QThread::msleep(80);
+    const QJsonObject endDeleteBase = editorStatus();
+    const double endDeleteBaseY =
+        endDeleteBase.value(QStringLiteral("scrollContentY")).toDouble();
+    const double endDeleteBaseScreenY =
+        endDeleteBase.value(QStringLiteral("editorContentOffsetY")).toDouble()
+        + endDeleteBase.value(QStringLiteral("cursorRectY")).toDouble()
+        - endDeleteBaseY;
+    for (int i = 0; i < 40; ++i) {
+        keyPress({}, QStringLiteral("Backspace"));
+        QThread::msleep(16);
+    }
+    QThread::msleep(80);
+    const QJsonObject endDeleteHeld = editorStatus();
+    const double endDeleteHeldScreenY =
+        endDeleteHeld.value(QStringLiteral("editorContentOffsetY")).toDouble()
+        + endDeleteHeld.value(QStringLiteral("cursorRectY")).toDouble()
+        - endDeleteHeld.value(QStringLiteral("scrollContentY")).toDouble();
+    addCheck(checks, details, QStringLiteral("deleteAtEndHoldsViewWhileCursorAscends"),
+             std::abs(endDeleteHeld.value(QStringLiteral("scrollContentY")).toDouble()
+                      - endDeleteBaseY) < 1.5
+                 && endDeleteHeldScreenY < endDeleteBaseScreenY - 10.0
+                 && endDeleteHeld.value(QStringLiteral("textLength")).toInt()
+                    == scrollEndCursor + 1 - 40
+                 && endDeleteHeld.value(QStringLiteral("cursorPosition")).toInt()
+                    == scrollEndCursor + 1 - 40,
+             QJsonObject{{QStringLiteral("baseY"), endDeleteBaseY},
+                         {QStringLiteral("baseScreenY"), endDeleteBaseScreenY},
+                         {QStringLiteral("held"), endDeleteHeld},
+                         {QStringLiteral("heldScreenY"), endDeleteHeldScreenY}});
 
     // --- CJK Fix: Performance Scaling Record ---
     const QString perfSmall = buildPerfDocument(20000);

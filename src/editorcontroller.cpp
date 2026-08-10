@@ -1595,8 +1595,8 @@ void EditorController::buildCommandHandlers()
             sendResponse(r.socket, response, r.startedNs, r.requestId);
         }}},
         {QStringLiteral("testUndo"), {Gate::Test, [this](const DispatchRequest &r) {
-            // 与真实 Ctrl+Z 走同一路径：输入触发的自动滚动一并回滚。
-            const bool invoked = m_commands ? m_commands->undoWithScrollRollback() : false;
+            // 与真实 Ctrl+Z 走同一路径：撤销视为普通编辑，共用自动滚动检查。
+            const bool invoked = m_commands ? m_commands->performUndo() : false;
             QJsonObject response = statusObject();
             response.insert(QStringLiteral("command"), r.command);
             response.insert(QStringLiteral("invoked"), invoked);
@@ -1604,7 +1604,8 @@ void EditorController::buildCommandHandlers()
             sendResponse(r.socket, response, r.startedNs, r.requestId);
         }}},
         {QStringLiteral("testRedo"), {Gate::Test, [this](const DispatchRequest &r) {
-            const bool invoked = QMetaObject::invokeMethod(m_editor, "redo");
+            // 与真实重做快捷键走同一路径：重做视为普通编辑，共用自动滚动检查。
+            const bool invoked = m_commands ? m_commands->performRedo() : false;
             QJsonObject response = statusObject();
             response.insert(QStringLiteral("command"), r.command);
             response.insert(QStringLiteral("invoked"), invoked);
@@ -3193,8 +3194,6 @@ QJsonObject EditorController::statusObject() const
                       static_cast<int>(m_window->rendererInterface()->graphicsApi()));
         status.insert(QStringLiteral("verticalScrollBarVisible"),
                       m_window->property("verticalScrollBarVisible").toBool());
-        status.insert(QStringLiteral("inputScrollRestoreInProgress"),
-                      m_window->property("inputScrollRestoreInProgress").toBool());
         if (m_commands) {
             const QVariantMap scrollDiagnostics = m_commands->inputScrollDiagnostics();
             for (auto it = scrollDiagnostics.constBegin();

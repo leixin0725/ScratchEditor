@@ -40,7 +40,8 @@ public:
     void resetShortcuts();
     bool execute(const QString &commandId);
     bool handleEditorEvent(QEvent *event);
-    bool undoWithScrollRollback();
+    bool performUndo();
+    bool performRedo();
     QVariantMap inputScrollDiagnostics() const;
 
     bool findNext(const QString &query, bool caseSensitive, bool backwards);
@@ -142,18 +143,12 @@ private:
     void queueInputAutoScrollCheck();
     void checkInputAutoScroll();
 
-    struct InputScrollRecord {
-        qreal preScrollY = 0.0;
-        bool didScroll = false;
-    };
-
     struct InputScrollDiagnostics {
         QString lastKind;
         qint64 inputCount = 0;
         qint64 checkCount = 0;
         qint64 triggerCount = 0;
         qint64 overrideCount = 0;
-        qreal preScrollY = 0.0;
         qreal currentY = 0.0;
         qreal cursorTop = 0.0;
         qreal cursorBottom = 0.0;
@@ -161,11 +156,14 @@ private:
         qreal maxY = 0.0;
         qreal targetY = 0.0;
         qreal settleY = 0.0;
+        qreal heldY = 0.0;
         int preLength = -1;
         int docLength = -1;
         int cursorPosition = -1;
+        bool atStart = false;
         bool atEnd = false;
-        bool touched = false;
+        bool touchedTop = false;
+        bool touchedBottom = false;
         bool didScroll = false;
         bool overrideDetected = false;
     };
@@ -181,16 +179,16 @@ private:
         qreal maxY = 0.0;
         qreal targetY = 0.0;
         qreal settleY = 0.0;
+        qreal heldY = 0.0;
         int preLen = -1;
         int docLen = -1;
         int cursorPos = -1;
-        int recordCount = -1;
+        bool atStart = false;
         bool atEnd = false;
-        bool touched = false;
+        bool touchedTop = false;
+        bool touchedBottom = false;
         bool didScroll = false;
         bool earlyReturn = false;
-        bool pending = false;
-        bool restoreInProgress = false;
     };
 
     void recordInputScrollEvent(InputScrollEvent event);
@@ -215,15 +213,11 @@ private:
     bool m_selectionDragPreviousKeepMouseGrab = false;
     QCursor m_selectionDragOriginalCursor;
     std::optional<FormatUndoSnapshot> m_formatUndoSnapshot;
-    QVector<InputScrollRecord> m_inputScrollHistory;
-    bool m_inputAutoScrollPending = false;
     bool m_inputAutoScrollCheckQueued = false;
-    bool m_scrollRestoreUndoInProgress = false;
-    qreal m_inputPreScrollY = 0.0;
     int m_inputPreTextLength = -1;
+    qreal m_inputPreScrollY = 0.0;
     InputScrollDiagnostics m_inputScrollDiag;
     QVector<InputScrollEvent> m_inputScrollEvents;
     qint64 m_inputScrollEventSeq = 0;
-    qint64 m_inputScrollClearCount = 0;
     qint64 m_inputScrollEarlyReturnCount = 0;
 };
