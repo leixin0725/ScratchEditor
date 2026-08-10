@@ -52,6 +52,7 @@
     "monospaceFamily": "Cascadia Mono",
     "title": 13,
     "heading": 11,
+    "dialogTitle": 12,
     "normal": 10,
     "small": 9,
     "caption": 8,

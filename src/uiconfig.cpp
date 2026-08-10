@@ -223,6 +223,7 @@ UiConfig UiConfig::defaults()
     put({"fonts", "monospaceFamily"}, QStringLiteral("Cascadia Mono"));
     put({"fonts", "title"}, 13);
     put({"fonts", "heading"}, 11);
+    put({"fonts", "dialogTitle"}, 12);
     put({"fonts", "normal"}, 10);
     put({"fonts", "small"}, 9);
     put({"fonts", "caption"}, 8);
@@ -449,6 +450,7 @@ QVariantMap UiConfig::sanitize(const QVariantMap &input)
     fixString({"fonts", "monospaceFamily"});
     fixInt({"fonts", "title"}, 6, 72);
     fixInt({"fonts", "heading"}, 6, 72);
+    fixInt({"fonts", "dialogTitle"}, 6, 72);
     fixInt({"fonts", "normal"}, 6, 72);
     fixInt({"fonts", "small"}, 6, 72);
     fixInt({"fonts", "caption"}, 6, 72);

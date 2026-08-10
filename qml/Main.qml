@@ -1323,6 +1323,7 @@ Window {
         visible: controller.historyLoadConfirmationVisible
         color: root.overlayColor
         Rectangle {
+            id: loadConfirmationPanel
             anchors.centerIn: parent
             width: Math.min(uiConfig.panels.dialog.maxWidth,
                             parent.width - uiConfig.panels.dialog.widthInset)
@@ -1330,12 +1331,48 @@ Window {
             radius: uiConfig.layout.radiusLarge
             color: root.themePanelColor
             border.color: root.themeBorderColor
+            // 0 = 取消，1 = 载入；默认焦点在确认按钮。
+            property int focusedButton: 1
+            focus: true
+
+            onVisibleChanged: {
+                if (visible) {
+                    focusedButton = 1
+                    forceActiveFocus()
+                } else if (historyPanelLoader.item) {
+                    // 对话框关闭后把焦点还给历史面板搜索框。
+                    historyPanelLoader.item.focusQuery()
+                }
+            }
+
+            function activateFocused() {
+                if (focusedButton === 1) {
+                    controller.confirmLoadClipboardHistory()
+                } else {
+                    controller.cancelLoadClipboardHistory()
+                }
+            }
+
+            Keys.onLeftPressed: function(event) {
+                focusedButton = focusedButton === 1 ? 0 : 1
+                event.accepted = true
+            }
+            Keys.onRightPressed: function(event) {
+                focusedButton = focusedButton === 1 ? 0 : 1
+                event.accepted = true
+            }
+            Keys.onReturnPressed: function(event) { activateFocused(); event.accepted = true }
+            Keys.onEnterPressed: function(event) { activateFocused(); event.accepted = true }
+            Keys.onSpacePressed: function(event) { activateFocused(); event.accepted = true }
+
             Text {
                 anchors.top: parent.top
                 anchors.topMargin: uiConfig.panels.dialog.titleTop
                 anchors.horizontalCenter: parent.horizontalCenter
                 text: "放弃当前修改并载入历史？"
-                color: root.themeTextColor; font.family: root.uiFontFamily
+                color: root.themeTextColor
+                font.family: root.uiFontFamily
+                font.pointSize: uiConfig.fonts.dialogTitle
             }
             Rectangle {
                 x: uiConfig.panels.dialog.buttonSide
@@ -1343,8 +1380,14 @@ Window {
                 width: uiConfig.panels.dialog.buttonWidth
                 height: uiConfig.layout.controlHeightNormal
                 radius: uiConfig.layout.radiusNormal
-                color: root.themeButtonColor
-                Text { anchors.centerIn: parent; text: "取消"; color: root.themeTextColor }
+                color: loadConfirmationPanel.focusedButton === 0
+                       ? root.themeAccentColor : root.themeButtonColor
+                Text {
+                    anchors.centerIn: parent
+                    text: "取消"
+                    color: loadConfirmationPanel.focusedButton === 0
+                           ? root.panelAccentTextColor : root.themeTextColor
+                }
                 MouseArea { anchors.fill: parent; onClicked: controller.cancelLoadClipboardHistory() }
             }
             Rectangle {
@@ -1354,8 +1397,14 @@ Window {
                 width: uiConfig.panels.dialog.buttonWidth
                 height: uiConfig.layout.controlHeightNormal
                 radius: uiConfig.layout.radiusNormal
-                color: root.themeAccentColor
-                Text { anchors.centerIn: parent; text: "载入"; color: root.themeAccentTextColor }
+                color: loadConfirmationPanel.focusedButton === 1
+                       ? root.themeAccentColor : root.themeButtonColor
+                Text {
+                    anchors.centerIn: parent
+                    text: "载入"
+                    color: loadConfirmationPanel.focusedButton === 1
+                           ? root.panelAccentTextColor : root.themeTextColor
+                }
                 MouseArea { anchors.fill: parent; onClicked: controller.confirmLoadClipboardHistory() }
             }
         }
@@ -1367,6 +1416,7 @@ Window {
         visible: controller.historyClearConfirmationVisible
         color: root.overlayColor
         Rectangle {
+            id: clearConfirmationPanel
             anchors.centerIn: parent
             width: Math.min(uiConfig.panels.dialog.maxWidth,
                             parent.width - uiConfig.panels.dialog.widthInset)
@@ -1374,12 +1424,48 @@ Window {
             radius: uiConfig.layout.radiusLarge
             color: root.themePanelColor
             border.color: root.themeBorderColor
+            // 0 = 取消，1 = 清空；默认焦点在确认按钮。
+            property int focusedButton: 1
+            focus: true
+
+            onVisibleChanged: {
+                if (visible) {
+                    focusedButton = 1
+                    forceActiveFocus()
+                } else if (historyPanelLoader.item) {
+                    // 对话框关闭后把焦点还给历史面板搜索框。
+                    historyPanelLoader.item.focusQuery()
+                }
+            }
+
+            function activateFocused() {
+                if (focusedButton === 1) {
+                    controller.confirmClearClipboardHistory()
+                } else {
+                    controller.cancelClearClipboardHistory()
+                }
+            }
+
+            Keys.onLeftPressed: function(event) {
+                focusedButton = focusedButton === 1 ? 0 : 1
+                event.accepted = true
+            }
+            Keys.onRightPressed: function(event) {
+                focusedButton = focusedButton === 1 ? 0 : 1
+                event.accepted = true
+            }
+            Keys.onReturnPressed: function(event) { activateFocused(); event.accepted = true }
+            Keys.onEnterPressed: function(event) { activateFocused(); event.accepted = true }
+            Keys.onSpacePressed: function(event) { activateFocused(); event.accepted = true }
+
             Text {
                 anchors.top: parent.top
                 anchors.topMargin: uiConfig.panels.dialog.titleTop
                 anchors.horizontalCenter: parent.horizontalCenter
                 text: "确认清空全部剪贴板历史？"
-                color: root.themeTextColor; font.family: root.uiFontFamily
+                color: root.themeTextColor
+                font.family: root.uiFontFamily
+                font.pointSize: uiConfig.fonts.dialogTitle
             }
             Rectangle {
                 x: uiConfig.panels.dialog.buttonSide
@@ -1387,8 +1473,14 @@ Window {
                 width: uiConfig.panels.dialog.buttonWidth
                 height: uiConfig.layout.controlHeightNormal
                 radius: uiConfig.layout.radiusNormal
-                color: root.themeButtonColor
-                Text { anchors.centerIn: parent; text: "取消"; color: root.themeTextColor }
+                color: clearConfirmationPanel.focusedButton === 0
+                       ? root.themeAccentColor : root.themeButtonColor
+                Text {
+                    anchors.centerIn: parent
+                    text: "取消"
+                    color: clearConfirmationPanel.focusedButton === 0
+                           ? root.panelAccentTextColor : root.themeTextColor
+                }
                 MouseArea { anchors.fill: parent; onClicked: controller.cancelClearClipboardHistory() }
             }
             Rectangle {
@@ -1398,11 +1490,13 @@ Window {
                 width: uiConfig.panels.dialog.buttonWidth
                 height: uiConfig.layout.controlHeightNormal
                 radius: uiConfig.layout.radiusNormal
-                color: root.themeDangerColor
+                color: clearConfirmationPanel.focusedButton === 1
+                       ? root.themeAccentColor : root.themeDangerColor
                 Text {
                     anchors.centerIn: parent
                     text: "清空"
-                    color: root.themeDangerTextColor
+                    color: clearConfirmationPanel.focusedButton === 1
+                           ? root.panelAccentTextColor : root.themeDangerTextColor
                 }
                 MouseArea { anchors.fill: parent; onClicked: controller.confirmClearClipboardHistory() }
             }
