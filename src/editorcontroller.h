@@ -35,6 +35,7 @@ class EditorCommandRegistry;
 class ExternalFileSession;
 class MarkdownHighlighter;
 class MarkdownStyle;
+class UiConfig;
 
 class EditorController final : public QObject, public QAbstractNativeEventFilter
 {
@@ -77,6 +78,7 @@ class EditorController final : public QObject, public QAbstractNativeEventFilter
     Q_PROPERTY(QString themeAccentTextColor READ themeAccentTextColor NOTIFY markdownStyleChanged)
     Q_PROPERTY(QString markdownStyleFile READ markdownStyleFile CONSTANT)
     Q_PROPERTY(bool markdownStyleLoaded READ markdownStyleLoaded NOTIFY markdownStyleChanged)
+    Q_PROPERTY(QVariant uiConfig READ uiConfig CONSTANT)
 
 public:
     explicit EditorController(bool testMode, QElapsedTimer *startupTimer,
@@ -128,6 +130,7 @@ public:
     QString themeAccentTextColor() const;
     QString markdownStyleFile() const;
     bool markdownStyleLoaded() const;
+    QVariant uiConfig() const;
 
     Q_INVOKABLE void registerWindow(QQuickWindow *window);
     Q_INVOKABLE void registerEditor(QObject *editor);
@@ -285,6 +288,7 @@ private:
     std::unique_ptr<ClipboardHistoryStore> m_clipboardHistoryStore;
     std::unique_ptr<ExternalFileSession> m_externalFileSession;
     std::unique_ptr<MarkdownStyle> m_markdownStyle;
+    std::unique_ptr<UiConfig> m_uiConfig;
     QFileSystemWatcher m_markdownStyleWatcher;
     QTimer m_markdownStyleReloadTimer;
     QPointer<MarkdownHighlighter> m_markdownHighlighter;

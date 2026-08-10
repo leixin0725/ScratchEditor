@@ -7,6 +7,7 @@
 #include <memory>
 
 class QSettings;
+class UiConfig;
 
 class AppSettings final
 {
@@ -25,7 +26,9 @@ public:
         int maxWidth = 360;
     };
 
-    explicit AppSettings(bool testMode);
+    // uiConfig 提供外观/状态面板/历史卡片等用户设置的默认值（单一来源）；
+    // 传入 nullptr 时回退到本类内置常量。
+    explicit AppSettings(bool testMode, const UiConfig *uiConfig = nullptr);
     ~AppSettings();
 
     QString fileName() const;
@@ -54,15 +57,17 @@ public:
     void resetAll();
 
 private:
-    static constexpr int CurrentSchemaVersion = 1;
+    static constexpr int CurrentSchemaVersion = 2;
     static QString settingsPath(bool testMode);
     static QString defaultFontFamily();
     static bool validTheme(const QString &theme);
     static bool validFontFamily(const QString &fontFamily);
     void initialize(bool allowLegacyMigration);
     void migrateLegacySettings();
+    void migrateSchemaV1Keys();
     void writeSchemaVersion();
     void sync();
 
     std::unique_ptr<QSettings> m_settings;
+    const UiConfig *m_uiConfig = nullptr;
 };

@@ -9,6 +9,8 @@
 namespace WindowPlacement {
 
 // 参考窗口与编辑器窗口之间的锚定间距（逻辑像素）。
+// 应用运行时会从 config/ui.json 的 placement.anchorGap 传入实际值，
+// 此常量仅作为算法默认值与单元测试基线。
 inline constexpr int AnchorGap = 16;
 
 // 把 Windows 原生物理像素矩形映射到 Qt 的多屏逻辑坐标。屏幕全局原点
@@ -34,6 +36,7 @@ QRect placeNearWindow(const QSize &rememberedSize,
                       const QSize &minimumSize,
                       const QVector<QRect> &screens,
                       const std::optional<QRect> &referenceRect,
-                      const QRect &obstacleRect);
+                      const QRect &obstacleRect,
+                      int anchorGap = AnchorGap);
 
 } // namespace WindowPlacement

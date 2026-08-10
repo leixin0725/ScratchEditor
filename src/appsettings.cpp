@@ -1,5 +1,7 @@
 #include "appsettings.h"
 
+#include "uiconfig.h"
+
 #include <QDir>
 #include <QFileInfo>
 #include <QFontDatabase>
@@ -16,24 +18,15 @@ constexpr auto schemaVersionKey = "meta/schemaVersion";
 constexpr auto geometryKey = "window/geometry";
 constexpr auto externalGeometryKey = "window/externalGeometry";
 constexpr auto themeKey = "appearance/theme";
-constexpr auto fontFamilyKey = "editor/fontFamily";
-constexpr auto fontPointSizeKey = "editor/fontPointSize";
-constexpr auto animationsEnabledKey = "ui/animationsEnabled";
+constexpr auto fontFamilyKey = "appearance/fontFamily";
+constexpr auto fontPointSizeKey = "appearance/fontPointSize";
+constexpr auto animationsEnabledKey = "appearance/animationsEnabled";
 constexpr auto statusPanelFontSizeKey = "statusPanel/fontSize";
 constexpr auto statusPanelShowDelayMsKey = "statusPanel/showDelayMs";
 constexpr auto statusPanelHideDelayMsKey = "statusPanel/hideDelayMs";
 constexpr auto statusPanelMaxWidthKey = "statusPanel/maxWidth";
 constexpr auto clipboardHistoryCardHeightKey = "clipboardHistory/cardHeight";
 constexpr auto defaultTheme = "dark";
-constexpr int defaultFontPointSize = 13;
-constexpr bool defaultAnimationsEnabled = true;
-constexpr int defaultStatusPanelFontSize = 10;
-constexpr int defaultStatusPanelShowDelayMs = 300;
-constexpr int defaultStatusPanelHideDelayMs = 250;
-constexpr int defaultStatusPanelMaxWidth = 360;
-constexpr int defaultClipboardHistoryCardHeight = 58;
-constexpr int minClipboardHistoryCardHeight = 44;
-constexpr int maxClipboardHistoryCardHeight = 200;
 
 QString shortcutKey(const QString &commandId)
 {
@@ -42,7 +35,8 @@ QString shortcutKey(const QString &commandId)
 
 } // namespace
 
-AppSettings::AppSettings(bool testMode)
+AppSettings::AppSettings(bool testMode, const UiConfig *uiConfig)
+    : m_uiConfig(uiConfig)
 {
     const QString path = settingsPath(testMode);
     const QFileInfo info(path);
@@ -136,8 +130,14 @@ void AppSettings::resetShortcuts()
 
 AppSettings::Appearance AppSettings::appearance() const
 {
-    Appearance result{QString::fromLatin1(defaultTheme), defaultFontFamily(),
-                      defaultFontPointSize, defaultAnimationsEnabled};
+    const QString fallbackTheme =
+        m_uiConfig ? m_uiConfig->defaultTheme() : QString::fromLatin1(defaultTheme);
+    const int fallbackFontSize =
+        m_uiConfig ? m_uiConfig->editorDefaultFontSize() : 13;
+    const bool fallbackAnimations =
+        m_uiConfig ? m_uiConfig->defaultAnimationsEnabled() : true;
+    Appearance result{fallbackTheme, defaultFontFamily(), fallbackFontSize,
+                      fallbackAnimations};
     if (!m_settings) {
         return result;
     }
@@ -152,13 +152,15 @@ AppSettings::Appearance AppSettings::appearance() const
     if (validFontFamily(storedFamily)) {
         result.fontFamily = storedFamily;
     }
+    const int sizeMin = m_uiConfig ? m_uiConfig->editorFontSizeMin() : 9;
+    const int sizeMax = m_uiConfig ? m_uiConfig->editorFontSizeMax() : 24;
     const int storedSize = m_settings->value(QLatin1StringView(fontPointSizeKey),
-                                             defaultFontPointSize).toInt();
-    if (storedSize >= 9 && storedSize <= 24) {
+                                             fallbackFontSize).toInt();
+    if (storedSize >= sizeMin && storedSize <= sizeMax) {
         result.fontPointSize = storedSize;
     }
     result.animationsEnabled = m_settings->value(QLatin1StringView(animationsEnabledKey),
-                                                 defaultAnimationsEnabled).toBool();
+                                                 fallbackAnimations).toBool();
     return result;
 }
 
@@ -180,9 +182,12 @@ bool AppSettings::setAppearance(const QString &theme, const QString &fontFamily,
         }
         return false;
     }
-    if (fontPointSize < 9 || fontPointSize > 24) {
+    const int sizeMin = m_uiConfig ? m_uiConfig->editorFontSizeMin() : 9;
+    const int sizeMax = m_uiConfig ? m_uiConfig->editorFontSizeMax() : 24;
+    if (fontPointSize < sizeMin || fontPointSize > sizeMax) {
         if (errorMessage) {
-            *errorMessage = QStringLiteral("字号必须在 9 到 24 之间");
+            *errorMessage = QStringLiteral("字号必须在 %1 到 %2 之间")
+                                .arg(sizeMin).arg(sizeMax);
         }
         return false;
     }
@@ -205,6 +210,7 @@ void AppSettings::resetAppearance()
         return;
     }
     m_settings->remove(QStringLiteral("appearance"));
+    // 清理历史版本遗留的 editor/ui 段（schema 1 迁移后不应再出现）。
     m_settings->remove(QStringLiteral("editor"));
     m_settings->remove(QStringLiteral("ui"));
     writeSchemaVersion();
@@ -213,33 +219,45 @@ void AppSettings::resetAppearance()
 
 AppSettings::StatusPanel AppSettings::statusPanel() const
 {
-    StatusPanel result;
+    StatusPanel result{
+        m_uiConfig ? m_uiConfig->statusPanelDefaultFontSize() : 10,
+        m_uiConfig ? m_uiConfig->statusPanelDefaultShowDelayMs() : 300,
+        m_uiConfig ? m_uiConfig->statusPanelDefaultHideDelayMs() : 250,
+        m_uiConfig ? m_uiConfig->statusPanelDefaultMaxWidth() : 360};
     if (!m_settings) {
         return result;
     }
 
+    const int fontSizeMin = m_uiConfig ? m_uiConfig->statusPanelFontSizeMin() : 9;
+    const int fontSizeMax = m_uiConfig ? m_uiConfig->statusPanelFontSizeMax() : 24;
     const int storedFontSize =
         m_settings->value(QLatin1StringView(statusPanelFontSizeKey),
                           result.fontSize).toInt();
-    if (storedFontSize >= 9 && storedFontSize <= 24) {
+    if (storedFontSize >= fontSizeMin && storedFontSize <= fontSizeMax) {
         result.fontSize = storedFontSize;
     }
+    const int showMin = m_uiConfig ? m_uiConfig->statusPanelShowDelayMinMs() : 0;
+    const int showMax = m_uiConfig ? m_uiConfig->statusPanelShowDelayMaxMs() : 2000;
     const int storedShowDelayMs =
         m_settings->value(QLatin1StringView(statusPanelShowDelayMsKey),
                           result.showDelayMs).toInt();
-    if (storedShowDelayMs >= 0 && storedShowDelayMs <= 2000) {
+    if (storedShowDelayMs >= showMin && storedShowDelayMs <= showMax) {
         result.showDelayMs = storedShowDelayMs;
     }
+    const int hideMin = m_uiConfig ? m_uiConfig->statusPanelHideDelayMinMs() : 0;
+    const int hideMax = m_uiConfig ? m_uiConfig->statusPanelHideDelayMaxMs() : 3000;
     const int storedHideDelayMs =
         m_settings->value(QLatin1StringView(statusPanelHideDelayMsKey),
                           result.hideDelayMs).toInt();
-    if (storedHideDelayMs >= 0 && storedHideDelayMs <= 3000) {
+    if (storedHideDelayMs >= hideMin && storedHideDelayMs <= hideMax) {
         result.hideDelayMs = storedHideDelayMs;
     }
+    const int widthMin = m_uiConfig ? m_uiConfig->statusPanelMaxWidthMin() : 200;
+    const int widthMax = m_uiConfig ? m_uiConfig->statusPanelMaxWidthMax() : 800;
     const int storedMaxWidth =
         m_settings->value(QLatin1StringView(statusPanelMaxWidthKey),
                           result.maxWidth).toInt();
-    if (storedMaxWidth >= 200 && storedMaxWidth <= 800) {
+    if (storedMaxWidth >= widthMin && storedMaxWidth <= widthMax) {
         result.maxWidth = storedMaxWidth;
     }
     return result;
@@ -248,27 +266,39 @@ AppSettings::StatusPanel AppSettings::statusPanel() const
 bool AppSettings::setStatusPanel(int fontSize, int showDelayMs, int hideDelayMs,
                                  int maxWidth, QString *errorMessage)
 {
-    if (fontSize < 9 || fontSize > 24) {
+    const int fontSizeMin = m_uiConfig ? m_uiConfig->statusPanelFontSizeMin() : 9;
+    const int fontSizeMax = m_uiConfig ? m_uiConfig->statusPanelFontSizeMax() : 24;
+    const int showMin = m_uiConfig ? m_uiConfig->statusPanelShowDelayMinMs() : 0;
+    const int showMax = m_uiConfig ? m_uiConfig->statusPanelShowDelayMaxMs() : 2000;
+    const int hideMin = m_uiConfig ? m_uiConfig->statusPanelHideDelayMinMs() : 0;
+    const int hideMax = m_uiConfig ? m_uiConfig->statusPanelHideDelayMaxMs() : 3000;
+    const int widthMin = m_uiConfig ? m_uiConfig->statusPanelMaxWidthMin() : 200;
+    const int widthMax = m_uiConfig ? m_uiConfig->statusPanelMaxWidthMax() : 800;
+    if (fontSize < fontSizeMin || fontSize > fontSizeMax) {
         if (errorMessage) {
-            *errorMessage = QStringLiteral("面板字号必须在 9 到 24 之间");
+            *errorMessage = QStringLiteral("面板字号必须在 %1 到 %2 之间")
+                                .arg(fontSizeMin).arg(fontSizeMax);
         }
         return false;
     }
-    if (showDelayMs < 0 || showDelayMs > 2000) {
+    if (showDelayMs < showMin || showDelayMs > showMax) {
         if (errorMessage) {
-            *errorMessage = QStringLiteral("面板显示延迟必须在 0 到 2000 毫秒之间");
+            *errorMessage = QStringLiteral("面板显示延迟必须在 %1 到 %2 毫秒之间")
+                                .arg(showMin).arg(showMax);
         }
         return false;
     }
-    if (hideDelayMs < 0 || hideDelayMs > 3000) {
+    if (hideDelayMs < hideMin || hideDelayMs > hideMax) {
         if (errorMessage) {
-            *errorMessage = QStringLiteral("面板收起延迟必须在 0 到 3000 毫秒之间");
+            *errorMessage = QStringLiteral("面板收起延迟必须在 %1 到 %2 毫秒之间")
+                                .arg(hideMin).arg(hideMax);
         }
         return false;
     }
-    if (maxWidth < 200 || maxWidth > 800) {
+    if (maxWidth < widthMin || maxWidth > widthMax) {
         if (errorMessage) {
-            *errorMessage = QStringLiteral("面板最大宽度必须在 200 到 800 像素之间");
+            *errorMessage = QStringLiteral("面板最大宽度必须在 %1 到 %2 像素之间")
+                                .arg(widthMin).arg(widthMax);
         }
         return false;
     }
@@ -297,13 +327,18 @@ void AppSettings::resetStatusPanel()
 
 int AppSettings::historyCardHeight() const
 {
+    const int defaultCardHeight =
+        m_uiConfig ? m_uiConfig->historyCardHeightDefault() : 58;
+    const int minCardHeight =
+        m_uiConfig ? m_uiConfig->historyCardHeightMin() : 44;
+    const int maxCardHeight =
+        m_uiConfig ? m_uiConfig->historyCardHeightMax() : 200;
     if (!m_settings) {
-        return defaultClipboardHistoryCardHeight;
+        return defaultCardHeight;
     }
     const int stored = m_settings->value(QLatin1StringView(clipboardHistoryCardHeightKey),
-                                         defaultClipboardHistoryCardHeight).toInt();
-    return std::clamp(stored, minClipboardHistoryCardHeight,
-                      maxClipboardHistoryCardHeight);
+                                         defaultCardHeight).toInt();
+    return std::clamp(stored, minCardHeight, maxCardHeight);
 }
 
 void AppSettings::resetAll()
@@ -365,6 +400,7 @@ void AppSettings::initialize(bool allowLegacyMigration)
     if (allowLegacyMigration) {
         migrateLegacySettings();
     }
+    migrateSchemaV1Keys();
     writeSchemaVersion();
     sync();
 }
@@ -379,6 +415,24 @@ void AppSettings::migrateLegacySettings()
         }
     }
     m_settings->setValue(QStringLiteral("meta/legacyNativeSettingsMigrated"), true);
+}
+
+void AppSettings::migrateSchemaV1Keys()
+{
+    if (!m_settings || m_settings->value(QLatin1StringView(schemaVersionKey), 0).toInt() >= 2) {
+        return;
+    }
+    const auto moveKey = [this](const char *from, const char *to) {
+        if (m_settings->contains(QLatin1StringView(from))
+            && !m_settings->contains(QLatin1StringView(to))) {
+            m_settings->setValue(QLatin1StringView(to),
+                                 m_settings->value(QLatin1StringView(from)));
+        }
+        m_settings->remove(QLatin1StringView(from));
+    };
+    moveKey("editor/fontFamily", "appearance/fontFamily");
+    moveKey("editor/fontPointSize", "appearance/fontPointSize");
+    moveKey("ui/animationsEnabled", "appearance/animationsEnabled");
 }
 
 void AppSettings::writeSchemaVersion()

@@ -9,6 +9,7 @@
 #include "markdownhighlighter.h"
 #include "markdownstyle.h"
 #include "statuspanelhints.h"
+#include "uiconfig.h"
 #include "windowplacement.h"
 
 #include <QColor>
@@ -238,7 +239,8 @@ EditorController::EditorController(bool testMode, QElapsedTimer *startupTimer,
             : m_externalFileError;
         m_statusHealthy = m_externalFileReady;
     }
-    m_settings = std::make_unique<AppSettings>(m_testMode);
+    m_uiConfig = std::make_unique<UiConfig>(UiConfig::load(m_testMode));
+    m_settings = std::make_unique<AppSettings>(m_testMode, m_uiConfig.get());
     m_clipboardGateway = ClipboardGateway::create(m_testMode);
     if (!externalFileMode()) {
         m_clipboardHistoryModel = std::make_unique<ClipboardHistoryModel>();
@@ -541,22 +543,26 @@ bool EditorController::statusHealthy() const
 
 int EditorController::statusPanelFontSize() const
 {
-    return m_settings ? m_settings->statusPanel().fontSize : 10;
+    return m_settings ? m_settings->statusPanel().fontSize
+                      : (m_uiConfig ? m_uiConfig->statusPanelDefaultFontSize() : 10);
 }
 
 int EditorController::statusPanelShowDelayMs() const
 {
-    return m_settings ? m_settings->statusPanel().showDelayMs : 300;
+    return m_settings ? m_settings->statusPanel().showDelayMs
+                      : (m_uiConfig ? m_uiConfig->statusPanelDefaultShowDelayMs() : 300);
 }
 
 int EditorController::statusPanelHideDelayMs() const
 {
-    return m_settings ? m_settings->statusPanel().hideDelayMs : 250;
+    return m_settings ? m_settings->statusPanel().hideDelayMs
+                      : (m_uiConfig ? m_uiConfig->statusPanelDefaultHideDelayMs() : 250);
 }
 
 int EditorController::statusPanelMaxWidth() const
 {
-    return m_settings ? m_settings->statusPanel().maxWidth : 360;
+    return m_settings ? m_settings->statusPanel().maxWidth
+                      : (m_uiConfig ? m_uiConfig->statusPanelDefaultMaxWidth() : 360);
 }
 
 QStringList EditorController::statusPanelHints() const
@@ -652,7 +658,8 @@ bool EditorController::historyClearConfirmationVisible() const
 
 int EditorController::historyCardHeight() const
 {
-    return m_settings ? m_settings->historyCardHeight() : 58;
+    return m_settings ? m_settings->historyCardHeight()
+                      : (m_uiConfig ? m_uiConfig->historyCardHeightDefault() : 58);
 }
 
 QVariantList EditorController::commands() const
@@ -724,6 +731,11 @@ QString EditorController::markdownStyleFile() const
 bool EditorController::markdownStyleLoaded() const
 {
     return m_markdownStyle && m_markdownStyle->loadedFromFile();
+}
+
+QVariant EditorController::uiConfig() const
+{
+    return m_uiConfig ? m_uiConfig->map() : QVariantMap{};
 }
 
 void EditorController::registerWindow(QQuickWindow *window)
@@ -2071,12 +2083,14 @@ void EditorController::showEditor()
             ? m_settings->externalWindowGeometry().size()
             : QSize();
         m_windowRestingGeometry = WindowPlacement::placeNearWindow(
-            rememberedSize, defaultSize, minimumSize, screens, referenceRect, obstacle);
+            rememberedSize, defaultSize, minimumSize, screens, referenceRect, obstacle,
+            m_uiConfig ? m_uiConfig->placementAnchorGap() : WindowPlacement::AnchorGap);
         m_positioned = true;
     } else if (!m_positioned) {
         // 临时编辑器无记忆：在焦点窗口附近唤出。
         m_windowRestingGeometry = WindowPlacement::placeNearWindow(
-            QSize(), defaultSize, minimumSize, screens, referenceRect, QRect());
+            QSize(), defaultSize, minimumSize, screens, referenceRect, QRect(),
+            m_uiConfig ? m_uiConfig->placementAnchorGap() : WindowPlacement::AnchorGap);
         m_positioned = true;
     } else if (m_windowRestingGeometry.isValid()) {
         // 临时编辑器有进程内记忆：每次打开按当前屏幕布局重新校正（兼容热插拔），
@@ -2086,7 +2100,9 @@ void EditorController::showEditor()
         m_windowRestingGeometry = fitted
             ? *fitted
             : WindowPlacement::placeNearWindow(
-                  QSize(), defaultSize, minimumSize, screens, referenceRect, QRect());
+                  QSize(), defaultSize, minimumSize, screens, referenceRect, QRect(),
+                  m_uiConfig ? m_uiConfig->placementAnchorGap()
+                             : WindowPlacement::AnchorGap);
     }
     updateWindowAnchor();
 
@@ -2306,12 +2322,14 @@ void EditorController::startWindowTransition(qreal targetOpacity, const QRect &t
         const QSignalBlocker opacityBlocker(m_windowOpacityAnimation);
         const QSignalBlocker geometryBlocker(m_windowGeometryAnimation);
         m_windowTransitionGroup->setCurrentTime(0);
-        m_windowOpacityAnimation->setDuration(120);
+        m_windowOpacityAnimation->setDuration(
+            m_uiConfig ? m_uiConfig->transitionDuration() : 120);
         m_windowOpacityAnimation->setStartValue(startOpacity);
         m_windowOpacityAnimation->setEndValue(targetOpacity);
         m_windowOpacityAnimation->setEasingCurve(hideWhenFinished ? QEasingCurve::InCubic
                                                                   : QEasingCurve::OutCubic);
-        m_windowGeometryAnimation->setDuration(120);
+        m_windowGeometryAnimation->setDuration(
+            m_uiConfig ? m_uiConfig->transitionDuration() : 120);
         m_windowGeometryAnimation->setStartValue(startGeometry);
         m_windowGeometryAnimation->setEndValue(targetGeometry);
         m_windowGeometryAnimation->setEasingCurve(hideWhenFinished ? QEasingCurve::InCubic
@@ -2388,7 +2406,8 @@ QRect EditorController::scaledWindowGeometry(const QRect &restingGeometry) const
         return restingGeometry;
     }
 
-    constexpr qreal shapeScale = 0.98;
+    const qreal shapeScale =
+        m_uiConfig ? m_uiConfig->windowShapeScale() : 0.98;
     const int minimumWidth = m_window ? m_window->minimumWidth() : 1;
     const int minimumHeight = m_window ? m_window->minimumHeight() : 1;
     const QSize scaledSize(qMax(minimumWidth, qRound(restingGeometry.width() * shapeScale)),
@@ -2806,12 +2825,18 @@ void EditorController::saveWindowGeometry()
 
 QSize EditorController::windowDefaultSize() const
 {
-    // 与 qml/Main.qml 的初始 width/height 保持一致。
-    return QSize(920, 640);
+    // 与 config/ui.json 的 window 令牌保持一致，QML 侧同源读取。
+    return m_uiConfig
+        ? QSize(m_uiConfig->windowDefaultWidth(), m_uiConfig->windowDefaultHeight())
+        : QSize(920, 640);
 }
 
 QSize EditorController::windowMinimumSize() const
 {
+    if (m_uiConfig) {
+        return QSize(m_uiConfig->windowMinimumWidth(),
+                     m_uiConfig->windowMinimumHeight());
+    }
     return m_window
         ? QSize(m_window->minimumWidth(), m_window->minimumHeight())
         : QSize(500, 320);
@@ -3151,6 +3176,10 @@ QJsonObject EditorController::statusObject() const
     status.insert(QStringLiteral("themeAccentTextColor"), themeAccentTextColor());
     status.insert(QStringLiteral("markdownStyleFile"), markdownStyleFile());
     status.insert(QStringLiteral("markdownStyleLoaded"), markdownStyleLoaded());
+    status.insert(QStringLiteral("uiConfigFile"),
+                  m_uiConfig ? m_uiConfig->filePath() : QString());
+    status.insert(QStringLiteral("uiConfigLoaded"),
+                  m_uiConfig && m_uiConfig->loadedFromFile());
     status.insert(QStringLiteral("commandCount"), commands().size());
     status.insert(QStringLiteral("historyAvailable"), clipboardHistoryAvailable());
     status.insert(QStringLiteral("historyHealthy"), clipboardHistoryHealthy());

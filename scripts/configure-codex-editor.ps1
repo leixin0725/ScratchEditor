@@ -34,8 +34,10 @@ $resolvedSourceEditorPath = [System.IO.Path]::GetFullPath($SourceEditorPath)
 $deployQt = Join-Path $projectRoot ".tools\Qt\6.10.2\mingw_64\bin\windeployqt.exe"
 $qmlDirectory = Join-Path $projectRoot "qml"
 $markdownStyle = Join-Path $projectRoot "config\markdown-style.json"
+$uiConfig = Join-Path $projectRoot "config\ui.json"
 $sharedStyleDirectory = Join-Path $installRoot "ScratchEditor"
 $sharedStyleFile = Join-Path $sharedStyleDirectory "markdown-style.json"
+$sharedUiFile = Join-Path $sharedStyleDirectory "ui.json"
 $restartAhkResident = $false
 
 function Invoke-ProductionEditorCommand {
@@ -164,6 +166,8 @@ function Install-EditorCopy {
     New-Item -ItemType Directory -Path $installedConfigDirectory -Force | Out-Null
     Copy-Item -LiteralPath $markdownStyle `
         -Destination (Join-Path $installedConfigDirectory "markdown-style.json") -Force
+    Copy-Item -LiteralPath $uiConfig `
+        -Destination (Join-Path $installedConfigDirectory "ui.json") -Force
 
     $deployOptions = @(
         "--release",
@@ -186,6 +190,9 @@ function Install-SharedStyleConfiguration {
     if (-not (Test-Path -LiteralPath $sharedStyleFile -PathType Leaf)) {
         Copy-Item -LiteralPath $markdownStyle -Destination $sharedStyleFile
     }
+    if (-not (Test-Path -LiteralPath $sharedUiFile -PathType Leaf)) {
+        Copy-Item -LiteralPath $uiConfig -Destination $sharedUiFile
+    }
 }
 
 if ($Action -eq "Install") {
@@ -193,7 +200,8 @@ if ($Action -eq "Install") {
         $resolvedSourceEditorPath,
         $deployQt,
         $qmlDirectory,
-        $markdownStyle
+        $markdownStyle,
+        $uiConfig
     )) {
         if (-not (Test-Path -LiteralPath $sourcePath)) {
             throw "Deployment source is missing: $sourcePath. Rebuild release before configuring Codex."
@@ -475,6 +483,7 @@ function Write-LocalInstallationDocument {
         ('| Stable Codex / pi editor | `' + $resolvedEditorPath + '` |'),
         ('| Stable AHK editor | `' + $resolvedAhkEditorPath + '` |'),
         ('| Shared live theme / Markdown config | `' + $sharedStyleFile + '` |'),
+        ('| Shared UI design-token config | `' + $sharedUiFile + '` |'),
         ('| Regular-terminal `VISUAL` / `EDITOR` | `' + $windowsCommand + '` |'),
         '| VS Code integrated-terminal `VISUAL` / `EDITOR` | `code --wait` |',
         ('| Git Bash profile | `' + $bashProfilePath + '` |'),
@@ -485,7 +494,7 @@ function Write-LocalInstallationDocument {
         'Codex and pi share the same stable `CodexEditor` executable. Each `--wait` edit still runs as an independent file-mode process so concurrent sessions cannot overwrite one another.',
         'Ctrl+G uses VS Code inside the VS Code integrated terminal and the shared stable ScratchEditor copy in regular terminals.',
         'Scroll Lock and Win+F use the separate stable `AhkEditor` executable through the persistent `ScratchEditor.Stage1.v1` IPC instance.',
-        'Both installed editors watch the shared theme / Markdown config. Manual edits are applied while the editors are running; builds seed this file once and never overwrite later user changes.',
+        'Both installed editors watch the shared theme / Markdown config; manual edits are applied while the editors are running. The shared UI design-token config (`ui.json`) is seeded once and applied on the next editor start; builds never overwrite later user changes.',
         'Edit `theme.accentColor` for the shared accent used by settings, the command palette, focus borders, text selections, the drag insertion cursor, and Markdown links. `theme.accentTextColor` controls text drawn on that accent.',
         'Clickable Codex file citations continue to use VS Code in every terminal through `file_opener = "vscode"`.',
         'WSL uses `scripts/configure-codex-editor-wsl.sh` to install a wrapper at `~/.local/bin/scratcheditor-external-editor`; it converts WSL paths with `wslpath -w` and calls the stable Codex editor. WSL intentionally does not yet mirror `file_opener = "vscode"`.',
@@ -547,6 +556,7 @@ $persistentConfigurationValid = $userVisual -eq $windowsCommand `
     StableCodexEditor = $resolvedEditorPath
     StableAhkEditor = $resolvedAhkEditorPath
     SharedStyleFile = $sharedStyleFile
+    SharedUiFile = $sharedUiFile
     InstalledCopiesMatch = $installedCopiesMatch
     UserVisual = $userVisual
     UserEditor = $userEditor
