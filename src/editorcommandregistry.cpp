@@ -2,6 +2,7 @@
 #include "appsettings.h"
 #include "cjktextprocessor.h"
 
+#include <QCoreApplication>
 #include <QEvent>
 #include <QGuiApplication>
 #include <QInputMethodEvent>
@@ -1041,6 +1042,13 @@ TextRange inferredWordRange(QTextDocument *document, const QString &text, int po
     const bool containsLeftCharacter = emptyOnLeft
         || (start < position && end >= position);
     if (start < end && containsRightCharacter && containsLeftCharacter) {
+        if (CjkText::spanContainsCjk(text, start, end)) {
+            const CjkText::WordRange cjkRange =
+                CjkText::wordRangeForCursor(text, position);
+            if (cjkRange.start < cjkRange.end) {
+                return {cjkRange.start, cjkRange.end};
+            }
+        }
         return {start, end};
     }
 
@@ -1051,6 +1059,13 @@ TextRange inferredWordRange(QTextDocument *document, const QString &text, int po
     }
     while (end < text.size() && !text.at(end).isSpace()) {
         ++end;
+    }
+    if (CjkText::spanContainsCjk(text, start, end)) {
+        const CjkText::WordRange cjkRange =
+            CjkText::wordRangeForCursor(text, position);
+        if (cjkRange.start < cjkRange.end) {
+            return {cjkRange.start, cjkRange.end};
+        }
     }
     return {start, end};
 }
@@ -1537,6 +1552,34 @@ bool EditorCommandRegistry::handleEditorEvent(QEvent *event)
                 return pasted;
             }
         }
+        // Ctrl+左/右：中英文自适应词边界。纯 ASCII 跨度沿用 Qt 原生落点，
+        // 只有跨越中文的移动才使用 CjkText 的分词规则；Shift 时扩展选区。
+        const bool ctrlHorizontalArrow =
+            (keyEvent->key() == Qt::Key_Left || keyEvent->key() == Qt::Key_Right)
+            && modifiers.testFlag(Qt::ControlModifier)
+            && !modifiers.testFlag(Qt::AltModifier)
+            && !modifiers.testFlag(Qt::MetaModifier);
+        if (ctrlHorizontalArrow
+            && !m_editor->property("inputMethodComposing").toBool()) {
+            return moveByCjkAwareWord(keyEvent->key() == Qt::Key_Left,
+                                      shiftPressed);
+        }
+        // Ctrl+Backspace / Ctrl+Delete：按词删除。有选区时放行给原生删除选区；
+        // 否则仅当原生删除跨度含中文时改用新分词边界。
+        const bool ctrlWordDelete =
+            (keyEvent->key() == Qt::Key_Backspace
+             || keyEvent->key() == Qt::Key_Delete)
+            && modifiers.testFlag(Qt::ControlModifier)
+            && !modifiers.testFlag(Qt::AltModifier)
+            && !modifiers.testFlag(Qt::MetaModifier);
+        if (ctrlWordDelete
+            && !m_editor->property("inputMethodComposing").toBool()) {
+            if (m_editor->property("selectionStart").toInt()
+                != m_editor->property("selectionEnd").toInt()) {
+                return false;
+            }
+            return deleteByCjkAwareWord(keyEvent->key() == Qt::Key_Backspace);
+        }
         const bool tabPressed = keyEvent->key() == Qt::Key_Tab
             || keyEvent->key() == Qt::Key_Backtab;
         const bool plainBackspace = keyEvent->key() == Qt::Key_Backspace
@@ -1692,6 +1735,19 @@ bool EditorCommandRegistry::handleEditorEvent(QEvent *event)
             return true;
         }
         return false;
+    }
+
+    // 双击按词选择：先用新边界计算词范围；若为空（纯空白/边界）放行给 Qt 原生，
+    // 否则向 QML 重放副本以保持三击状态，再用新词范围覆盖原生选区。
+    if (event->type() == QEvent::MouseButtonDblClick) {
+        auto *mouseEvent = static_cast<QMouseEvent *>(event);
+        if (mouseEvent->button() == Qt::LeftButton
+            && !mouseEvent->modifiers().testAnyFlags(
+                Qt::ShiftModifier | Qt::ControlModifier
+                | Qt::AltModifier | Qt::MetaModifier)
+            && !m_editor->property("inputMethodComposing").toBool()) {
+            return handleCjkDoubleClick(mouseEvent);
+        }
     }
 
     if (event->type() == QEvent::InputMethod) {
@@ -2068,6 +2124,123 @@ bool EditorCommandRegistry::performRedo()
     const bool invoked = QMetaObject::invokeMethod(m_editor, "redo");
     queueInputAutoScrollCheck();
     return invoked;
+bool EditorCommandRegistry::moveByCjkAwareWord(bool left, bool keepSelection)
+{
+    if (!m_editor || !m_document) {
+        return false;
+    }
+
+    const int position = m_editor->property("cursorPosition").toInt();
+    const int selectionStart = m_editor->property("selectionStart").toInt();
+    const int selectionEnd = m_editor->property("selectionEnd").toInt();
+    const bool hasSelection = selectionStart != selectionEnd;
+
+    QTextCursor native(m_document);
+    native.setPosition(position);
+    const QTextCursor::MoveOperation operation =
+        left ? QTextCursor::WordLeft : QTextCursor::WordRight;
+    if (!native.movePosition(operation)) {
+        // 已到文档边界：光标不动；无 Shift 时按 Qt 原生行为收起选区。
+        if (!keepSelection && hasSelection) {
+            selectRange(position, position);
+        }
+        focusEditor();
+        return true;
+    }
+
+    const int nativeEnd = native.position();
+    const int lo = qMin(position, nativeEnd);
+    const int hi = qMax(position, nativeEnd);
+    const QString text = m_document->toPlainText();
+    const int target = CjkText::spanContainsCjk(text, lo, hi)
+        ? CjkText::moveWordBoundary(text, position, left ? -1 : 1)
+        : nativeEnd;
+
+    if (keepSelection) {
+        // 锚点固定在不随 active end 移动的一端，与 QTextCursor::KeepAnchor 一致。
+        const int anchor = hasSelection
+            ? (position == selectionStart ? selectionEnd : selectionStart)
+            : position;
+        selectRangeWithActiveEnd(qMin(anchor, target), qMax(anchor, target),
+                                 target);
+    } else {
+        selectRange(target, target);
+    }
+    focusEditor();
+    return true;
+}
+
+bool EditorCommandRegistry::deleteByCjkAwareWord(bool backwards)
+{
+    if (!m_editor || !m_document
+        || m_editor->property("readOnly").toBool()) {
+        return false;
+    }
+
+    const int position = m_editor->property("cursorPosition").toInt();
+    QTextCursor native(m_document);
+    native.setPosition(position);
+    const QTextCursor::MoveOperation operation =
+        backwards ? QTextCursor::PreviousWord : QTextCursor::NextWord;
+    if (!native.movePosition(operation, QTextCursor::KeepAnchor)) {
+        // 文档边界：交给原生（无操作）。
+        return false;
+    }
+    const QString text = m_document->toPlainText();
+    if (!CjkText::spanContainsCjk(text, native.selectionStart(),
+                                  native.selectionEnd())) {
+        // 纯 ASCII 跨度：交给原生，保持逐字一致（含分隔符与换行细节）。
+        return false;
+    }
+
+    const CjkText::WordRange range =
+        CjkText::wordDeletionRange(text, position, backwards);
+    if (range.start >= range.end) {
+        return false;
+    }
+    QTextCursor edit(m_document);
+    edit.beginEditBlock();
+    edit.setPosition(range.start);
+    edit.setPosition(range.end, QTextCursor::KeepAnchor);
+    edit.removeSelectedText();
+    edit.endEditBlock();
+    m_editor->setProperty("cursorPosition", range.start);
+    focusEditor();
+    return true;
+}
+
+bool EditorCommandRegistry::handleCjkDoubleClick(QMouseEvent *event)
+{
+    if (!m_editor || !m_document) {
+        return false;
+    }
+
+    const int position = editorPositionAt(event->position());
+    if (position < 0) {
+        return false;
+    }
+    const CjkText::WordRange range =
+        CjkText::wordRangeAt(m_document->toPlainText(), position);
+    if (range.start >= range.end) {
+        return false;
+    }
+
+    if (m_doubleClickReplaying) {
+        // 重放副本直接放行给 QML 原生，保持“双击→三击”状态机。
+        return false;
+    }
+
+    QMouseEvent replay(event->type(), event->position(), event->scenePosition(),
+                       event->globalPosition(), event->button(), event->buttons(),
+                       event->modifiers(), event->source(), event->pointingDevice());
+    replay.setTimestamp(event->timestamp());
+    m_doubleClickReplaying = true;
+    QCoreApplication::sendEvent(m_editor, &replay);
+    m_doubleClickReplaying = false;
+
+    selectRange(range.start, range.end);
+    event->accept();
+    return true;
 }
 
 bool EditorCommandRegistry::moveSelection(int selectionStart, int selectionEnd,

@@ -17,6 +17,7 @@
 class QTextDocument;
 class AppSettings;
 class QEvent;
+class QMouseEvent;
 class QQuickItem;
 class QQuickWindow;
 
@@ -132,6 +133,9 @@ private:
     void focusEditor();
     QString selectedText() const;
     bool handleSelectionDragEvent(QEvent *event);
+    bool moveByCjkAwareWord(bool left, bool keepSelection);
+    bool deleteByCjkAwareWord(bool backwards);
+    bool handleCjkDoubleClick(QMouseEvent *event);
     bool moveSelection(int selectionStart, int selectionEnd, int dropPosition);
     int editorPositionAt(const QPointF &localPosition) const;
     QQuickItem *editorItem() const;
@@ -213,6 +217,7 @@ private:
     bool m_selectionDragActive = false;
     bool m_selectionDragPreviousKeepMouseGrab = false;
     QCursor m_selectionDragOriginalCursor;
+    bool m_doubleClickReplaying = false;
     std::optional<FormatUndoSnapshot> m_formatUndoSnapshot;
     bool m_inputAutoScrollCheckQueued = false;
     int m_inputPreTextLength = -1;
