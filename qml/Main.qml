@@ -78,6 +78,8 @@ Window {
         - (historyPanelOpen && !historyPanelOverlay ? historyPanelWidth : 0)
     readonly property bool historyPanelLoaded:
         historyPanelLoader.active && historyPanelLoader.item !== null
+    readonly property real historyPanelEdgeIntrusion:
+        historyPanelLoader.item ? historyPanelLoader.item.edgeIntrusion : 0
     readonly property int historyRevealZoneX: 0
     readonly property int historyRevealZoneWidth: marginSize + historyTriggerWidth
     readonly property bool historyPanelClipped: historyPanelLoader.clip
@@ -1045,6 +1047,9 @@ Window {
         sourceComponent: Item {
             id: historyRoot
             readonly property bool queryFocused: historyQuery.activeFocus
+            readonly property real edgeIntrusion:
+                root.historyPanelOpen ? 0
+                                      : Math.max(0, historyPanel.x + historyPanel.width)
 
             function focusQuery() {
                 historyQuery.forceActiveFocus()
@@ -1081,15 +1086,23 @@ Window {
 
             Rectangle {
                 id: historyPanel
-                x: root.historyPanelOpen ? 0 : -root.historyPanelWidth
+                // 闭合时右边缘正好压在 loader 左边界（左边框与编辑区域交界）。
+                // 滑动进度只在开/合切换时变化并带动画；x 直接由宽度与进度绑定，
+                // 窗口缩放期间宽度变化会让闭合 x 即时跟随，避免 Behavior 逐帧
+                // 重启动画造成右边缘短暂探入可见裁剪区（唤出窗口时闪现）。
+                property real slideProgress: root.historyPanelOpen ? 1 : 0
+                x: -historyPanel.width + historyPanel.width * slideProgress
                 width: root.historyPanelWidth
                 height: parent.height
                 color: root.themePanelColor
                 border.color: root.themeBorderColor
                 border.width: uiConfig.layout.borderWidth
 
-                Behavior on x {
-                    NumberAnimation { duration: root.transitionDuration; easing.type: Easing.OutCubic }
+                Behavior on slideProgress {
+                    NumberAnimation {
+                        duration: root.transitionDuration
+                        easing.type: Easing.OutCubic
+                    }
                 }
 
                 HoverHandler {

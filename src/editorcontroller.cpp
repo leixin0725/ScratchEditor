@@ -3327,6 +3327,8 @@ QJsonObject EditorController::statusObject() const
                       m_window->property("historyPanelOverlay").toBool());
         status.insert(QStringLiteral("historyPanelWidth"),
                       m_window->property("historyPanelWidth").toDouble());
+        status.insert(QStringLiteral("historyPanelEdgeIntrusion"),
+                      m_window->property("historyPanelEdgeIntrusion").toDouble());
         status.insert(QStringLiteral("editorVisibleWidth"),
                       m_window->property("editorVisibleWidth").toDouble());
         status.insert(QStringLiteral("historyQueryFocused"),

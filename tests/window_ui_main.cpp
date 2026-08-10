@@ -342,6 +342,32 @@ int main(int argc, char *argv[])
                          {QStringLiteral("hidden"), hiddenWindow},
                          {QStringLiteral("parked"), parkedWindow},
                          {QStringLiteral("reopened"), reopenedWindow}});
+
+    // 动画开启的闭合态窗口缩放回归：缩放动画期间历史面板右边缘不得探入编辑区交界。
+    const QJsonObject geometryBeforeResize = request(QStringLiteral("status"));
+    request(QStringLiteral("testSetGeometry"),
+            {{QStringLiteral("x"), geometryBeforeResize.value(QStringLiteral("x")).toInt()},
+             {QStringLiteral("y"), geometryBeforeResize.value(QStringLiteral("y")).toInt()},
+             {QStringLiteral("width"),
+              geometryBeforeResize.value(QStringLiteral("width")).toInt() + 40},
+             {QStringLiteral("height"),
+              geometryBeforeResize.value(QStringLiteral("height")).toInt() + 20}});
+    QThread::msleep(30);
+    const QJsonObject resizedClosedAnimated = request(QStringLiteral("status"));
+    request(QStringLiteral("testSetGeometry"),
+            {{QStringLiteral("x"), geometryBeforeResize.value(QStringLiteral("x")).toInt()},
+             {QStringLiteral("y"), geometryBeforeResize.value(QStringLiteral("y")).toInt()},
+             {QStringLiteral("width"),
+              geometryBeforeResize.value(QStringLiteral("width")).toInt()},
+             {QStringLiteral("height"),
+              geometryBeforeResize.value(QStringLiteral("height")).toInt()}});
+    QThread::msleep(180);
+    addCheck(checks, details, QStringLiteral("historyClosedResizeKeepsEdgeClipped"),
+             !resizedClosedAnimated.value(QStringLiteral("historyPanelOpen")).toBool()
+                 && resizedClosedAnimated.value(
+                        QStringLiteral("historyPanelEdgeIntrusion")).toDouble() <= 0.001,
+             resizedClosedAnimated);
+
     request(QStringLiteral("hide"));
     QThread::msleep(180);
 
