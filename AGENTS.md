@@ -38,7 +38,7 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\run-editing-te
 
 ## 必须遵守的规则
 
-1. **不破坏用户环境**：除非用户明确要求部署，不得修改 AHK 文件、剪贴板、用户配置或稳定安装副本（`%LOCALAPPDATA%\ScratchEditor\CodexEditor`、`AhkEditor`）。
+1. **不破坏用户环境**：除非用户明确要求部署，不得修改 AHK 文件（`D:\_Dev\ScratchEditor\dev-links\AutoHotkey`为符号链接,保持严格只读）、剪贴板、用户配置或稳定安装副本（`%LOCALAPPDATA%\ScratchEditor\CodexEditor`、`AhkEditor`）。
 2. **开发迭代必须隔离**：使用 `editing`/`window-ui` preset 并传 `-SkipLocalInstall`。
 3. **坐标单位**：一律使用 Qt UTF-16 code-unit 索引，不混用 UTF-8 字节偏移。
 4. **性能约束**：编辑核心改动保持线性复杂度；每次编辑最多一次全文读取、一次分析；先收集插入点再倒序写入；禁止在候选循环中重复 `toPlainText()` 或全文扫描。
