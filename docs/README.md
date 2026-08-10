@@ -5,6 +5,10 @@
 
 ## 更新记录
 
+  - `2026-08-10`：修复窗口缩放与轻量关闭动画期间右侧滚动条短暂闪现——滚动条可见性
+    由 60ms 防抖快照改为实时跟随 `editorViewport.contentHeight`（滑块尺寸仍按 60ms
+    合并更新），window-ui 测试新增 `resizeScrollbarStaysHidden` 与
+    `closingAnimationScrollbarStaysHidden` 回归检查。
   - `2026-08-10`：修复轻量动画开启时窗口缩放导致编辑区（缓冲区）边缘“迟钝→加速”追赶的问题——
     编辑区几何改为直接绑定布局进度（`historyLayoutProgress`），缩放期间即时跟随窗口边缘，
     历史面板开/合仍保留滑动动画；window-ui 测试新增

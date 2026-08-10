@@ -99,6 +99,9 @@ Window {
     readonly property bool historyQueryFocused:
         historyPanelLoader.item ? historyPanelLoader.item.queryFocused : false
     property string historySelectedId: ""
+    // 内容高度防抖快照：仅驱动滚动条滑块尺寸（60ms 合并更新）；滑块可见性
+    // 直接依赖实时 editorViewport.contentHeight，避免缩放/关闭动画期间快照
+    // 滞后导致滚动条闪现。
     property real scrollContentHeight: 0
     property bool replaceMode: false
     property string searchStatus: ""
@@ -141,6 +144,7 @@ Window {
         benchmarkAnimation.restart()
     }
 
+    // 滑块尺寸的防抖快照更新；可见性不使用本快照（见 scrollThumb.visible）。
     function refreshScrollMetrics() {
         scrollContentHeight = editorViewport.contentHeight
     }
@@ -1568,7 +1572,9 @@ Window {
             editorViewport.height * editorViewport.height
                 / Math.max(editorViewport.height, root.scrollContentHeight)
         )
-        visible: root.scrollContentHeight > editorViewport.height + 0.5
+        // 可见性用实时 contentHeight：窗口缩放/轻量关闭动画期间视口高度逐帧变化，
+        // 60ms 防抖快照会持续滞后，短文本时滚动条会短暂误显示；滑块尺寸仍走防抖快照。
+        visible: editorViewport.contentHeight > editorViewport.height + 0.5
         color: scrollHover.hovered || editorViewport.movingVertically
                ? root.themeScrollbarThumbActiveColor
                : root.themeScrollbarThumbIdleColor
