@@ -306,6 +306,25 @@ std::optional<std::pair<QChar, QChar>> fullwidthQuotesFor(const QChar &opening,
     return std::nullopt;
 }
 
+std::optional<std::pair<QString, QString>> fullwidthPairFor(const QChar &opening,
+                                                            const QChar &closing)
+{
+    // Tab 跳出配对时的整对全角映射；与输入时 `( [ " '` 生成全角配对的映射一致。
+    if (opening == u'(' && closing == u')') {
+        return std::pair<QString, QString>{QStringLiteral("（"), QStringLiteral("）")};
+    }
+    if (opening == u'[' && closing == u']') {
+        return std::pair<QString, QString>{QStringLiteral("【"), QStringLiteral("】")};
+    }
+    if (opening == u'"' && closing == u'"') {
+        return std::pair<QString, QString>{QStringLiteral("“"), QStringLiteral("”")};
+    }
+    if (opening == u'\'' && closing == u'\'') {
+        return std::pair<QString, QString>{QStringLiteral("‘"), QStringLiteral("’")};
+    }
+    return std::nullopt;
+}
+
 bool wrapContentContainsCjk(const QString &text, int openerPosition, int closerPosition)
 {
     if (openerPosition < 0 || closerPosition <= openerPosition) {
@@ -3354,31 +3373,47 @@ bool EditorCommandRegistry::jumpOutOfPair()
 
     const auto &pairs = delimiterPairs();
     QVector<int> stack;
-    const auto consumeDelimiter = [&pairs](QVector<int> &delimiterStack, QChar character) {
+    QVector<int> openerPositions;
+    const auto consumeDelimiter = [&pairs](QVector<int> &delimiterStack,
+                                           QVector<int> &positions,
+                                           int position, QChar character) -> int {
         if (!delimiterStack.isEmpty()
             && pairs.at(delimiterStack.back()).closing.front() == character) {
+            const int openerPosition = positions.isEmpty() ? -1 : positions.back();
             delimiterStack.pop_back();
-            return;
+            if (!positions.isEmpty()) {
+                positions.pop_back();
+            }
+            return openerPosition;
         }
         for (int index = 0; index < pairs.size(); ++index) {
             if (pairs.at(index).opening.front() == character) {
                 delimiterStack.append(index);
-                return;
+                positions.append(position);
+                break;
             }
         }
+        return -1;
     };
 
     for (int position = lineStart; position < start; ++position) {
-        consumeDelimiter(stack, text.at(position));
+        consumeDelimiter(stack, openerPositions, position, text.at(position));
     }
+    int delimiterJumpPosition = -1;
+    int delimiterOpenerPosition = -1;
+    int delimiterCloserPosition = -1;
     if (!stack.isEmpty()) {
         const int containingDepth = stack.size();
         for (int position = start; position < text.size()
              && text.at(position) != QLatin1Char('\n'); ++position) {
-            consumeDelimiter(stack, text.at(position));
+            const int openerPosition =
+                consumeDelimiter(stack, openerPositions, position, text.at(position));
             if (stack.size() < containingDepth) {
                 const int candidate = position + 1;
                 jumpPosition = jumpPosition < 0 ? candidate : qMin(jumpPosition, candidate);
+                delimiterJumpPosition = candidate;
+                delimiterOpenerPosition = openerPosition;
+                delimiterCloserPosition = position;
                 break;
             }
         }
@@ -3387,6 +3422,41 @@ bool EditorCommandRegistry::jumpOutOfPair()
     if (jumpPosition < 0) {
         return false;
     }
+
+    // Tab 跳出严格匹配的半角配对时，若配对内容含 CJK 则整对转为全角，
+    // 与输入时 `( [ " '` 生成全角配对的映射一致；保护区内不转换。
+    if (m_document && delimiterJumpPosition == jumpPosition
+        && delimiterOpenerPosition >= 0 && delimiterCloserPosition >= 0) {
+        const auto fullwidth = fullwidthPairFor(
+            text.at(delimiterOpenerPosition), text.at(delimiterCloserPosition));
+        if (fullwidth
+            && wrapContentContainsCjk(text, delimiterOpenerPosition, delimiterCloserPosition)) {
+            // 内容含 CJK 才做一次惰性全文分析；开符或闭符任一受保护则跳过。
+            std::optional<CjkText::DocumentAnalysis> lazyAnalysis;
+            const auto analysis = [&lazyAnalysis, &text]() -> const CjkText::DocumentAnalysis & {
+                if (!lazyAnalysis) {
+                    lazyAnalysis = CjkText::analyzeDocument(text);
+                }
+                return *lazyAnalysis;
+            };
+            const bool openerProtected =
+                CjkText::isPositionProtected(analysis(), delimiterOpenerPosition);
+            const bool closerProtected =
+                CjkText::isPositionProtected(analysis(), delimiterCloserPosition);
+            if (!openerProtected && !closerProtected) {
+                QTextCursor cursor(m_document);
+                cursor.beginEditBlock();
+                cursor.setPosition(delimiterCloserPosition);
+                cursor.setPosition(delimiterCloserPosition + 1, QTextCursor::KeepAnchor);
+                cursor.insertText(fullwidth->second);
+                cursor.setPosition(delimiterOpenerPosition);
+                cursor.setPosition(delimiterOpenerPosition + 1, QTextCursor::KeepAnchor);
+                cursor.insertText(fullwidth->first);
+                cursor.endEditBlock();
+            }
+        }
+    }
+
     m_editor->setProperty("cursorPosition", jumpPosition);
     focusEditor();
     return true;

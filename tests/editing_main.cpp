@@ -2225,6 +2225,48 @@ int main(int argc, char *argv[])
               QStringLiteral("中文-"), 3, 3, QStringLiteral("key -"),
               keyAction(QStringLiteral("-")), QStringLiteral("中文——"), 4);
 
+    // --- Tab 跳出配对的 CJK 全角转换（TAB-CJK-001..008） ---
+    const auto tabAction = [] { return keyPress({}, QStringLiteral("Tab")); };
+    cjkExpect(checks, details, QStringLiteral("tabCjkParenPair"),
+              QStringLiteral("x(中文)"), 4, 4, QStringLiteral("Tab"),
+              tabAction, QStringLiteral("x（中文）"), 5);
+    cjkExpect(checks, details, QStringLiteral("tabCjkBracketPair"),
+              QStringLiteral("x[中文]"), 4, 4, QStringLiteral("Tab"),
+              tabAction, QStringLiteral("x【中文】"), 5);
+    cjkExpect(checks, details, QStringLiteral("tabCjkDoubleQuotePair"),
+              QStringLiteral("x\"中文\""), 4, 4, QStringLiteral("Tab"),
+              tabAction, QStringLiteral("x“中文”"), 5);
+    cjkExpect(checks, details, QStringLiteral("tabCjkSingleQuotePair"),
+              QStringLiteral("x'中文'"), 4, 4, QStringLiteral("Tab"),
+              tabAction, QStringLiteral("x‘中文’"), 5);
+    cjkExpect(checks, details, QStringLiteral("tabCjkNestedOuterPair"),
+              QStringLiteral("x([中文])"), 6, 6, QStringLiteral("Tab"),
+              tabAction, QStringLiteral("x（[中文]）"), 7);
+    cjkExpect(checks, details, QStringLiteral("tabCjkAsciiContentNegative"),
+              QStringLiteral("x(abc)"), 5, 5, QStringLiteral("Tab"),
+              tabAction, QStringLiteral("x(abc)"), 6);
+    cjkExpect(checks, details, QStringLiteral("tabCjkFullwidthPairUnchanged"),
+              QStringLiteral("x（中文）"), 4, 4, QStringLiteral("Tab"),
+              tabAction, QStringLiteral("x（中文）"), 5);
+    cjkExpect(checks, details, QStringLiteral("tabCjkProtectedInlineCode"),
+              QStringLiteral("`x(中文)`"), 5, 5, QStringLiteral("Tab"),
+              tabAction, QStringLiteral("`x(中文)`"), 6);
+    {
+        // 转换与跳转合并为一次撤销（UNDO-GROUP-…）。
+        setTextAndSelection(QStringLiteral("x(中文)"), 4, 4);
+        keyPress({}, QStringLiteral("Tab"));
+        QThread::msleep(30);
+        const QString converted = editorText();
+        request(QStringLiteral("testUndo"));
+        QThread::msleep(30);
+        const QString undone = editorText();
+        addCheck(checks, details, QStringLiteral("tabCjkConversionSingleUndo"),
+                 converted == QStringLiteral("x（中文）")
+                     && undone == QStringLiteral("x(中文)"),
+                 QJsonObject{{QStringLiteral("converted"), converted},
+                             {QStringLiteral("undone"), undone}});
+    }
+
     // --- CJK Fix: Protected Region KeyPress (PROTECT-KEY-001..005) ---
     cjkExpect(checks, details, QStringLiteral("protectKeyInlineCode"),
               QStringLiteral("`中文`"), 2, 2, QStringLiteral("key , inside inline code"),
