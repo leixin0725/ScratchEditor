@@ -426,7 +426,17 @@ Window {
             } else if (commandId === "settings") {
                 root.openSettings()
             } else if (commandId === "clipboardHistory") {
-                root.openClipboardHistory(true)
+                if (root.historyPanelOpen) {
+                    if (controller.historyLoadConfirmationVisible) {
+                        controller.cancelLoadClipboardHistory()
+                    } else if (controller.historyClearConfirmationVisible) {
+                        controller.cancelClearClipboardHistory()
+                    }
+                    root.closeClipboardHistory()
+                    editor.forceActiveFocus()
+                } else {
+                    root.openClipboardHistory(true)
+                }
             }
         }
 

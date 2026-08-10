@@ -1231,7 +1231,7 @@ EditorCommandRegistry::EditorCommandRegistry(AppSettings *settings,
 
     if (clipboardHistoryAvailable) {
         m_definitions.append({QStringLiteral("clipboardHistory"),
-                              QStringLiteral("打开剪贴板历史"),
+                              QStringLiteral("切换剪贴板历史"),
                               QStringLiteral("界面"), QString(), {}, true});
     }
 

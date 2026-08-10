@@ -554,6 +554,20 @@ int main(int argc, char *argv[])
                  && wideHistory.value(QStringLiteral("editorVisibleWidth")).toDouble() >= 320.0,
              wideHistory);
 
+    execute(QStringLiteral("clipboardHistory"));
+    QThread::msleep(150);
+    const QJsonObject toggledClosedHistory = request(QStringLiteral("status"));
+    addCheck(checks, details, QStringLiteral("historyCommandTogglesClosed"),
+             !toggledClosedHistory.value(QStringLiteral("historyPanelOpen")).toBool(),
+             toggledClosedHistory);
+    execute(QStringLiteral("clipboardHistory"));
+    QThread::msleep(150);
+    const QJsonObject toggledReopenedHistory = request(QStringLiteral("status"));
+    addCheck(checks, details, QStringLiteral("historyCommandTogglesReopened"),
+             toggledReopenedHistory.value(QStringLiteral("historyPanelOpen")).toBool()
+                 && toggledReopenedHistory.value(QStringLiteral("historyQueryFocused")).toBool(),
+             toggledReopenedHistory);
+
     const QJsonObject historyState = request(QStringLiteral("testClipboardHistoryState"));
     const QJsonArray historyItems = historyState.value(QStringLiteral("items")).toArray();
     const QString selectedHistoryId = historyItems.isEmpty()
