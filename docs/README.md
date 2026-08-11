@@ -5,6 +5,10 @@
 
 ## 更新记录
 
+- `2026-08-11`：QML 主窗口按功能边界拆分——`Main.qml` 保留窗口、编辑区和跨面板协调，
+  查找替换、剪贴板历史、设置页与命令面板迁入独立组件；后续 `EditorController`、
+  `EditorCommandRegistry` 与 editing 验收代码的重构顺序和边界见根目录
+  [`README.md`](../README.md#后续维护路线)。
   - `2026-08-10`：修复窗口缩放与轻量关闭动画期间右侧滚动条短暂闪现——滚动条可见性
     由 60ms 防抖快照改为实时跟随 `editorViewport.contentHeight`（滑块尺寸仍按 60ms
     合并更新），window-ui 测试新增 `resizeScrollbarStaysHidden` 与
