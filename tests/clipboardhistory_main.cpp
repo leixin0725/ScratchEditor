@@ -1,5 +1,6 @@
 #include "clipboardgateway.h"
 #include "clipboardhistorycommandgate.h"
+#include "clipboardhistorycoordinator.h"
 #include "clipboardhistorymodel.h"
 #include "clipboardhistorystore.h"
 
@@ -10,6 +11,7 @@
 #include <QElapsedTimer>
 #include <QFile>
 #include <QTemporaryDir>
+#include <QThread>
 
 namespace {
 int failures = 0;
@@ -32,6 +34,19 @@ void checkTrue(const char *name, bool actual)
     checkEqual(name, actual, true);
 }
 
+template<typename Predicate>
+bool waitUntil(Predicate predicate, int timeoutMs = 5000)
+{
+    QElapsedTimer timer;
+    timer.start();
+    while (!predicate() && timer.elapsed() < timeoutMs) {
+        QCoreApplication::processEvents(QEventLoop::AllEvents, 10);
+        QThread::msleep(1);
+    }
+    QCoreApplication::processEvents(QEventLoop::AllEvents, 10);
+    return predicate();
+}
+
 void commandGateTests()
 {
     for (const QString &command : clipboardHistoryTestCommands()) {
@@ -50,6 +65,11 @@ void commandGateTests()
 
 void gatewayTests()
 {
+    constexpr auto backendEnvironment = "SCRATCHEDITOR_TEST_CLIPBOARD_BACKEND";
+    const bool backendWasSet = qEnvironmentVariableIsSet(backendEnvironment);
+    const QByteArray originalBackend = qgetenv(backendEnvironment);
+    qunsetenv(backendEnvironment);
+
     auto gateway = ClipboardGateway::create(true);
     QString error;
     checkTrue("memory monitoring starts", gateway->startMonitoring(0, &error));
@@ -84,6 +104,21 @@ void gatewayTests()
     gateway->setTestFault(QStringLiteral("sequenceRace"), true);
     const quint32 firstSequence = gateway->sequenceNumber();
     checkTrue("sequence race changes sequence", gateway->sequenceNumber() != firstSequence);
+
+    qputenv(backendEnvironment, QByteArrayLiteral("native"));
+    const auto nativeTestGateway = ClipboardGateway::create(true);
+#ifdef Q_OS_WIN
+    checkEqual("explicit native test backend", nativeTestGateway->backendName(),
+               QStringLiteral("win32"));
+#else
+    checkEqual("explicit native test backend fallback", nativeTestGateway->backendName(),
+               QStringLiteral("memory"));
+#endif
+    if (backendWasSet) {
+        qputenv(backendEnvironment, originalBackend);
+    } else {
+        qunsetenv(backendEnvironment);
+    }
 }
 
 void decoderTests()
@@ -345,6 +380,128 @@ void storeTests()
     checkEqual("reset store is empty", resetSnapshot.items.size(), 0);
     checkEqual("reset store revision", resetSnapshot.revision, quint64(1));
 }
+
+void coordinatorTests()
+{
+    QTemporaryDir directory;
+    checkTrue("coordinator temporary directory", directory.isValid());
+
+    const QString asyncPath = directory.filePath(QStringLiteral("async-load.dat"));
+    ClipboardHistorySnapshot persisted;
+    persisted.revision = 7;
+    persisted.items.append(
+        {QStringLiteral("async-id"), QStringLiteral("async-loaded"), 100});
+    {
+        ClipboardHistoryStore fixture(asyncPath);
+        fixture.save(persisted);
+        checkTrue("coordinator async fixture persisted", fixture.waitForIdle(5000));
+    }
+    ClipboardHistoryCoordinator asyncCoordinator(true, true, asyncPath);
+    checkTrue("coordinator async load completes", waitUntil([&] {
+        return asyncCoordinator.storeStateName() == QStringLiteral("Ready")
+            && asyncCoordinator.revision() >= persisted.revision;
+    }));
+    checkEqual("coordinator async load item count", asyncCoordinator.items().size(),
+               qsizetype(1));
+    checkEqual("coordinator async load text", asyncCoordinator.items().first().text,
+               QStringLiteral("async-loaded"));
+
+    const QString echoPath = directory.filePath(QStringLiteral("echo.dat"));
+    ClipboardHistoryCoordinator echoCoordinator(true, true, echoPath);
+    checkTrue("coordinator echo store ready", waitUntil([&] {
+        return echoCoordinator.storeStateName() == QStringLiteral("Ready");
+    }));
+    QString error;
+    checkTrue("coordinator write captures", echoCoordinator.writeText(
+                  QStringLiteral("self-write"), &error));
+    const quint64 beforeEchoRevision = echoCoordinator.revision();
+    ClipboardCaptureCandidate echo;
+    echo.kind = ClipboardCaptureCandidate::Kind::Text;
+    echo.text = QStringLiteral("self-write");
+    echo.sequenceNumber = echoCoordinator.selfWriteSequence();
+    echo.capturedAtUtcMs = 200;
+    echo.includeInHistory = ClipboardCaptureCandidate::IncludeInHistory::Allow;
+    echo = echoCoordinator.injectTestChange(echo);
+    checkEqual("coordinator self write echo suppressed",
+               int(echoCoordinator.captureTestCandidate(echo)),
+               int(ClipboardHistoryCoordinator::CaptureOutcome::SelfWriteNotification));
+    checkEqual("coordinator self write revision stable", echoCoordinator.revision(),
+               beforeEchoRevision);
+    checkEqual("coordinator echo suppression consumed once",
+               int(echoCoordinator.captureTestCandidate(echo)),
+               int(ClipboardHistoryCoordinator::CaptureOutcome::DuplicateRefreshed));
+
+    const QString priorityPath = directory.filePath(QStringLiteral("priority.dat"));
+    ClipboardHistoryCoordinator priorityCoordinator(true, true, priorityPath);
+    checkTrue("coordinator priority store ready", waitUntil([&] {
+        return priorityCoordinator.storeStateName() == QStringLiteral("Ready");
+    }));
+    priorityCoordinator.setTestFault(QStringLiteral("listenerRegistration"), true);
+    checkEqual("coordinator monitor fault restart", priorityCoordinator.restartMonitoring(0),
+               false);
+    const QString monitorError = priorityCoordinator.error();
+    checkTrue("coordinator monitor fault visible", !monitorError.isEmpty());
+    priorityCoordinator.setTestFault(QStringLiteral("write"), true);
+    ClipboardCaptureCandidate storeFailure;
+    storeFailure.kind = ClipboardCaptureCandidate::Kind::Text;
+    storeFailure.text = QStringLiteral("write-fault");
+    storeFailure.capturedAtUtcMs = 300;
+    storeFailure.includeInHistory = ClipboardCaptureCandidate::IncludeInHistory::Allow;
+    checkEqual("coordinator priority capture accepted",
+               int(priorityCoordinator.captureTestCandidate(storeFailure)),
+               int(ClipboardHistoryCoordinator::CaptureOutcome::Inserted));
+    checkTrue("coordinator priority write settles", priorityCoordinator.waitForIdle(5000));
+    checkTrue("coordinator priority state delivered", waitUntil([&] {
+        return priorityCoordinator.storeStateName() == QStringLiteral("WriteFailed");
+    }));
+    checkEqual("coordinator monitor error has priority", priorityCoordinator.error(),
+               monitorError);
+    priorityCoordinator.setTestFault(QStringLiteral("listenerRegistration"), false);
+    checkTrue("coordinator monitor fault recovers", priorityCoordinator.restartMonitoring(0));
+    checkTrue("coordinator store error revealed", !priorityCoordinator.error().isEmpty()
+              && priorityCoordinator.error() != monitorError);
+
+    const QString lockedPath = directory.filePath(QStringLiteral("locked.dat"));
+    {
+        QFile corrupt(lockedPath);
+        checkTrue("coordinator locked fixture opens",
+                  corrupt.open(QIODevice::WriteOnly | QIODevice::Truncate));
+        checkEqual("coordinator locked fixture writes", corrupt.write("corrupt", 7), qint64(7));
+    }
+    {
+        ClipboardHistoryCoordinator lockedCoordinator(true, true, lockedPath);
+        checkTrue("coordinator read locked arrives", waitUntil([&] {
+            return lockedCoordinator.storeStateName() == QStringLiteral("ReadLocked");
+        }));
+        checkTrue("coordinator read locked can clear", lockedCoordinator.canClear());
+        checkTrue("coordinator read locked clear", lockedCoordinator.clearHistory());
+        checkTrue("coordinator read locked clear persists",
+                  lockedCoordinator.waitForIdle(5000));
+        checkTrue("coordinator read locked shutdown", lockedCoordinator.shutdown());
+    }
+    ClipboardHistoryStore clearedStore(lockedPath);
+    ClipboardHistorySnapshot cleared;
+    checkTrue("coordinator cleared store reloads", clearedStore.load(&cleared, &error));
+    checkEqual("coordinator cleared store item count", cleared.items.size(), qsizetype(0));
+    checkEqual("coordinator cleared store revision", cleared.revision, quint64(1));
+
+    const QString shutdownPath = directory.filePath(QStringLiteral("coordinator-shutdown.dat"));
+    {
+        ClipboardHistoryCoordinator shutdownCoordinator(true, true, shutdownPath);
+        checkTrue("coordinator shutdown store ready", waitUntil([&] {
+            return shutdownCoordinator.storeStateName() == QStringLiteral("Ready");
+        }));
+        checkTrue("coordinator shutdown write accepted", shutdownCoordinator.writeText(
+                      QStringLiteral("shutdown-flush"), &error));
+        checkTrue("coordinator shutdown flushes", shutdownCoordinator.shutdown());
+    }
+    ClipboardHistoryStore shutdownStore(shutdownPath);
+    ClipboardHistorySnapshot shutdownSnapshot;
+    checkTrue("coordinator shutdown store reloads",
+              shutdownStore.load(&shutdownSnapshot, &error));
+    checkEqual("coordinator shutdown persisted text", shutdownSnapshot.items.first().text,
+               QStringLiteral("shutdown-flush"));
+}
 }
 
 int main(int argc, char *argv[])
@@ -355,5 +512,6 @@ int main(int argc, char *argv[])
     decoderTests();
     modelTests();
     storeTests();
+    coordinatorTests();
     return failures == 0 ? 0 : 1;
 }

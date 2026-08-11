@@ -4,11 +4,19 @@
 
 - `perf_main.cpp`：性能、真实 OS 输入和微软拼音验收客户端。
 - `system_main.cpp`：滚动条、Escape、焦点和剪贴板异常回归。
+  `run-system-tests.ps1` 仅为其启动的 test-mode 子进程设置
+  `SCRATCHEDITOR_TEST_CLIPBOARD_BACKEND=native`，以验证真实 Win32 剪贴板锁定、写回与恢复；
+  其他 test-mode 进程继续使用隔离的内存后端。
 - `editing_main.cpp`：编辑行为验证，覆盖 Markdown 高亮、编辑命令、查找替换和快捷键回归。
-- `clipboardhistory_main.cpp`：无窗口的内存 gateway、历史集合、二进制 codec、DPAPI、原子存储与故障边界测试。
+- `clipboardhistory_main.cpp`：无窗口的协调器、内存 gateway、历史集合、二进制 codec、DPAPI、
+  原子存储与故障边界测试；协调器用例覆盖异步加载、自写入回声抑制、错误优先级、
+  `ReadLocked` 清空与关闭刷新。
 - `window_ui_main.cpp`：窗口界面验证，覆盖设置页、主题字体、集中配置、历史栏内外侧 hover/快速左向越界、窗口交互/配色、20 轮唤出关闭动画稳定性、闭合态窗口缩放时历史面板右边缘不外露回归、动画开启时缩放窗口编辑区即时跟随回归（历史面板开/合两种状态）、短文本下窗口缩放与轻量关闭动画滚动条不闪现回归、窗口放置算法单元校验（记忆恢复、混合 DPI 非主屏坐标、尺寸阶梯、锚定顺序与重叠避让）与明确排除项回归。
 - `externalfilesession_main.cpp`：外部 CLI 编辑模式的 UTF-8/BOM、Unicode 路径、空文件、原子保存和错误边界回归。
 - `externaleditorprocess_main.cpp`：验证外部编辑进程在编辑期间持续等待、保存写回后以成功状态退出、外部尺寸记忆独立写入 `window/externalGeometry`，并覆盖错误参数退出码。
+
+需要 AHK 基线的 runner 默认使用仓库内 `integration/KeysRedirect.QtMigration.ahk`；如需通过
+`-OriginalAhkPath` 指定项目外单个文件，必须先取得用户明确授权，禁止为此建立外部目录链接。
 - `../scripts/run-external-cli-integration.mjs`：通过伪终端实测 Codex 与 pi 的 `Ctrl+G`，由 ScratchEditor 写回 `/quit` 后确认 CLI 成功返回；Claude Code 暂不在此脚本中测试。
 
 CLI 级脚本需要一个已安装的 `node-pty` 包。本机默认复用全局 Gemini CLI 的依赖；其他环境可

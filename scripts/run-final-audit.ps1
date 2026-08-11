@@ -13,7 +13,7 @@ if ([string]::IsNullOrWhiteSpace($OriginalAhkPath)) {
     $OriginalAhkPath = $env:SCRATCHEDITOR_ORIGINAL_AHK
 }
 if ([string]::IsNullOrWhiteSpace($OriginalAhkPath)) {
-    $OriginalAhkPath = Join-Path $projectRoot "dev-links\AutoHotkey\KeysRedirect.ahk"
+    $OriginalAhkPath = Join-Path $projectRoot "integration\KeysRedirect.QtMigration.ahk"
 }
 
 $requiredFiles = @(
@@ -187,7 +187,7 @@ try {
     if ($gitInitialized) {
         $tracked = @(& git ls-files)
         $trackedExcluded = @($tracked | Where-Object {
-            $_ -match '^(\.tools/|build/|dev-links/|artifacts/(?!baselines/))'
+            $_ -match '^(\.tools/|build/|artifacts/(?!baselines/))'
         })
         & git diff --check *> $null
         $unstagedWhitespace = $LASTEXITCODE
