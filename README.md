@@ -155,7 +155,8 @@ Codex / pi ───────文件模式───> %LOCALAPPDATA%\ScratchEdi
 ```
 
 - `src/`：C++20 应用与编辑核心。
-- `qml/`：预编译 Qt Quick 界面。
+- `qml/`：预编译 Qt Quick 界面；`Main.qml` 只协调窗口、编辑区与跨面板状态，
+  查找替换、剪贴板历史、设置页和命令面板分别由独立组件实现。
 - `integration/`：隔离的 AHK 迁移参考副本。
 - `tests/`：C++ 验收程序和 AHK 测试夹具。
 - `scripts/`：构建、功能回归和性能验收入口。
@@ -164,6 +165,20 @@ Codex / pi ───────文件模式───> %LOCALAPPDATA%\ScratchEdi
 
 完整架构和阶段门槛见 [ScratchEditor-Migration.md](docs/archive/ScratchEditor-Migration.md)，文档索引见
 [docs/README.md](docs/README.md)。
+
+## 后续维护路线
+
+以下顺序用于约束后续重构范围；每一项均应独立实施和回归，不做跨层大规模重写：
+
+1. **拆分 `EditorController` 职责**：优先把剪贴板历史的加载、捕获、持久化与错误聚合
+   收敛到协调器，再隔离测试 IPC 和性能基准设施；保持现有 QML 属性、IPC JSON、ready/test
+   门禁及窗口生命周期语义不变。
+2. **按垂直能力治理 `EditorCommandRegistry`**：依次评估输入自动滚动、选区拖动和纯文本变换的
+   提取，不做一次性重写；继续遵守 Qt UTF-16 索引、单次全文读取/分析及线性复杂度约束。
+3. **拆分 editing 验收代码**：按编辑领域拆分 `tests/editing_main.cpp`，共享 IPC 客户端与断言工具，
+   但保留现有测试可执行文件、脚本入口、独立 check 名和机器可读产物格式。
+
+只有当前一项完成隔离构建与对应完整回归后，才开始下一项；纯粹移动代码时不得顺带改变产品行为。
 
 ## 工具链与构建
 

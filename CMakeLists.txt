@@ -69,7 +69,11 @@ qt_add_qml_module(ScratchEditor
     URI ScratchEditor
     VERSION 1.0
     QML_FILES
+        qml/ClipboardHistoryPanel.qml
+        qml/CommandPalette.qml
+        qml/FindPanel.qml
         qml/Main.qml
+        qml/SettingsPage.qml
 )
 
 target_link_libraries(ScratchEditor PRIVATE
