@@ -150,7 +150,8 @@ KeysRedirect.ahk ──命名管道──> %LOCALAPPDATA%\ScratchEditor\AhkEdito
 Codex / pi ───────文件模式───> %LOCALAPPDATA%\ScratchEditor\CodexEditor\ScratchEditor.exe
 共享 Markdown 主题配置 ──────> %LOCALAPPDATA%\ScratchEditor\ScratchEditor\markdown-style.json
 共享 UI 设计令牌配置 ────────> %LOCALAPPDATA%\ScratchEditor\ScratchEditor\ui.json
-                                             ├─ C++：生命周期、IPC、剪贴板、配置、编辑命令、窗口过渡
+                                             ├─ C++：应用协调、IPC、配置、编辑命令、窗口过渡
+                                             │       └─ ClipboardHistoryCoordinator：剪贴板访问、历史领域与持久化
                                              └─ QML：编辑器、查找、命令面板、设置页与界面动效
 ```
 
@@ -170,9 +171,9 @@ Codex / pi ───────文件模式───> %LOCALAPPDATA%\ScratchEdi
 
 以下顺序用于约束后续重构范围；每一项均应独立实施和回归，不做跨层大规模重写：
 
-1. **拆分 `EditorController` 职责**：优先把剪贴板历史的加载、捕获、持久化与错误聚合
-   收敛到协调器，再隔离测试 IPC 和性能基准设施；保持现有 QML 属性、IPC JSON、ready/test
-   门禁及窗口生命周期语义不变。
+1. **拆分 `EditorController` 职责**：剪贴板访问、历史加载/捕获/持久化和错误聚合已收敛到
+   `ClipboardHistoryCoordinator`；下一步隔离测试 IPC 和性能基准设施。继续保持现有 QML 属性、
+   IPC JSON、ready/test 门禁及窗口生命周期语义不变。
 2. **按垂直能力治理 `EditorCommandRegistry`**：依次评估输入自动滚动、选区拖动和纯文本变换的
    提取，不做一次性重写；继续遵守 Qt UTF-16 索引、单次全文读取/分析及线性复杂度约束。
 3. **拆分 editing 验收代码**：按编辑领域拆分 `tests/editing_main.cpp`，共享 IPC 客户端与断言工具，

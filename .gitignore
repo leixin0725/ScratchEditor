@@ -1,6 +1,5 @@
 /.tools/
 /build/
-/dev-links/
 
 /artifacts/*
 !/artifacts/baselines/

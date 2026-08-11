@@ -83,7 +83,18 @@ QJsonObject waitForStatus(const std::function<bool(const QJsonObject &)> &predic
 #ifdef Q_OS_WIN
 QString readClipboardText()
 {
-    if (!OpenClipboard(nullptr)) {
+    constexpr int maximumAttempts = 50;
+    bool opened = false;
+    for (int attempt = 0; attempt < maximumAttempts; ++attempt) {
+        if (OpenClipboard(nullptr)) {
+            opened = true;
+            break;
+        }
+        if (attempt + 1 < maximumAttempts) {
+            Sleep(2);
+        }
+    }
+    if (!opened) {
         return {};
     }
     QString result;
@@ -160,7 +171,8 @@ public:
             // Clipboard ownership can remain transiently unavailable just after the
             // preceding write. Retry for a bounded interval so this fixture tests
             // the editor's locked-clipboard behavior instead of a one-shot race.
-            for (int attempt = 0; attempt < 500 && !m_acquired; ++attempt) {
+            constexpr int maximumAttempts = 2000;
+            for (int attempt = 0; attempt < maximumAttempts && !m_acquired; ++attempt) {
                 m_acquired = OpenClipboard(nullptr) != FALSE;
                 if (!m_acquired) {
                     Sleep(1);

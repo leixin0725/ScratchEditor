@@ -1,9 +1,7 @@
 #include "editorcontroller.h"
 #include "appsettings.h"
-#include "clipboardgateway.h"
 #include "clipboardhistorycommandgate.h"
-#include "clipboardhistorymodel.h"
-#include "clipboardhistorystore.h"
+#include "clipboardhistorycoordinator.h"
 #include "editorcommandregistry.h"
 #include "externalfilesession.h"
 #include "markdownhighlighter.h"
@@ -14,7 +12,6 @@
 
 #include <QColor>
 #include <QCoreApplication>
-#include <QCryptographicHash>
 #include <QCursor>
 #include <QDateTime>
 #include <QDir>
@@ -76,6 +73,24 @@ double percentile(QVector<double> values, double fraction)
 QString plainCommand(const QByteArray &line)
 {
     return QString::fromUtf8(line).trimmed();
+}
+
+QString clipboardCaptureOutcomeName(ClipboardHistoryCoordinator::CaptureOutcome outcome)
+{
+    using Outcome = ClipboardHistoryCoordinator::CaptureOutcome;
+    switch (outcome) {
+    case Outcome::Unavailable: return QStringLiteral("unavailable");
+    case Outcome::Inserted: return QStringLiteral("inserted");
+    case Outcome::DuplicateRefreshed: return QStringLiteral("duplicateRefreshed");
+    case Outcome::Empty: return QStringLiteral("empty");
+    case Outcome::Oversize: return QStringLiteral("oversize");
+    case Outcome::SelfWriteNotification: return QStringLiteral("selfWriteNotification");
+    case Outcome::ExcludedFromMonitor: return QStringLiteral("excludedFromMonitor");
+    case Outcome::ExcludedFromHistory: return QStringLiteral("excludedFromHistory");
+    case Outcome::NonText: return QStringLiteral("nonText");
+    case Outcome::ReadFailure: return QStringLiteral("readFailure");
+    }
+    return QStringLiteral("readFailure");
 }
 
 #ifdef Q_OS_WIN
@@ -241,43 +256,12 @@ EditorController::EditorController(bool testMode, QElapsedTimer *startupTimer,
     }
     m_uiConfig = std::make_unique<UiConfig>(UiConfig::load(m_testMode));
     m_settings = std::make_unique<AppSettings>(m_testMode, m_uiConfig.get());
-    m_clipboardGateway = ClipboardGateway::create(m_testMode);
-    if (!externalFileMode()) {
-        m_clipboardHistoryModel = std::make_unique<ClipboardHistoryModel>();
-        const QString historyPath = QDir(QFileInfo(m_settings->fileName()).absolutePath())
-                                        .filePath(QStringLiteral("clipboard-history.dat"));
-        m_clipboardHistoryStore = std::make_unique<ClipboardHistoryStore>(historyPath);
-        connect(m_clipboardHistoryModel.get(), &ClipboardHistoryModel::historyChanged,
-                this, [this] {
-                    persistClipboardHistory();
-                    emit clipboardHistoryStateChanged();
-                });
-        connect(m_clipboardHistoryStore.get(), &ClipboardHistoryStore::stateChanged,
-                this, [this] {
-                    m_clipboardHistoryStoreError = m_clipboardHistoryStore->error();
-                    updateClipboardHistoryError();
-                });
-        QPointer<EditorController> guard(this);
-        m_clipboardHistoryStore->loadAsync(
-            [guard](bool loaded, ClipboardHistorySnapshot snapshot, QString error) mutable {
-                if (!guard) {
-                    return;
-                }
-                QMetaObject::invokeMethod(guard, [guard, loaded, snapshot = std::move(snapshot),
-                                                   error = std::move(error)]() mutable {
-                    if (!guard) {
-                        return;
-                    }
-                    if (loaded) {
-                        guard->m_clipboardHistoryModel->mergePersisted(snapshot.items,
-                                                                       snapshot.revision);
-                    } else {
-                        guard->m_clipboardHistoryStoreError = error;
-                        guard->updateClipboardHistoryError();
-                    }
-                }, Qt::QueuedConnection);
-            });
-    }
+    const QString historyPath = QDir(QFileInfo(m_settings->fileName()).absolutePath())
+                                    .filePath(QStringLiteral("clipboard-history.dat"));
+    m_clipboardHistory = std::make_unique<ClipboardHistoryCoordinator>(
+        m_testMode, !externalFileMode(), historyPath);
+    connect(m_clipboardHistory.get(), &ClipboardHistoryCoordinator::stateChanged,
+            this, &EditorController::clipboardHistoryStateChanged);
     m_markdownStyle = std::make_unique<MarkdownStyle>(MarkdownStyle::load(m_testMode));
     m_markdownStyleReloadTimer.setSingleShot(true);
     m_markdownStyleReloadTimer.setInterval(150);
@@ -372,18 +356,7 @@ EditorController::EditorController(bool testMode, QElapsedTimer *startupTimer,
 }
 
 EditorController::~EditorController()
-{
-    if (m_clipboardGateway) {
-        m_clipboardGateway->stopMonitoring();
-    }
-    if (m_clipboardHistoryStore) {
-        if (!m_clipboardHistoryStore->flushForShutdown()) {
-            // aboutToQuit 后事件循环不再承担业务工作。极端超时下保留对象到进程退出，
-            // 避免 QThreadPool 析构再次无限等待；worker 已被标记为不得 commit。
-            m_clipboardHistoryStore.release();
-        }
-    }
-}
+    = default;
 
 bool EditorController::nativeEventFilter(const QByteArray &eventType, void *message,
                                          qintptr *result)
@@ -402,7 +375,9 @@ bool EditorController::nativeEventFilter(const QByteArray &eventType, void *mess
             scheduleScreenConfigurationUpdate();
         } else if (msg && msg->message == WM_CLIPBOARDUPDATE
                    && clipboardHistoryAvailable()) {
-            QTimer::singleShot(0, this, [this] { processClipboardHistoryChange(); });
+            QTimer::singleShot(0, m_clipboardHistory.get(), [this] {
+                m_clipboardHistory->processClipboardChange();
+            });
         }
     }
 #else
@@ -627,23 +602,22 @@ bool EditorController::clipboardHealthy() const
 
 QAbstractItemModel *EditorController::clipboardHistoryModel() const
 {
-    return m_clipboardHistoryModel.get();
+    return m_clipboardHistory ? m_clipboardHistory->model() : nullptr;
 }
 
 bool EditorController::clipboardHistoryAvailable() const
 {
-    return !externalFileMode() && bool(m_clipboardHistoryModel);
+    return m_clipboardHistory && m_clipboardHistory->available();
 }
 
 bool EditorController::clipboardHistoryHealthy() const
 {
-    return clipboardHistoryAvailable() && m_clipboardHistoryStore
-        && m_clipboardHistoryStore->healthy() && m_clipboardHistoryError.isEmpty();
+    return m_clipboardHistory && m_clipboardHistory->healthy();
 }
 
 QString EditorController::clipboardHistoryError() const
 {
-    return m_clipboardHistoryError;
+    return m_clipboardHistory ? m_clipboardHistory->error() : QString();
 }
 
 bool EditorController::historyLoadConfirmationVisible() const
@@ -791,12 +765,9 @@ void EditorController::registerWindow(QQuickWindow *window)
         m_positioned = restoreWindowGeometry();
         m_window->create();
         applyNativeWindowStyle();
-        if (clipboardHistoryAvailable() && m_clipboardGateway) {
-            QString error;
-            if (!m_clipboardGateway->startMonitoring(
-                    reinterpret_cast<quintptr>(m_window->winId()), &error)) {
-                setClipboardHistoryError(error);
-            }
+        if (clipboardHistoryAvailable()) {
+            m_clipboardHistory->startMonitoring(
+                reinterpret_cast<quintptr>(m_window->winId()));
         }
     }
     updateReadyState();
@@ -1270,13 +1241,13 @@ void EditorController::buildCommandHandlers()
         {QStringLiteral("testClipboard"), {Gate::Test, [this](const DispatchRequest &r) {
             QJsonObject response = statusObject();
             response.insert(QStringLiteral("command"), r.command);
-            response.insert(QStringLiteral("text"), m_clipboardGateway
-                                ? m_clipboardGateway->testClipboardText() : QString());
+            response.insert(QStringLiteral("text"), m_clipboardHistory
+                                ? m_clipboardHistory->testClipboardText() : QString());
             sendResponse(r.socket, response, r.startedNs, r.requestId);
         }}},
         {QStringLiteral("testSetClipboard"), {Gate::Test, [this](const DispatchRequest &r) {
-            if (m_clipboardGateway) {
-                m_clipboardGateway->setTestClipboardText(
+            if (m_clipboardHistory) {
+                m_clipboardHistory->setTestClipboardText(
                     r.request.value(QStringLiteral("text")).toString());
             }
             QJsonObject response = statusObject();
@@ -1287,8 +1258,8 @@ void EditorController::buildCommandHandlers()
         {QStringLiteral("testDeliveredText"), {Gate::Test, [this](const DispatchRequest &r) {
             QJsonObject response = statusObject();
             response.insert(QStringLiteral("command"), r.command);
-            response.insert(QStringLiteral("text"), m_clipboardGateway
-                                ? m_clipboardGateway->testDeliveredText() : QString());
+            response.insert(QStringLiteral("text"), m_clipboardHistory
+                                ? m_clipboardHistory->testDeliveredText() : QString());
             sendResponse(r.socket, response, r.startedNs, r.requestId);
         }}},
         {QStringLiteral("testEmitClipboardChange"), {Gate::Test, [this](const DispatchRequest &r) {
@@ -1318,13 +1289,15 @@ void EditorController::buildCommandHandlers()
                 : (r.request.value(QStringLiteral("excludeFromHistory")).toBool()
                     ? ClipboardCaptureCandidate::IncludeInHistory::Deny
                     : ClipboardCaptureCandidate::IncludeInHistory::Allow);
-            if (m_clipboardGateway) {
-                candidate = m_clipboardGateway->injectTestChange(candidate);
+            if (m_clipboardHistory) {
+                candidate = m_clipboardHistory->injectTestChange(candidate);
             }
             if (r.request.value(QStringLiteral("processThroughMonitor")).toBool()) {
-                const quint64 beforeRevision = m_clipboardHistoryModel
-                    ? m_clipboardHistoryModel->revision() : 0;
-                processClipboardHistoryChange();
+                const quint64 beforeRevision = m_clipboardHistory
+                    ? m_clipboardHistory->revision() : 0;
+                if (m_clipboardHistory) {
+                    m_clipboardHistory->processClipboardChange();
+                }
                 const QPointer<QLocalSocket> socket = r.socket;
                 const qint64 startedNs = r.startedNs;
                 const QString requestId = r.requestId;
@@ -1332,8 +1305,8 @@ void EditorController::buildCommandHandlers()
                 QTimer::singleShot(100, this, [this, socket, startedNs, requestId,
                                                 command, beforeRevision] {
                     QJsonObject response = statusObject();
-                    const quint64 revision = m_clipboardHistoryModel
-                        ? m_clipboardHistoryModel->revision() : 0;
+                    const quint64 revision = m_clipboardHistory
+                        ? m_clipboardHistory->revision() : 0;
                     const bool captured = revision > beforeRevision;
                     response.insert(QStringLiteral("command"), command);
                     response.insert(QStringLiteral("captured"), captured);
@@ -1346,28 +1319,10 @@ void EditorController::buildCommandHandlers()
                 });
                 return;
             }
-            QString outcome;
-            if (candidate.excludeFromMonitor) outcome = QStringLiteral("excludedFromMonitor");
-            else if (candidate.includeInHistory == ClipboardCaptureCandidate::IncludeInHistory::Deny
-                     || candidate.includeInHistory == ClipboardCaptureCandidate::IncludeInHistory::Malformed)
-                outcome = QStringLiteral("excludedFromHistory");
-            else if (candidate.kind == ClipboardCaptureCandidate::Kind::Empty)
-                outcome = QStringLiteral("empty");
-            else if (candidate.kind == ClipboardCaptureCandidate::Kind::NonText)
-                outcome = QStringLiteral("nonText");
-            else if (candidate.kind == ClipboardCaptureCandidate::Kind::ReadFailure)
-                outcome = QStringLiteral("readFailure");
-            else {
-                const QByteArray fingerprint = QCryptographicHash::hash(
-                    candidate.text.toUtf8(), QCryptographicHash::Sha256);
-                const bool selfNotification = m_selfWriteSequence != 0
-                    && candidate.sequenceNumber == m_selfWriteSequence
-                    && fingerprint == m_selfWriteFingerprint
-                    && m_monotonic.elapsed() <= m_selfWriteExpiresAtMs;
-                outcome = captureHistoryCandidate(candidate.text, candidate.capturedAtUtcMs,
-                                                  candidate.sequenceNumber,
-                                                  selfNotification);
-            }
+            const QString outcome = m_clipboardHistory
+                ? clipboardCaptureOutcomeName(
+                      m_clipboardHistory->captureTestCandidate(candidate))
+                : QStringLiteral("unavailable");
             QJsonObject response = statusObject();
             response.insert(QStringLiteral("command"), r.command);
             response.insert(QStringLiteral("ok"), true);
@@ -1375,11 +1330,11 @@ void EditorController::buildCommandHandlers()
                             outcome == QStringLiteral("inserted")
                                 || outcome == QStringLiteral("duplicateRefreshed"));
             response.insert(QStringLiteral("outcome"), outcome);
-            response.insert(QStringLiteral("historyCount"), m_clipboardHistoryModel
-                                ? m_clipboardHistoryModel->items().size() : 0);
+            response.insert(QStringLiteral("historyCount"), m_clipboardHistory
+                                ? m_clipboardHistory->items().size() : 0);
             response.insert(QStringLiteral("visibleRevision"),
-                            static_cast<qint64>(m_clipboardHistoryModel
-                                ? m_clipboardHistoryModel->revision() : 0));
+                            static_cast<qint64>(m_clipboardHistory
+                                ? m_clipboardHistory->revision() : 0));
             response.insert(QStringLiteral("sequenceNumber"),
                             static_cast<qint64>(candidate.sequenceNumber));
             if (isVisible()) {
@@ -1392,8 +1347,8 @@ void EditorController::buildCommandHandlers()
             QJsonObject response = statusObject();
             response.insert(QStringLiteral("command"), r.command);
             QJsonArray items;
-            if (m_clipboardHistoryModel) {
-                for (const ClipboardHistoryItem &item : m_clipboardHistoryModel->items()) {
+            if (m_clipboardHistory) {
+                for (const ClipboardHistoryItem &item : m_clipboardHistory->items()) {
                     QJsonObject value;
                     value.insert(QStringLiteral("id"), item.id);
                     value.insert(QStringLiteral("text"), item.text);
@@ -1402,29 +1357,27 @@ void EditorController::buildCommandHandlers()
                     items.append(value);
                 }
                 QJsonArray visibleIds;
-                for (const QString &id : m_clipboardHistoryModel->visibleIds()) {
+                for (const QString &id : m_clipboardHistory->visibleIds()) {
                     visibleIds.append(id);
                 }
                 response.insert(QStringLiteral("visibleIds"), visibleIds);
-                response.insert(QStringLiteral("query"), m_clipboardHistoryModel->filter());
+                response.insert(QStringLiteral("query"), m_clipboardHistory->filter());
                 response.insert(QStringLiteral("selectedId"),
-                                m_clipboardHistoryModel->selectedId());
+                                m_clipboardHistory->selectedId());
                 response.insert(QStringLiteral("revision"),
-                                static_cast<qint64>(m_clipboardHistoryModel->revision()));
+                                static_cast<qint64>(m_clipboardHistory->revision()));
             }
             response.insert(QStringLiteral("items"), items);
             response.insert(QStringLiteral("persistedRevision"),
-                            static_cast<qint64>(m_clipboardHistoryStore
-                                ? m_clipboardHistoryStore->persistedRevision() : 0));
+                            static_cast<qint64>(m_clipboardHistory
+                                ? m_clipboardHistory->persistedRevision() : 0));
             sendResponse(r.socket, response, r.startedNs, r.requestId);
         }}},
         {QStringLiteral("testResetClipboardHistory"), {Gate::Test, [this](const DispatchRequest &r) {
             QString error;
-            if (m_clipboardHistoryModel) m_clipboardHistoryModel->reset();
-            if (m_clipboardHistoryStore) {
-                m_clipboardHistoryStore->waitForIdle(5000);
+            if (m_clipboardHistory) {
                 const QString directory = QFileInfo(m_settings->fileName()).absolutePath();
-                m_clipboardHistoryStore->removeIsolatedFile(directory, &error);
+                m_clipboardHistory->resetForTest(directory, &error);
             }
             QJsonObject response = statusObject();
             response.insert(QStringLiteral("command"), r.command);
@@ -1435,29 +1388,24 @@ void EditorController::buildCommandHandlers()
         {QStringLiteral("testSetClipboardHistoryFault"), {Gate::Test, [this](const DispatchRequest &r) {
             const QString operation = r.request.value(QStringLiteral("operation")).toString();
             const bool enabled = r.request.value(QStringLiteral("enabled")).toBool();
-            if (m_clipboardGateway) m_clipboardGateway->setTestFault(operation, enabled);
-            if (m_clipboardHistoryStore) m_clipboardHistoryStore->setFault(operation, enabled);
+            if (m_clipboardHistory) m_clipboardHistory->setTestFault(operation, enabled);
             QJsonObject response = statusObject();
             response.insert(QStringLiteral("command"), r.command);
             response.insert(QStringLiteral("ok"), true);
             sendResponse(r.socket, response, r.startedNs, r.requestId);
         }}},
         {QStringLiteral("testRestartClipboardMonitoring"), {Gate::Test, [this](const DispatchRequest &r) {
-            QString error;
-            if (m_clipboardGateway) {
-                m_clipboardGateway->stopMonitoring();
-                m_clipboardGateway->startMonitoring(0, &error);
-            }
-            setClipboardHistoryError(error);
+            const bool restarted = m_clipboardHistory
+                && m_clipboardHistory->restartMonitoring(0);
             QJsonObject response = statusObject();
             response.insert(QStringLiteral("command"), r.command);
-            response.insert(QStringLiteral("ok"), error.isEmpty());
+            response.insert(QStringLiteral("ok"), restarted);
             sendResponse(r.socket, response, r.startedNs, r.requestId);
         }}},
         {QStringLiteral("testWaitForClipboardHistoryIdle"), {Gate::Test, [this](const DispatchRequest &r) {
             const int timeoutMs = qBound(1, r.request.value(QStringLiteral("timeoutMs")).toInt(5000), 10000);
-            const bool idle = !m_clipboardHistoryStore
-                || m_clipboardHistoryStore->waitForIdle(timeoutMs);
+            const bool idle = !m_clipboardHistory
+                || m_clipboardHistory->waitForIdle(timeoutMs);
             QJsonObject response = statusObject();
             response.insert(QStringLiteral("command"), r.command);
             response.insert(QStringLiteral("ok"), idle);
@@ -2434,11 +2382,11 @@ void EditorController::deliverTextToNextWindow()
     const quintptr editorWindow = m_window
         ? static_cast<quintptr>(m_window->winId()) : 0;
     QTimer::singleShot(m_testMode ? 0 : 150, this, [this, editorWindow] {
-        if (!m_clipboardGateway) {
+        if (!m_clipboardHistory) {
             return;
         }
         QString error;
-        if (!m_clipboardGateway->deliverText(editorWindow, &error) && !error.isEmpty()) {
+        if (!m_clipboardHistory->deliverText(editorWindow, &error) && !error.isEmpty()) {
             setClipboardState(false, error);
         }
     });
@@ -2467,168 +2415,43 @@ void EditorController::shutdown()
     if (!m_testMode && !externalFileMode() && isVisible()) {
         commitAndHide();
     }
-    if (m_clipboardGateway) {
-        m_clipboardGateway->stopMonitoring();
-    }
-    if (m_clipboardHistoryStore) {
-        m_clipboardHistoryStore->waitForIdle(10000);
+    if (m_clipboardHistory) {
+        m_clipboardHistory->shutdown();
     }
     m_server.close();
 }
 
 bool EditorController::readClipboardText(QString *text, QString *errorMessage)
 {
-    return m_clipboardGateway && m_clipboardGateway->readText(text, errorMessage);
+    return m_clipboardHistory && m_clipboardHistory->readText(text, errorMessage);
 }
 
 bool EditorController::writeClipboardText(const QString &text, QString *errorMessage)
 {
-    if (!m_clipboardGateway || !m_clipboardGateway->writeText(text, errorMessage)) {
-        return false;
-    }
-    if (clipboardHistoryAvailable() && !text.isEmpty()) {
-        const quint32 sequence = m_clipboardGateway->sequenceNumber();
-        captureHistoryCandidate(text, QDateTime::currentMSecsSinceEpoch(), sequence);
-        if (sequence != 0) {
-            m_selfWriteSequence = sequence;
-            m_selfWriteFingerprint = QCryptographicHash::hash(text.toUtf8(),
-                                                               QCryptographicHash::Sha256);
-            m_selfWriteExpiresAtMs = m_monotonic.elapsed() + 2000;
-        }
-    }
-    return true;
-}
-
-void EditorController::processClipboardHistoryChange(int attempt)
-{
-    if (!clipboardHistoryAvailable() || !m_clipboardGateway
-        || !m_clipboardGateway->monitoring()) {
-        return;
-    }
-    const quint32 before = m_clipboardGateway->sequenceNumber();
-    QString error;
-    const ClipboardCaptureCandidate candidate =
-        m_clipboardGateway->readHistoryCandidate(&error);
-    const quint32 after = m_clipboardGateway->sequenceNumber();
-    if (before != 0 && after != 0 && before != after) {
-        constexpr int maximumAttempts = 6;
-        if (attempt + 1 < maximumAttempts) {
-            QTimer::singleShot(12, this, [this, attempt] {
-                processClipboardHistoryChange(attempt + 1);
-            });
-        } else {
-            setClipboardHistoryError(QStringLiteral("剪贴板在读取期间持续变化，已暂停本次捕获"));
-        }
-        return;
-    }
-    if (candidate.kind == ClipboardCaptureCandidate::Kind::ReadFailure) {
-        if (!error.isEmpty()) {
-            setClipboardHistoryError(error);
-        }
-        return;
-    }
-    setClipboardHistoryError({});
-    if (candidate.excludeFromMonitor
-        || candidate.includeInHistory == ClipboardCaptureCandidate::IncludeInHistory::Deny
-        || candidate.includeInHistory == ClipboardCaptureCandidate::IncludeInHistory::Malformed
-        || candidate.kind != ClipboardCaptureCandidate::Kind::Text) {
-        return;
-    }
-    const QByteArray fingerprint = QCryptographicHash::hash(candidate.text.toUtf8(),
-                                                            QCryptographicHash::Sha256);
-    const bool selfNotification = m_selfWriteSequence != 0
-        && candidate.sequenceNumber == m_selfWriteSequence
-        && fingerprint == m_selfWriteFingerprint
-        && m_monotonic.elapsed() <= m_selfWriteExpiresAtMs;
-    captureHistoryCandidate(candidate.text, candidate.capturedAtUtcMs,
-                            candidate.sequenceNumber, selfNotification);
-}
-
-QString EditorController::captureHistoryCandidate(const QString &text, qint64 capturedAtUtcMs,
-                                                  quint32 sequenceNumber,
-                                                  bool selfNotification)
-{
-    Q_UNUSED(sequenceNumber);
-    if (!m_clipboardHistoryModel) {
-        return QStringLiteral("unavailable");
-    }
-    if (selfNotification) {
-        m_selfWriteSequence = 0;
-        m_selfWriteFingerprint.clear();
-        m_selfWriteExpiresAtMs = 0;
-        return QStringLiteral("selfWriteNotification");
-    }
-    const auto outcome = m_clipboardHistoryModel->capture(
-        text, capturedAtUtcMs > 0 ? capturedAtUtcMs : QDateTime::currentMSecsSinceEpoch());
-    switch (outcome) {
-    case ClipboardHistoryModel::CaptureOutcome::Inserted:
-        return QStringLiteral("inserted");
-    case ClipboardHistoryModel::CaptureOutcome::DuplicateRefreshed:
-        return QStringLiteral("duplicateRefreshed");
-    case ClipboardHistoryModel::CaptureOutcome::Empty:
-        return QStringLiteral("empty");
-    case ClipboardHistoryModel::CaptureOutcome::Oversize:
-        return QStringLiteral("oversize");
-    }
-    return QStringLiteral("readFailure");
-}
-
-void EditorController::persistClipboardHistory()
-{
-    if (!m_clipboardHistoryStore || !m_clipboardHistoryModel) {
-        return;
-    }
-    if (m_clipboardHistoryStore->state() == ClipboardHistoryStore::State::Loading) {
-        return;
-    }
-    ClipboardHistorySnapshot snapshot;
-    snapshot.revision = m_clipboardHistoryModel->revision();
-    snapshot.items = m_clipboardHistoryModel->items();
-    m_clipboardHistoryStore->save(snapshot);
-}
-
-void EditorController::setClipboardHistoryError(const QString &error)
-{
-    if (m_clipboardHistoryMonitorError == error) {
-        return;
-    }
-    m_clipboardHistoryMonitorError = error;
-    updateClipboardHistoryError();
-}
-
-void EditorController::updateClipboardHistoryError()
-{
-    const QString combined = !m_clipboardHistoryMonitorError.isEmpty()
-        ? m_clipboardHistoryMonitorError
-        : m_clipboardHistoryStoreError;
-    if (m_clipboardHistoryError == combined) {
-        return;
-    }
-    m_clipboardHistoryError = combined;
-    emit clipboardHistoryStateChanged();
+    return m_clipboardHistory && m_clipboardHistory->writeText(text, errorMessage);
 }
 
 void EditorController::setClipboardHistoryFilter(const QString &query)
 {
-    if (m_clipboardHistoryModel) {
-        m_clipboardHistoryModel->setFilter(query);
+    if (m_clipboardHistory) {
+        m_clipboardHistory->setFilter(query);
     }
 }
 
 void EditorController::selectClipboardHistoryItem(const QString &id)
 {
-    if (m_clipboardHistoryModel) {
-        m_clipboardHistoryModel->setSelectedId(id);
+    if (m_clipboardHistory) {
+        m_clipboardHistory->setSelectedId(id);
         emit clipboardHistoryUiStateChanged();
     }
 }
 
 void EditorController::requestLoadClipboardHistory(const QString &id)
 {
-    if (!m_clipboardHistoryModel || !m_editor) {
+    if (!m_clipboardHistory || !m_editor) {
         return;
     }
-    const QString target = m_clipboardHistoryModel->textById(id);
+    const QString target = m_clipboardHistory->textById(id);
     if (target.isNull()) {
         return;
     }
@@ -2645,10 +2468,10 @@ void EditorController::requestLoadClipboardHistory(const QString &id)
 
 void EditorController::confirmLoadClipboardHistory()
 {
-    if (!m_clipboardHistoryModel || !m_editor || m_pendingHistoryId.isEmpty()) {
+    if (!m_clipboardHistory || !m_editor || m_pendingHistoryId.isEmpty()) {
         return;
     }
-    const QString text = m_clipboardHistoryModel->textById(m_pendingHistoryId);
+    const QString text = m_clipboardHistory->textById(m_pendingHistoryId);
     if (text.isNull()) {
         cancelLoadClipboardHistory();
         return;
@@ -2678,19 +2501,17 @@ void EditorController::cancelLoadClipboardHistory()
 
 void EditorController::deleteClipboardHistoryItem(const QString &id)
 {
-    if (m_clipboardHistoryModel) {
-        m_clipboardHistoryModel->deleteById(id);
+    if (m_clipboardHistory) {
+        m_clipboardHistory->deleteById(id);
     }
 }
 
 void EditorController::requestClearClipboardHistory()
 {
-    if (!m_clipboardHistoryModel) {
+    if (!m_clipboardHistory) {
         return;
     }
-    const bool unreadableStore = m_clipboardHistoryStore
-        && m_clipboardHistoryStore->state() == ClipboardHistoryStore::State::ReadLocked;
-    if (m_clipboardHistoryModel->items().isEmpty() && !unreadableStore) {
+    if (!m_clipboardHistory->canClear()) {
         return;
     }
     m_historyClearConfirmationVisible = true;
@@ -2699,16 +2520,11 @@ void EditorController::requestClearClipboardHistory()
 
 void EditorController::confirmClearClipboardHistory()
 {
-    if (!m_clipboardHistoryModel || !m_historyClearConfirmationVisible) {
+    if (!m_clipboardHistory || !m_historyClearConfirmationVisible) {
         return;
     }
-    const bool resetUnreadableStore = m_clipboardHistoryStore
-        && m_clipboardHistoryStore->state() == ClipboardHistoryStore::State::ReadLocked;
-    if (resetUnreadableStore) {
-        m_clipboardHistoryStore->resetUnreadableStore();
-    }
     m_historyClearConfirmationVisible = false;
-    m_clipboardHistoryModel->clearHistory(resetUnreadableStore);
+    m_clipboardHistory->clearHistory();
     emit clipboardHistoryUiStateChanged();
 }
 
@@ -3228,27 +3044,28 @@ QJsonObject EditorController::statusObject() const
     status.insert(QStringLiteral("historyAvailable"), clipboardHistoryAvailable());
     status.insert(QStringLiteral("historyHealthy"), clipboardHistoryHealthy());
     status.insert(QStringLiteral("historyError"), clipboardHistoryError());
-    status.insert(QStringLiteral("historyCount"), m_clipboardHistoryModel
-                      ? m_clipboardHistoryModel->items().size() : 0);
+    status.insert(QStringLiteral("historyCount"), m_clipboardHistory
+                      ? m_clipboardHistory->items().size() : 0);
     status.insert(QStringLiteral("historyStoreFile"),
-                  m_testMode && m_clipboardHistoryStore
-                      ? m_clipboardHistoryStore->filePath() : QString());
-    status.insert(QStringLiteral("historyStoreState"), m_clipboardHistoryStore
-                      ? m_clipboardHistoryStore->stateName() : QStringLiteral("Unavailable"));
+                  m_testMode && m_clipboardHistory
+                      ? m_clipboardHistory->storeFilePath() : QString());
+    status.insert(QStringLiteral("historyStoreState"), m_clipboardHistory
+                      ? m_clipboardHistory->storeStateName() : QStringLiteral("Unavailable"));
     status.insert(QStringLiteral("historyLoadConfirmationVisible"),
                   m_historyLoadConfirmationVisible);
     status.insert(QStringLiteral("historyClearConfirmationVisible"),
                   m_historyClearConfirmationVisible);
-    status.insert(QStringLiteral("historySelectedId"), m_clipboardHistoryModel
-                      ? m_clipboardHistoryModel->selectedId() : QString());
-    status.insert(QStringLiteral("clipboardBackend"), m_clipboardGateway
-                      ? m_clipboardGateway->backendName() : QStringLiteral("unavailable"));
+    status.insert(QStringLiteral("historySelectedId"), m_clipboardHistory
+                      ? m_clipboardHistory->selectedId() : QString());
+    status.insert(QStringLiteral("clipboardBackend"), m_clipboardHistory
+                      ? m_clipboardHistory->backendName() : QStringLiteral("unavailable"));
     status.insert(QStringLiteral("nativeClipboardAccessAttempts"),
-                  static_cast<qint64>(m_clipboardGateway
-                      ? m_clipboardGateway->nativeAccessAttempts() : 0));
+                  static_cast<qint64>(m_clipboardHistory
+                      ? m_clipboardHistory->nativeAccessAttempts() : 0));
     if (m_testMode) {
         status.insert(QStringLiteral("testSelfWriteSequence"),
-                      static_cast<qint64>(m_selfWriteSequence));
+                      static_cast<qint64>(m_clipboardHistory
+                          ? m_clipboardHistory->selfWriteSequence() : 0));
     }
 
     if (m_window) {

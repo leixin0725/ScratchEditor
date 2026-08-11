@@ -418,7 +418,10 @@ private:
 
 std::unique_ptr<ClipboardGateway> ClipboardGateway::create(bool testMode, QObject *parent)
 {
-    if (testMode) {
+    const bool nativeTestBackend = testMode
+        && qEnvironmentVariable("SCRATCHEDITOR_TEST_CLIPBOARD_BACKEND")
+               == QStringLiteral("native");
+    if (testMode && !nativeTestBackend) {
         return std::make_unique<MemoryClipboardGateway>(parent);
     }
 #ifdef Q_OS_WIN

@@ -40,6 +40,8 @@ qt_add_executable(ScratchEditor WIN32
     src/windowplacement.h
     src/clipboardgateway.cpp
     src/clipboardgateway.h
+    src/clipboardhistorycoordinator.cpp
+    src/clipboardhistorycoordinator.h
     src/clipboardhistorycommandgate.h
     src/clipboardhistorymodel.cpp
     src/clipboardhistorymodel.h
@@ -98,6 +100,8 @@ qt_add_executable(ScratchEditorClipboardHistoryTests
     tests/clipboardhistory_main.cpp
     src/clipboardgateway.cpp
     src/clipboardgateway.h
+    src/clipboardhistorycoordinator.cpp
+    src/clipboardhistorycoordinator.h
     src/clipboardhistorycommandgate.h
     src/clipboardhistorymodel.cpp
     src/clipboardhistorymodel.h

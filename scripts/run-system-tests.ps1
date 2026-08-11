@@ -14,7 +14,7 @@ if ([string]::IsNullOrWhiteSpace($OriginalAhkPath)) {
     $OriginalAhkPath = $env:SCRATCHEDITOR_ORIGINAL_AHK
 }
 if ([string]::IsNullOrWhiteSpace($OriginalAhkPath)) {
-    $OriginalAhkPath = Join-Path $projectRoot "dev-links\AutoHotkey\KeysRedirect.ahk"
+    $OriginalAhkPath = Join-Path $projectRoot "integration\KeysRedirect.QtMigration.ahk"
 }
 $originalAhk = $OriginalAhkPath
 $artifactDir = Join-Path $projectRoot "artifacts"
@@ -78,6 +78,7 @@ function Start-TestInstance {
     $startInfo.FileName = $editorExe
     $startInfo.Arguments = "--background --test-mode"
     $startInfo.UseShellExecute = $false
+    $startInfo.EnvironmentVariables["SCRATCHEDITOR_TEST_CLIPBOARD_BACKEND"] = "native"
     $process = [System.Diagnostics.Process]::Start($startInfo)
 
     $ready = $null

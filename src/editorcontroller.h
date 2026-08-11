@@ -28,9 +28,7 @@ class QScreen;
 class QVariantAnimation;
 class QAbstractItemModel;
 class AppSettings;
-class ClipboardGateway;
-class ClipboardHistoryModel;
-class ClipboardHistoryStore;
+class ClipboardHistoryCoordinator;
 class EditorCommandRegistry;
 class ExternalFileSession;
 class MarkdownHighlighter;
@@ -244,12 +242,6 @@ private:
     void updateReadyState();
     bool readClipboardText(QString *text, QString *errorMessage);
     bool writeClipboardText(const QString &text, QString *errorMessage);
-    void processClipboardHistoryChange(int attempt = 0);
-    QString captureHistoryCandidate(const QString &text, qint64 capturedAtUtcMs,
-                                    quint32 sequenceNumber, bool selfNotification = false);
-    void persistClipboardHistory();
-    void setClipboardHistoryError(const QString &error);
-    void updateClipboardHistoryError();
     void setClipboardState(bool healthy, const QString &message = {});
     bool restoreWindowGeometry();
     void saveWindowGeometry();
@@ -283,9 +275,7 @@ private:
     QPointer<QObject> m_editor;
     std::unique_ptr<AppSettings> m_settings;
     std::unique_ptr<EditorCommandRegistry> m_commands;
-    std::unique_ptr<ClipboardGateway> m_clipboardGateway;
-    std::unique_ptr<ClipboardHistoryModel> m_clipboardHistoryModel;
-    std::unique_ptr<ClipboardHistoryStore> m_clipboardHistoryStore;
+    std::unique_ptr<ClipboardHistoryCoordinator> m_clipboardHistory;
     std::unique_ptr<ExternalFileSession> m_externalFileSession;
     std::unique_ptr<MarkdownStyle> m_markdownStyle;
     std::unique_ptr<UiConfig> m_uiConfig;
@@ -340,12 +330,6 @@ private:
     QString m_pendingHistoryId;
     bool m_historyLoadConfirmationVisible = false;
     bool m_historyClearConfirmationVisible = false;
-    QString m_clipboardHistoryError;
-    QString m_clipboardHistoryMonitorError;
-    QString m_clipboardHistoryStoreError;
-    quint32 m_selfWriteSequence = 0;
-    QByteArray m_selfWriteFingerprint;
-    qint64 m_selfWriteExpiresAtMs = 0;
     QString m_settingsError;
     QTimer m_screenConfigurationTimer;
     QTimer m_displayChangeSettleTimer;

@@ -5,6 +5,10 @@
 
 ## 更新记录
 
+- `2026-08-11`：剪贴板访问、历史加载/捕获/持久化、监听稳定性重试、自写入回声抑制与
+  monitor/store 错误聚合从 `EditorController` 收敛到 `ClipboardHistoryCoordinator`；
+  QML 与 IPC 接口保持不变，边界和验证记录见
+  [`archive/010-clipboard-history-coordinator/`](archive/010-clipboard-history-coordinator/)。
 - `2026-08-11`：QML 主窗口按功能边界拆分——`Main.qml` 保留窗口、编辑区和跨面板协调，
   查找替换、剪贴板历史、设置页与命令面板迁入独立组件；后续 `EditorController`、
   `EditorCommandRegistry` 与 editing 验收代码的重构顺序和边界见根目录
@@ -61,6 +65,8 @@
   [原始实施计划](archive/cjk-features/cjk-features-plan.md)。
 - [`archive/001-external-editor/investigation-report.md`](archive/001-external-editor/investigation-report.md)：Codex、pi-coding-agent 和 Claude Code 外部编辑器兼容性调查。
 - [`archive/001-external-editor/extension-plan.md`](archive/001-external-editor/extension-plan.md)：外部编辑器瞬态文件模式的扩展计划与验收标准。
+- [`archive/010-clipboard-history-coordinator/`](archive/010-clipboard-history-coordinator/)：
+  剪贴板历史协调器的职责边界、兼容约束与验证记录。
 
 历史验收的机器可读证据统一保存在 [`../artifacts/baselines/`](../artifacts/baselines/)。
 中间调优结果在本地 `artifacts/archive/` 中保留，但不进入版本控制。
