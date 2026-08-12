@@ -97,6 +97,34 @@ bool hasKey(const QJsonArray &keys, const QString &key)
     return false;
 }
 
+bool hasHistoryPanelCornerShape(const QJsonObject &status)
+{
+    return qAbs(status.value(QStringLiteral("historyPanelTopLeftRadius")).toDouble() - 6.0)
+               <= 0.001
+        && qAbs(status.value(QStringLiteral("historyPanelBottomLeftRadius")).toDouble() - 6.0)
+               <= 0.001
+        && qAbs(status.value(QStringLiteral("historyPanelTopRightRadius")).toDouble()) <= 0.001
+        && qAbs(status.value(QStringLiteral("historyPanelBottomRightRadius")).toDouble()) <= 0.001;
+}
+
+QJsonObject historyPanelCornerDetails(const QJsonObject &status)
+{
+    return {{QStringLiteral("actual"),
+             QJsonObject{{QStringLiteral("topLeft"),
+                          status.value(QStringLiteral("historyPanelTopLeftRadius"))},
+                         {QStringLiteral("topRight"),
+                          status.value(QStringLiteral("historyPanelTopRightRadius"))},
+                         {QStringLiteral("bottomLeft"),
+                          status.value(QStringLiteral("historyPanelBottomLeftRadius"))},
+                         {QStringLiteral("bottomRight"),
+                          status.value(QStringLiteral("historyPanelBottomRightRadius"))}}},
+            {QStringLiteral("expected"),
+             QJsonObject{{QStringLiteral("topLeft"), 6},
+                         {QStringLiteral("topRight"), 0},
+                         {QStringLiteral("bottomLeft"), 6},
+                         {QStringLiteral("bottomRight"), 0}}}};
+}
+
 QJsonObject rectToJson(const QRect &rect)
 {
     return {{QStringLiteral("x"), rect.x()},
@@ -731,6 +759,9 @@ int main(int argc, char *argv[])
                  && historyInitial.value(QStringLiteral("historyHoverOpenDelayMs")).toInt() == 100
                  && historyInitial.value(QStringLiteral("historyHoverCloseDelayMs")).toInt() == 250,
              historyInitial);
+    addCheck(checks, details, QStringLiteral("historyPanelCornerShapeClosed"),
+             hasHistoryPanelCornerShape(historyInitial),
+             historyPanelCornerDetails(historyInitial));
     request(QStringLiteral("testEmitClipboardChange"),
             {{QStringLiteral("kind"), QStringLiteral("text")},
              {QStringLiteral("text"), QStringLiteral("alpha\nsecond line")},
@@ -752,6 +783,9 @@ int main(int argc, char *argv[])
                          - 920.0 / 3.0) < 1.0
                  && wideHistory.value(QStringLiteral("editorVisibleWidth")).toDouble() >= 320.0,
              wideHistory);
+    addCheck(checks, details, QStringLiteral("historyPanelCornerShapeOpen"),
+             hasHistoryPanelCornerShape(wideHistory),
+             historyPanelCornerDetails(wideHistory));
 
     // 动画开启、历史面板打开（推挤模式）时缩放：编辑区必须即时跟随窗口边缘，
     // 不允许 x/width 的 Behavior 逐帧重启动画造成滞后追赶（修复前 30ms 处差值约 20px）。
@@ -774,6 +808,9 @@ int main(int argc, char *argv[])
                           resizedOpenHistory.value(
                               QStringLiteral("editorVisibleWidth")).toDouble()},
                          {QStringLiteral("diff"), openWidthDiff}});
+    addCheck(checks, details, QStringLiteral("historyPanelCornerShapeAfterResize"),
+             hasHistoryPanelCornerShape(resizedOpenHistory),
+             historyPanelCornerDetails(resizedOpenHistory));
     request(QStringLiteral("testSetGeometry"),
             {{QStringLiteral("x"), 100}, {QStringLiteral("y"), 100},
              {QStringLiteral("width"), 920}, {QStringLiteral("height"), 640}});
