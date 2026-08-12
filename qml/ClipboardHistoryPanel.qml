@@ -56,6 +56,7 @@ Loader {
 
         Rectangle {
             id: historyPanel
+            objectName: "clipboardHistoryPanel"
             // 闭合时右边缘正好压在 loader 左边界（左边框与编辑区域交界）。
             // 滑动进度只在开/合切换时变化并带动画；x 直接由宽度与进度绑定，
             // 窗口缩放期间宽度变化会让闭合 x 即时跟随，避免 Behavior 逐帧
@@ -64,6 +65,11 @@ Loader {
             x: -historyPanel.width + historyPanel.width * slideProgress
             width: host.historyPanelWidth
             height: parent.height
+            // 左侧是面板的外轮廓，复用大面板圆角；右侧与编辑区拼接，保持直角。
+            topLeftRadius: uiConfig.layout.radiusLarge
+            topRightRadius: 0
+            bottomLeftRadius: uiConfig.layout.radiusLarge
+            bottomRightRadius: 0
             color: host.themePanelColor
             border.color: host.themeBorderColor
             border.width: uiConfig.layout.borderWidth

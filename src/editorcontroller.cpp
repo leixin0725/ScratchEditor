@@ -3146,6 +3146,19 @@ QJsonObject EditorController::statusObject() const
                       m_window->property("historyPanelWidth").toDouble());
         status.insert(QStringLiteral("historyPanelEdgeIntrusion"),
                       m_window->property("historyPanelEdgeIntrusion").toDouble());
+        if (m_testMode) {
+            if (QQuickItem *historyPanel =
+                    m_window->findChild<QQuickItem *>(QStringLiteral("clipboardHistoryPanel"))) {
+                status.insert(QStringLiteral("historyPanelTopLeftRadius"),
+                              historyPanel->property("topLeftRadius").toDouble());
+                status.insert(QStringLiteral("historyPanelTopRightRadius"),
+                              historyPanel->property("topRightRadius").toDouble());
+                status.insert(QStringLiteral("historyPanelBottomLeftRadius"),
+                              historyPanel->property("bottomLeftRadius").toDouble());
+                status.insert(QStringLiteral("historyPanelBottomRightRadius"),
+                              historyPanel->property("bottomRightRadius").toDouble());
+            }
+        }
         status.insert(QStringLiteral("editorVisibleWidth"),
                       m_window->property("editorVisibleWidth").toDouble());
         status.insert(QStringLiteral("editorViewportWidth"),

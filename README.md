@@ -47,6 +47,7 @@ UTF-16 code unit 精确去重；再次复制完全相同的文本会保留稳定
 
 历史卡片默认高度为 58 像素，可在 `settings.ini` 的 `[clipboardHistory]` 段以 `cardHeight` 键调整
 （合法范围 44–200，修改后重启生效）；该键属于文件级配置，不进入设置页。
+历史面板打开时，左上、左下两个外侧角使用统一的大面板圆角，右侧与正文编辑区保持直线拼接。
 
 历史文件与 `settings.ini` 同目录，正式环境通常为
 `%LOCALAPPDATA%\ScratchEditor\ScratchEditor\clipboard-history.dat`。文件使用当前 Windows 用户
