@@ -99,7 +99,8 @@ function Invoke-SwitchScript {
     param(
         [string[]]$Arguments,
         [switch]$CaptureOutput,
-        [switch]$UseRealExitDelay
+        [switch]$UseRealExitDelay,
+        [ValidateRange(0, 10000)][int]$ErrorHoldMilliseconds = 0
     )
 
     $startInfo = [System.Diagnostics.ProcessStartInfo]::new()
@@ -132,6 +133,8 @@ function Invoke-SwitchScript {
     else {
         $startInfo.EnvironmentVariables.Remove("SCRATCHEDITOR_SWITCH_EXIT_DELAY_MS")
     }
+    $startInfo.EnvironmentVariables["SCRATCHEDITOR_SWITCH_ERROR_HOLD_MS"] =
+        [string]$ErrorHoldMilliseconds
 
     $process = [System.Diagnostics.Process]::Start($startInfo)
     $stdoutTask = if ($CaptureOutput) { $process.StandardOutput.ReadToEndAsync() } else { $null }
@@ -191,6 +194,17 @@ try {
         ($delayedList.ExitCode -eq 0 -and $delayTimer.ElapsedMilliseconds -ge 1900) `
         ("exit={0}, elapsedMs={1}" -f $delayedList.ExitCode, $delayTimer.ElapsedMilliseconds) `
         "exit 0, elapsedMs >= 1900"
+
+    $errorHoldTimer = [System.Diagnostics.Stopwatch]::StartNew()
+    $heldError = Invoke-SwitchScript `
+        -Arguments @("-TestEditorPath", (Join-Path $tempDirectory "held-missing.exe")) `
+        -CaptureOutput -ErrorHoldMilliseconds 2100
+    $errorHoldTimer.Stop()
+    Assert-True "error path waits for manual-close hold" `
+        ($heldError.ExitCode -ne 0 -and $errorHoldTimer.ElapsedMilliseconds -ge 2000) `
+        ("exit={0}, elapsedMs={1}" -f $heldError.ExitCode,
+            $errorHoldTimer.ElapsedMilliseconds) `
+        "nonzero, elapsedMs >= 2000"
 
     $listed = Invoke-SwitchScript -Arguments @("-ListCandidates") -CaptureOutput
     Assert-True "registered worktree candidate is listed" `

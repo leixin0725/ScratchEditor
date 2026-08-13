@@ -85,5 +85,7 @@
   "worktreeScanFailed": "无法读取 Git worktree 列表，仅扫描当前工作区。",
   "reparseSkipped": "已跳过 reparse point：{0}",
   "invalidExitDelay": "测试用退出缓冲时间必须是 0 到 10000 之间的整数毫秒值。",
-  "exitDelay": "操作已结束，窗口将在 {0} 秒后关闭。"
+  "invalidErrorHold": "测试用错误保留时间必须是 0 到 10000 之间的整数毫秒值。",
+  "exitDelay": "操作已结束，窗口将在 {0} 秒后关闭。",
+  "errorHold": "操作失败，窗口不会自动关闭；请手动关闭此窗口。"
 }

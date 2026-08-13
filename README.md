@@ -300,7 +300,8 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\switch-ahk-edi
 `[已启用]`、`[警告]` 和 `[错误]` 等标志使用不同终端颜色，持续说明所处状态、PID 与完整路径。
 目标会先完成存在性校验，启动后还会通过 IPC 复核 PID、可执行文件路径和 ready 状态；启动失败会
 清理失败进程并尝试恢复刚才的版本。中文文案由 `config/switch-ahk-editor.zh-CN.json` 集中维护，
-所有退出路径都会在结束提示后保留 2 秒缓冲，避免快捷方式窗口立即关闭。
+操作成功时会在结束提示后保留 2 秒缓冲，避免快捷方式窗口立即关闭；操作失败时窗口不会自动关闭，
+只能由用户手动关闭，以便完整查看错误与恢复提示。
 脚本显式以 UTF-8 读取，以兼容 Windows PowerShell 5.1 和项目 UTF-8 无 BOM 约束。
 
 若当前常驻实例权限高于调用终端，脚本会显示 `access denied` 并保持现状；从管理员 PowerShell

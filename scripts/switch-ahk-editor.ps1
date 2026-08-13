@@ -127,6 +127,7 @@ $nonInteractive = $env:SCRATCHEDITOR_SWITCH_NONINTERACTIVE -eq "1" -or
     -not [Environment]::UserInteractive -or [Console]::IsInputRedirected
 $isolatedSettingsFile = $env:SCRATCHEDITOR_SWITCH_SETTINGS_FILE
 $exitDelayMilliseconds = 2000
+$errorHoldMilliseconds = -1
 if ($isolatedMode -and
         -not [string]::IsNullOrWhiteSpace($env:SCRATCHEDITOR_SWITCH_EXIT_DELAY_MS)) {
     $parsedExitDelay = 0
@@ -136,6 +137,16 @@ if ($isolatedMode -and
         throw (Get-Text "invalidExitDelay")
     }
     $exitDelayMilliseconds = $parsedExitDelay
+}
+if ($isolatedMode -and
+        -not [string]::IsNullOrWhiteSpace($env:SCRATCHEDITOR_SWITCH_ERROR_HOLD_MS)) {
+    $parsedErrorHold = 0
+    if (-not [int]::TryParse(
+            $env:SCRATCHEDITOR_SWITCH_ERROR_HOLD_MS, [ref]$parsedErrorHold) -or
+            $parsedErrorHold -lt 0 -or $parsedErrorHold -gt 10000) {
+        throw (Get-Text "invalidErrorHold")
+    }
+    $errorHoldMilliseconds = $parsedErrorHold
 }
 $script:lastPipeConnectionState = "Unavailable"
 
@@ -747,10 +758,27 @@ catch {
     $exitCode = 1
 }
 finally {
-    if ($exitDelayMilliseconds -gt 0) {
+    if ($exitCode -eq 0 -and $exitDelayMilliseconds -gt 0) {
         Write-SwitchMessage -Kind Guide -Message `
             (Get-Text "exitDelay" ($exitDelayMilliseconds / 1000))
         Start-Sleep -Milliseconds $exitDelayMilliseconds
+    }
+    elseif ($exitCode -ne 0) {
+        Write-SwitchMessage -Kind Guide -Message (Get-Text "errorHold")
+        if ($errorHoldMilliseconds -ge 0) {
+            if ($errorHoldMilliseconds -gt 0) {
+                Start-Sleep -Milliseconds $errorHoldMilliseconds
+            }
+        }
+        else {
+            $closeWaitHandle = [System.Threading.ManualResetEvent]::new($false)
+            try {
+                $null = $closeWaitHandle.WaitOne()
+            }
+            finally {
+                $closeWaitHandle.Dispose()
+            }
+        }
     }
 }
 exit $exitCode
