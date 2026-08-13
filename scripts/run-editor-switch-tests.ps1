@@ -98,7 +98,8 @@ function Invoke-EditorCommand {
 function Invoke-SwitchScript {
     param(
         [string[]]$Arguments,
-        [switch]$CaptureOutput
+        [switch]$CaptureOutput,
+        [switch]$UseRealExitDelay
     )
 
     $startInfo = [System.Diagnostics.ProcessStartInfo]::new()
@@ -125,6 +126,12 @@ function Invoke-SwitchScript {
     $startInfo.EnvironmentVariables["SCRATCHEDITOR_SWITCH_NONINTERACTIVE"] = "1"
     $startInfo.EnvironmentVariables["SCRATCHEDITOR_SWITCH_TEST_WORKTREES"] =
         $testWorktreeDirectory
+    if (-not $UseRealExitDelay) {
+        $startInfo.EnvironmentVariables["SCRATCHEDITOR_SWITCH_EXIT_DELAY_MS"] = "0"
+    }
+    else {
+        $startInfo.EnvironmentVariables.Remove("SCRATCHEDITOR_SWITCH_EXIT_DELAY_MS")
+    }
 
     $process = [System.Diagnostics.Process]::Start($startInfo)
     $stdoutTask = if ($CaptureOutput) { $process.StandardOutput.ReadToEndAsync() } else { $null }
@@ -176,6 +183,15 @@ Copy-Item -LiteralPath $testEditor -Destination $testWorktreeEditor
 $startedPids = [System.Collections.Generic.HashSet[int]]::new()
 
 try {
+    $delayTimer = [System.Diagnostics.Stopwatch]::StartNew()
+    $delayedList = Invoke-SwitchScript -Arguments @("-ListCandidates") `
+        -CaptureOutput -UseRealExitDelay
+    $delayTimer.Stop()
+    Assert-True "script keeps exit window open for two seconds" `
+        ($delayedList.ExitCode -eq 0 -and $delayTimer.ElapsedMilliseconds -ge 1900) `
+        ("exit={0}, elapsedMs={1}" -f $delayedList.ExitCode, $delayTimer.ElapsedMilliseconds) `
+        "exit 0, elapsedMs >= 1900"
+
     $listed = Invoke-SwitchScript -Arguments @("-ListCandidates") -CaptureOutput
     Assert-True "registered worktree candidate is listed" `
         ($listed.ExitCode -eq 0 -and $listed.Stdout.Contains("registered-worktree") -and

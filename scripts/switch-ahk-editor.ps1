@@ -126,6 +126,17 @@ $isolatedMode = -not [StringComparer]::Ordinal.Equals($serverName, $defaultServe
 $nonInteractive = $env:SCRATCHEDITOR_SWITCH_NONINTERACTIVE -eq "1" -or
     -not [Environment]::UserInteractive -or [Console]::IsInputRedirected
 $isolatedSettingsFile = $env:SCRATCHEDITOR_SWITCH_SETTINGS_FILE
+$exitDelayMilliseconds = 2000
+if ($isolatedMode -and
+        -not [string]::IsNullOrWhiteSpace($env:SCRATCHEDITOR_SWITCH_EXIT_DELAY_MS)) {
+    $parsedExitDelay = 0
+    if (-not [int]::TryParse(
+            $env:SCRATCHEDITOR_SWITCH_EXIT_DELAY_MS, [ref]$parsedExitDelay) -or
+            $parsedExitDelay -lt 0 -or $parsedExitDelay -gt 10000) {
+        throw (Get-Text "invalidExitDelay")
+    }
+    $exitDelayMilliseconds = $parsedExitDelay
+}
 $script:lastPipeConnectionState = "Unavailable"
 
 function Get-NormalizedPath {
@@ -725,13 +736,21 @@ function Invoke-Switch {
     }
 }
 
+$exitCode = 0
 try {
     Invoke-Switch
-    exit 0
 }
 catch {
     Write-SwitchMessage -Kind Error -Message $_.Exception.Message
     Write-SwitchMessage -Kind Guide -Message (Get-Text "inspectStatus")
     Write-SwitchDetail "powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\switch-ahk-editor.ps1 -StatusOnly"
-    exit 1
+    $exitCode = 1
 }
+finally {
+    if ($exitDelayMilliseconds -gt 0) {
+        Write-SwitchMessage -Kind Guide -Message `
+            (Get-Text "exitDelay" ($exitDelayMilliseconds / 1000))
+        Start-Sleep -Milliseconds $exitDelayMilliseconds
+    }
+}
+exit $exitCode
