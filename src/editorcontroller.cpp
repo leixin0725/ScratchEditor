@@ -3057,6 +3057,8 @@ QJsonObject EditorController::statusObject() const
                   m_historyClearConfirmationVisible);
     status.insert(QStringLiteral("historySelectedId"), m_clipboardHistory
                       ? m_clipboardHistory->selectedId() : QString());
+    status.insert(QStringLiteral("historyHoveredId"),
+                  m_window ? m_window->property("historyHoveredId").toString() : QString());
     status.insert(QStringLiteral("clipboardBackend"), m_clipboardHistory
                       ? m_clipboardHistory->backendName() : QStringLiteral("unavailable"));
     status.insert(QStringLiteral("nativeClipboardAccessAttempts"),

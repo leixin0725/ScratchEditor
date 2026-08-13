@@ -858,6 +858,9 @@ int main(int argc, char *argv[])
     const QJsonArray historyItems = historyState.value(QStringLiteral("items")).toArray();
     const QString selectedHistoryId = historyItems.isEmpty()
         ? QString() : historyItems.first().toObject().value(QStringLiteral("id")).toString();
+    const QString hoveredHistoryId = historyItems.size() > 1
+        ? historyItems.at(1).toObject().value(QStringLiteral("id")).toString()
+        : QString();
     const QJsonObject beforeSingleClickText = request(QStringLiteral("testText"));
     historyAction(QStringLiteral("historySelect"), selectedHistoryId);
     const QJsonObject afterSingleClickText = request(QStringLiteral("testText"));
@@ -866,6 +869,29 @@ int main(int argc, char *argv[])
                  && beforeSingleClickText.value(QStringLiteral("text"))
                     == afterSingleClickText.value(QStringLiteral("text")),
              afterSingleClickText);
+    const QJsonObject hoveredHistory = historyAction(
+        QStringLiteral("historyItemHoverEnter"), hoveredHistoryId);
+    const QJsonObject unhoveredHistory = historyAction(
+        QStringLiteral("historyItemHoverLeave"), hoveredHistoryId);
+    addCheck(checks, details, QStringLiteral("historyItemHoverOnlyHighlights"),
+             !hoveredHistoryId.isEmpty()
+                 && hoveredHistory.value(QStringLiteral("invoked")).toBool()
+                 && hoveredHistory.value(QStringLiteral("historyHoveredId")).toString()
+                    == hoveredHistoryId
+                 && hoveredHistory.value(QStringLiteral("historySelectedId")).toString()
+                    == selectedHistoryId
+                 && unhoveredHistory.value(QStringLiteral("invoked")).toBool()
+                 && unhoveredHistory.value(QStringLiteral("historyHoveredId")).toString().isEmpty()
+                 && unhoveredHistory.value(QStringLiteral("historySelectedId")).toString()
+                    == selectedHistoryId,
+             QJsonObject{{QStringLiteral("actualHover"),
+                          hoveredHistory.value(QStringLiteral("historyHoveredId"))},
+                         {QStringLiteral("actualSelection"),
+                          hoveredHistory.value(QStringLiteral("historySelectedId"))},
+                         {QStringLiteral("afterLeaveHover"),
+                          unhoveredHistory.value(QStringLiteral("historyHoveredId"))},
+                         {QStringLiteral("expectedHover"), hoveredHistoryId},
+                         {QStringLiteral("expectedSelection"), selectedHistoryId}});
     historyAction(QStringLiteral("historySetQuery"), QStringLiteral("ALPHA"));
     const QJsonObject filteredHistory = request(QStringLiteral("testClipboardHistoryState"));
     addCheck(checks, details, QStringLiteral("historySearchIsCaseInsensitiveFullText"),

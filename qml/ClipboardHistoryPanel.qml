@@ -46,6 +46,14 @@ Loader {
                 root.appController.requestLoadClipboardHistory(host.historySelectedId)
             }
         }
+        function setHoveredId(value) {
+            host.historyHoveredId = value === undefined ? "" : value
+        }
+        function clearHoveredId(value) {
+            if (value === undefined || host.historyHoveredId === value) {
+                host.historyHoveredId = ""
+            }
+        }
         function moveSelection(delta) {
             if (historyList.count === 0) return
             historyList.currentIndex = Math.max(
@@ -176,7 +184,8 @@ Loader {
                     width: historyList.width
                     height: root.appController.historyCardHeight
                     radius: uiConfig.layout.radiusNormal
-                    color: host.historySelectedId === historyId
+                    color: (host.historySelectedId === historyId
+                            || host.historyHoveredId === historyId)
                            ? host.themeButtonColor : "transparent"
                     border.color: host.historySelectedId === historyId
                                   ? host.themeAccentColor : "transparent"
@@ -213,12 +222,16 @@ Loader {
                     MouseArea {
                         anchors.fill: parent
                         acceptedButtons: Qt.LeftButton
+                        hoverEnabled: true
+                        onEntered: historyRoot.setHoveredId(historyRow.historyId)
+                        onExited: historyRoot.clearHoveredId(historyRow.historyId)
                         onClicked: historyRoot.selectId(historyRow.historyId)
                         onDoubleClicked: {
                             historyRoot.selectId(historyRow.historyId)
                             historyRoot.activateSelected()
                         }
                     }
+                    Component.onDestruction: historyRoot.clearHoveredId(historyRow.historyId)
                 }
             }
 

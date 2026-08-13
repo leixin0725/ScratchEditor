@@ -99,6 +99,7 @@ Window {
     readonly property bool historyQueryFocused:
         historyPanelLoader.item ? historyPanelLoader.item.queryFocused : false
     property string historySelectedId: ""
+    property string historyHoveredId: ""
     // 内容高度防抖快照：仅驱动滚动条滑块尺寸（60ms 合并更新）；滑块可见性
     // 直接依赖实时 editorViewport.contentHeight，避免缩放/关闭动画期间快照
     // 滞后导致滚动条闪现。
@@ -216,6 +217,7 @@ Window {
         historyPanelOpen = false
         historyPanelOpenedByCommand = false
         historySelectedId = ""
+        historyHoveredId = ""
         controller.setClipboardHistoryFilter("")
         if (historyPanelLoader.item) {
             historyPanelLoader.item.clearQuery()
@@ -295,6 +297,10 @@ Window {
             historyPanelLoader.item.setQuery(value)
         } else if (action === "historySelect") {
             historyPanelLoader.item.selectId(value)
+        } else if (action === "historyItemHoverEnter") {
+            historyPanelLoader.item.setHoveredId(value)
+        } else if (action === "historyItemHoverLeave") {
+            historyPanelLoader.item.clearHoveredId(value)
         } else if (action === "historyActivateSelected") {
             historyPanelLoader.item.activateSelected()
         } else if (action === "historyDoubleClick") {
