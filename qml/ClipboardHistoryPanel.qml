@@ -65,10 +65,10 @@ Loader {
             x: -historyPanel.width + historyPanel.width * slideProgress
             width: host.historyPanelWidth
             height: parent.height
-            // 左侧是面板的外轮廓，复用大面板圆角；右侧与编辑区拼接，保持直角。
-            topLeftRadius: uiConfig.layout.radiusLarge
+            // 左侧使用历史面板专用内部圆角；右侧与编辑区拼接，保持直角。
+            topLeftRadius: uiConfig.panels.history.cornerRadius
             topRightRadius: 0
-            bottomLeftRadius: uiConfig.layout.radiusLarge
+            bottomLeftRadius: uiConfig.panels.history.cornerRadius
             bottomRightRadius: 0
             color: host.themePanelColor
             border.color: host.themeBorderColor

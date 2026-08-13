@@ -99,9 +99,9 @@ bool hasKey(const QJsonArray &keys, const QString &key)
 
 bool hasHistoryPanelCornerShape(const QJsonObject &status)
 {
-    return qAbs(status.value(QStringLiteral("historyPanelTopLeftRadius")).toDouble() - 6.0)
+    return qAbs(status.value(QStringLiteral("historyPanelTopLeftRadius")).toDouble() - 8.0)
                <= 0.001
-        && qAbs(status.value(QStringLiteral("historyPanelBottomLeftRadius")).toDouble() - 6.0)
+        && qAbs(status.value(QStringLiteral("historyPanelBottomLeftRadius")).toDouble() - 8.0)
                <= 0.001
         && qAbs(status.value(QStringLiteral("historyPanelTopRightRadius")).toDouble()) <= 0.001
         && qAbs(status.value(QStringLiteral("historyPanelBottomRightRadius")).toDouble()) <= 0.001;
@@ -119,9 +119,9 @@ QJsonObject historyPanelCornerDetails(const QJsonObject &status)
                          {QStringLiteral("bottomRight"),
                           status.value(QStringLiteral("historyPanelBottomRightRadius"))}}},
             {QStringLiteral("expected"),
-             QJsonObject{{QStringLiteral("topLeft"), 6},
+             QJsonObject{{QStringLiteral("topLeft"), 8},
                          {QStringLiteral("topRight"), 0},
-                         {QStringLiteral("bottomLeft"), 6},
+                         {QStringLiteral("bottomLeft"), 8},
                          {QStringLiteral("bottomRight"), 0}}}};
 }
 
