@@ -269,6 +269,44 @@ IPC 命令让稳定常驻实例自行退出，并在安装后重新启动；这�
 生产 IPC 另提供只读的 `getWindowGeometry` JSON 命令，供外部编辑进程查询常驻实例的
 窗口 resting 几何，以便唤起时避开可能已打开的临时编辑器窗口。
 
+### 在稳定版与临时测试版之间切换 AHK 快捷键
+
+AHK 始终向固定生产管道发送 Scroll Lock、Win+F 等快捷键命令，因此无需修改或重载项目外的
+`KeysRedirect.ahk`。仓库内切换器会先显示当前常驻实例，再正常保存并退出旧实例，最后让目标版本
+接管同一管道：
+
+```powershell
+# 只查看当前状态，不切换
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\switch-ahk-editor.ps1 -StatusOnly
+
+# 首次明确选择测试产物；相对路径按项目根目录解析
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\switch-ahk-editor.ps1 `
+  -TestEditorPath .\build\editing\ScratchEditor.exe
+
+# 之后无参数运行：测试版切回稳定版，稳定版切到交互选择的测试产物
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\switch-ahk-editor.ps1
+```
+
+当前无实例时，脚本会引导选择稳定版或测试版；切到测试版但未指定路径时，会按修改时间列出
+`build/*/ScratchEditor.exe` 候选。输出中的 `[CURRENT]`、`[TARGET]`、`[STOPPING]`、
+`[STARTING]` 和 `[ACTIVE]` 会持续说明所处状态、PID 与完整路径。目标会先完成存在性校验，
+启动后还会通过 IPC 复核 PID、可执行文件路径和 ready 状态；启动失败会清理失败进程并尝试恢复
+刚才的版本。
+
+若当前常驻实例权限高于调用终端，脚本会显示 `access denied` 并保持现状；从管理员 PowerShell
+重新运行同一命令即可。管道存在但无法识别实例时同样安全失败，不会误判为“当前无实例”。
+
+切换使用现有 `shutdownForUpdate` 正常关闭语义：若窗口可见，当前草稿会先按普通关闭行为写回
+剪贴板。正常退出超时后，脚本只会在重新核验旧实例 PID、启动时间和路径后询问是否强制终止；
+非交互环境不会强制终止任何进程。测试版以普通常驻模式运行并共享正式设置、主题、剪贴板历史
+和系统剪贴板，不使用 `--test-mode`，也不会覆盖 `%LOCALAPPDATA%\ScratchEditor\AhkEditor` 稳定副本。
+
+切换器的自动验收使用唯一测试管道、内存剪贴板和临时 INI，不会连接或停止真实常驻实例：
+
+```powershell
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\run-editor-switch-tests.ps1
+```
+
 用户可写配置存放在 Qt `AppConfigLocation` 下的 `settings.ini`（schema 版本 2）。
 首次创建集中配置时会迁移旧 Native Settings 中的窗口几何和快捷键；从 schema 1 升级时
 自动把 `editor/fontFamily`、`editor/fontPointSize`、`ui/animationsEnabled`
