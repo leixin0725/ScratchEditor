@@ -279,6 +279,9 @@ AHK 始终向固定生产管道发送 Scroll Lock、Win+F 等快捷键命令，�
 # 只查看当前状态，不切换
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\switch-ahk-editor.ps1 -StatusOnly
 
+# 只列出当前工作区和所有已注册 worktree 中的可用构建
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\switch-ahk-editor.ps1 -ListCandidates
+
 # 首次明确选择测试产物；相对路径按项目根目录解析
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\switch-ahk-editor.ps1 `
   -TestEditorPath .\build\editing\ScratchEditor.exe
@@ -287,11 +290,14 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\switch-ahk-edi
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\switch-ahk-editor.ps1
 ```
 
-当前无实例时，脚本会引导选择稳定版或测试版；切到测试版但未指定路径时，会按修改时间列出
-`build/*/ScratchEditor.exe` 候选。输出中的 `[CURRENT]`、`[TARGET]`、`[STOPPING]`、
-`[STARTING]` 和 `[ACTIVE]` 会持续说明所处状态、PID 与完整路径。目标会先完成存在性校验，
-启动后还会通过 IPC 复核 PID、可执行文件路径和 ready 状态；启动失败会清理失败进程并尝试恢复
-刚才的版本。
+当前无实例时，脚本会引导选择稳定版或测试版；切到测试版但未指定路径时，会扫描当前工作区以及
+`git worktree list --porcelain` 返回的全部已注册 worktree，并按修改时间列出各自直接位于
+`build/*/ScratchEditor.exe` 的候选。扫描不递归进入构建目录，并会跳过 worktree、`build` 或构建
+子目录上的 reparse point。输出统一使用中文，其中 `[当前]`、`[目标]`、`[停止]`、`[启动]`、
+`[已启用]`、`[警告]` 和 `[错误]` 等标志使用不同终端颜色，持续说明所处状态、PID 与完整路径。
+目标会先完成存在性校验，启动后还会通过 IPC 复核 PID、可执行文件路径和 ready 状态；启动失败会
+清理失败进程并尝试恢复刚才的版本。中文文案由 `config/switch-ahk-editor.zh-CN.json` 集中维护，
+脚本显式以 UTF-8 读取，以兼容 Windows PowerShell 5.1 和项目 UTF-8 无 BOM 约束。
 
 若当前常驻实例权限高于调用终端，脚本会显示 `access denied` 并保持现状；从管理员 PowerShell
 重新运行同一命令即可。管道存在但无法识别实例时同样安全失败，不会误判为“当前无实例”。

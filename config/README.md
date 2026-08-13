@@ -12,9 +12,14 @@
 |---|---|---|
 | `ui.json` | 全部 UI/动画/窗口显示设计令牌：窗口尺寸、布局、字号角色、动画时长、面板参数、深浅调色板、窗口摆放、用户偏好默认值 | 重启生效 |
 | `markdown-style.json` | Markdown 语法高亮格式与界面强调色（accentColor / accentTextColor） | 保存后自动热更新，无需重启 |
+| `switch-ahk-editor.zh-CN.json` | 稳定版/测试版快捷键切换器的简体中文终端文案 | 下次运行切换脚本时生效 |
 | `settings.ini`（运行时生成） | 用户可写设置：窗口几何、快捷键、主题/字体/动画开关、状态面板、剪贴板历史卡片高度 | 随应用写入，重启生效 |
 
 强调色是界面强调色的唯一来源，`ui.json` 不重复定义，避免两处维护。
+
+`switch-ahk-editor.zh-CN.json` 由 PowerShell 脚本显式按 UTF-8 读取，使脚本源码可以保持 ASCII
+兼容，同时满足 Windows PowerShell 5.1 与项目 UTF-8 无 BOM 的共同要求。文案中的 `{0}`、`{1}`
+等占位符由切换器按当前状态填充，增删或改名时必须同步更新脚本引用。
 
 ## ui.json
 

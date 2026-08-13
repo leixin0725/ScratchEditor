@@ -1,7 +1,8 @@
 [CmdletBinding()]
 param(
     [string]$TestEditorPath,
-    [switch]$StatusOnly
+    [switch]$StatusOnly,
+    [switch]$ListCandidates
 )
 
 $ErrorActionPreference = "Stop"
@@ -27,6 +28,84 @@ public static class ScratchEditorPipeNative
 "@
 }
 $projectRoot = Split-Path -Parent $PSScriptRoot
+$messageFile = Join-Path $projectRoot "config\switch-ahk-editor.zh-CN.json"
+if (-not (Test-Path -LiteralPath $messageFile -PathType Leaf)) {
+    throw "Missing message resource: $messageFile"
+}
+$messageJson = [System.IO.File]::ReadAllText(
+    $messageFile, [System.Text.UTF8Encoding]::new($false))
+$script:messages = $messageJson | ConvertFrom-Json
+
+function Get-Text {
+    param(
+        [Parameter(Mandatory, Position = 0)][string]$Key,
+        [Parameter(Position = 1, ValueFromRemainingArguments = $true)][object[]]$Arguments
+    )
+    $property = $script:messages.PSObject.Properties[$Key]
+    if ($null -eq $property) {
+        throw "Missing message key: $Key"
+    }
+    $template = [string]$property.Value
+    if ($null -eq $Arguments -or $Arguments.Count -eq 0) {
+        return $template
+    }
+    return [string]::Format(
+        [System.Globalization.CultureInfo]::CurrentCulture, $template, $Arguments)
+}
+
+$script:markerColors = @{
+    Current = "Cyan"
+    Target = "Magenta"
+    Stopping = "Yellow"
+    Stopped = "DarkYellow"
+    Starting = "Blue"
+    Active = "Green"
+    Done = "Green"
+    Warning = "Yellow"
+    Error = "Red"
+    Guide = "DarkGray"
+    Select = "Cyan"
+    Recovery = "Yellow"
+    Recovered = "Green"
+    RecoveryFailed = "Red"
+    Candidates = "Cyan"
+}
+$script:markerKeys = @{
+    Current = "markerCurrent"
+    Target = "markerTarget"
+    Stopping = "markerStopping"
+    Stopped = "markerStopped"
+    Starting = "markerStarting"
+    Active = "markerActive"
+    Done = "markerDone"
+    Warning = "markerWarning"
+    Error = "markerError"
+    Guide = "markerGuide"
+    Select = "markerSelect"
+    Recovery = "markerRecovery"
+    Recovered = "markerRecovered"
+    RecoveryFailed = "markerRecoveryFailed"
+    Candidates = "markerCandidates"
+}
+
+function Write-SwitchMessage {
+    param(
+        [Parameter(Mandatory)][ValidateSet(
+            "Current", "Target", "Stopping", "Stopped", "Starting", "Active",
+            "Done", "Warning", "Error", "Guide", "Select", "Recovery",
+            "Recovered", "RecoveryFailed", "Candidates")][string]$Kind,
+        [Parameter(Mandatory)][string]$Message
+    )
+    $marker = Get-Text $script:markerKeys[$Kind]
+    Write-Host ("[{0}]" -f $marker) -ForegroundColor $script:markerColors[$Kind] -NoNewline
+    Write-Host (" {0}" -f $Message)
+}
+
+function Write-SwitchDetail {
+    param([Parameter(Mandatory)][string]$Message)
+    Write-Host ("       {0}" -f $Message) -ForegroundColor Gray
+}
+
 $defaultServerName = "ScratchEditor.Stage1.v1"
 $serverName = if ([string]::IsNullOrWhiteSpace($env:SCRATCHEDITOR_SWITCH_SERVER_NAME)) {
     $defaultServerName
@@ -36,7 +115,7 @@ else {
 }
 $stableEditor = if ([string]::IsNullOrWhiteSpace($env:SCRATCHEDITOR_SWITCH_STABLE_EDITOR)) {
     if ([string]::IsNullOrWhiteSpace($env:LOCALAPPDATA)) {
-        throw "LOCALAPPDATA is not available."
+        throw (Get-Text "localAppDataMissing")
     }
     Join-Path $env:LOCALAPPDATA "ScratchEditor\AhkEditor\ScratchEditor.exe"
 }
@@ -75,6 +154,21 @@ function Get-EditorMode {
         return "STABLE"
     }
     return "TEST"
+}
+
+function Get-ModeDisplayName {
+    param([Parameter(Mandatory)][ValidateSet("NONE", "STABLE", "TEST", "UNKNOWN")][string]$Mode)
+    switch ($Mode) {
+        "NONE" { return (Get-Text "modeNone") }
+        "STABLE" { return (Get-Text "modeStable") }
+        "TEST" { return (Get-Text "modeTest") }
+        default { return (Get-Text "modeUnknown") }
+    }
+}
+
+function Get-BooleanDisplayName {
+    param([bool]$Value)
+    return Get-Text $(if ($Value) { "yes" } else { "no" })
 }
 
 function Invoke-EditorCommand {
@@ -168,17 +262,20 @@ function Write-EditorState {
 
     if ($null -ne $Status) {
         $mode = Get-EditorMode ([string]$Status.executableFile)
-        Write-Host ("[{0}] {1} | PID {2} | visible={3} | ready={4}" -f
-            $Label, $mode, $Status.pid, ([bool]$Status.visible), ([bool]$Status.ready))
-        Write-Host ("          Path: {0}" -f $Status.executableFile)
+        Write-SwitchMessage -Kind $Label -Message (Get-Text "state" `
+            (Get-ModeDisplayName $mode) $Status.pid `
+            (Get-BooleanDisplayName ([bool]$Status.visible)) `
+            (Get-BooleanDisplayName ([bool]$Status.ready)))
+        Write-SwitchDetail (Get-Text "path" $Status.executableFile)
         return
     }
     if (-not [string]::IsNullOrWhiteSpace($TargetPath)) {
-        Write-Host ("[{0}] {1}" -f $Label, (Get-EditorMode $TargetPath))
-        Write-Host ("          Path: {0}" -f $TargetPath)
+        Write-SwitchMessage -Kind $Label -Message `
+            (Get-ModeDisplayName (Get-EditorMode $TargetPath))
+        Write-SwitchDetail (Get-Text "path" $TargetPath)
         return
     }
-    Write-Host ("[{0}] NONE | no resident owns pipe {1}" -f $Label, $serverName)
+    Write-SwitchMessage -Kind $Label -Message (Get-Text "noResident" $serverName)
 }
 
 function Assert-EditorTarget {
@@ -189,72 +286,157 @@ function Assert-EditorTarget {
 
     $fullPath = Get-NormalizedPath $Path
     if (-not (Test-Path -LiteralPath $fullPath -PathType Leaf)) {
-        throw "$Role target does not exist: $fullPath"
+        throw (Get-Text "targetMissing" (Get-ModeDisplayName $Role) $fullPath)
     }
     if (-not [StringComparer]::OrdinalIgnoreCase.Equals(
             [System.IO.Path]::GetFileName($fullPath), "ScratchEditor.exe")) {
-        throw "$Role target must be a ScratchEditor.exe file: $fullPath"
+        throw (Get-Text "targetInvalidName" (Get-ModeDisplayName $Role) $fullPath)
     }
     return (Resolve-Path -LiteralPath $fullPath).Path
 }
 
-function Select-TestEditor {
-    $candidates = @(
-        Get-ChildItem -LiteralPath (Join-Path $projectRoot "build") -Directory `
-            -ErrorAction SilentlyContinue |
-            ForEach-Object {
-                $candidate = Join-Path $_.FullName "ScratchEditor.exe"
-                if (Test-Path -LiteralPath $candidate -PathType Leaf) {
-                    Get-Item -LiteralPath $candidate
+function Get-RegisteredWorktreePaths {
+    $paths = [System.Collections.Generic.List[string]]::new()
+    $paths.Add($projectRoot)
+    $testPaths = if ($isolatedMode) {
+        $env:SCRATCHEDITOR_SWITCH_TEST_WORKTREES
+    }
+    else {
+        $null
+    }
+    if (-not [string]::IsNullOrWhiteSpace($testPaths)) {
+        foreach ($path in $testPaths.Split([System.IO.Path]::PathSeparator)) {
+            if (-not [string]::IsNullOrWhiteSpace($path)) {
+                $paths.Add([System.IO.Path]::GetFullPath($path))
+            }
+        }
+    }
+    else {
+        $output = @(& git -C $projectRoot worktree list --porcelain 2>$null)
+        if ($LASTEXITCODE -eq 0) {
+            foreach ($line in $output) {
+                if ($line.StartsWith("worktree ", [StringComparison]::Ordinal)) {
+                    $paths.Add([System.IO.Path]::GetFullPath($line.Substring(9)))
                 }
-            } |
-            Sort-Object LastWriteTime -Descending
-    )
+            }
+        }
+        else {
+            Write-SwitchMessage -Kind Warning -Message (Get-Text "worktreeScanFailed")
+        }
+    }
+    return @($paths | Select-Object -Unique)
+}
+
+function Get-TestEditorCandidates {
+    $candidates = [System.Collections.Generic.List[object]]::new()
+    $seen = [System.Collections.Generic.HashSet[string]]::new(
+        [StringComparer]::OrdinalIgnoreCase)
+    foreach ($worktreePath in Get-RegisteredWorktreePaths) {
+        if (-not (Test-Path -LiteralPath $worktreePath -PathType Container)) {
+            continue
+        }
+        $worktreeItem = Get-Item -LiteralPath $worktreePath
+        if (($worktreeItem.Attributes -band [System.IO.FileAttributes]::ReparsePoint) -ne 0) {
+            Write-SwitchMessage -Kind Warning -Message (Get-Text "reparseSkipped" $worktreePath)
+            continue
+        }
+        $buildRoot = Join-Path $worktreePath "build"
+        if (-not (Test-Path -LiteralPath $buildRoot -PathType Container)) {
+            continue
+        }
+        $buildRootItem = Get-Item -LiteralPath $buildRoot
+        if (($buildRootItem.Attributes -band [System.IO.FileAttributes]::ReparsePoint) -ne 0) {
+            Write-SwitchMessage -Kind Warning -Message (Get-Text "reparseSkipped" $buildRoot)
+            continue
+        }
+        foreach ($buildDirectory in Get-ChildItem -LiteralPath $buildRoot -Directory `
+                -ErrorAction SilentlyContinue) {
+            if (($buildDirectory.Attributes -band [System.IO.FileAttributes]::ReparsePoint) -ne 0) {
+                Write-SwitchMessage -Kind Warning -Message `
+                    (Get-Text "reparseSkipped" $buildDirectory.FullName)
+                continue
+            }
+            $candidatePath = Join-Path $buildDirectory.FullName "ScratchEditor.exe"
+            if (-not (Test-Path -LiteralPath $candidatePath -PathType Leaf)) {
+                continue
+            }
+            $candidate = Get-Item -LiteralPath $candidatePath
+            if (-not $seen.Add($candidate.FullName)) {
+                continue
+            }
+            $worktreeName = if (Test-SamePath $worktreePath $projectRoot) {
+                [System.IO.Path]::GetFileName($projectRoot)
+            }
+            else {
+                [System.IO.Path]::GetFileName($worktreePath)
+            }
+            $candidates.Add([pscustomobject]@{
+                FullName = $candidate.FullName
+                LastWriteTime = $candidate.LastWriteTime
+                BuildName = $buildDirectory.Name
+                WorktreeName = $worktreeName
+                WorktreePath = $worktreePath
+            })
+        }
+    }
+    return @($candidates | Sort-Object LastWriteTime -Descending)
+}
+
+function Write-TestEditorCandidates {
+    param([Parameter(Mandatory)][object[]]$Candidates)
+    Write-SwitchMessage -Kind Candidates -Message (Get-Text "candidateTitle")
+    for ($index = 0; $index -lt $Candidates.Count; $index++) {
+        $item = $Candidates[$index]
+        Write-Host (Get-Text "candidateSummary" ($index + 1) $item.WorktreeName `
+            $item.BuildName $item.LastWriteTime) -ForegroundColor White
+        Write-SwitchDetail (Get-Text "worktree" $item.WorktreePath)
+        Write-SwitchDetail (Get-Text "candidatePath" $item.FullName)
+    }
+}
+
+function Select-TestEditor {
+    $candidates = @(Get-TestEditorCandidates)
     if ($candidates.Count -eq 0) {
-        Write-Host "[GUIDE] No test builds were found under build/*/ScratchEditor.exe."
-        Write-Host "        Build one without installing it:"
-        Write-Host "        powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\build.ps1 -Preset editing -SkipLocalInstall"
-        throw "No test editor candidate is available."
+        Write-SwitchMessage -Kind Guide -Message (Get-Text "noCandidates")
+        Write-SwitchMessage -Kind Guide -Message (Get-Text "buildFirst")
+        Write-SwitchDetail (Get-Text "buildCommand")
+        throw (Get-Text "noCandidateAvailable")
     }
 
-    Write-Host "[SELECT] Available test builds:"
-    for ($index = 0; $index -lt $candidates.Count; $index++) {
-        $item = $candidates[$index]
-        Write-Host ("  {0}. {1} | {2:yyyy-MM-dd HH:mm:ss}" -f
-            ($index + 1), $item.Directory.Name, $item.LastWriteTime)
-        Write-Host ("     {0}" -f $item.FullName)
-    }
+    Write-TestEditorCandidates -Candidates $candidates
     if ($nonInteractive) {
-        throw "A test target must be supplied with -TestEditorPath in non-interactive mode."
+        throw (Get-Text "nonInteractivePathRequired")
     }
     while ($true) {
-        $answer = Read-Host ("Choose a test build [1-{0}], or Q to cancel" -f $candidates.Count)
+        $answer = Read-Host (Get-Text "chooseCandidate" $candidates.Count)
         if ($answer -match '^[Qq]$') {
-            throw "Switch cancelled."
+            throw (Get-Text "cancelled")
         }
         $selection = 0
         if ([int]::TryParse($answer, [ref]$selection) -and
                 $selection -ge 1 -and $selection -le $candidates.Count) {
             return $candidates[$selection - 1].FullName
         }
-        Write-Host "[GUIDE] Enter one of the listed numbers, or Q to cancel."
+        Write-SwitchMessage -Kind Guide -Message (Get-Text "chooseCandidateAgain")
     }
 }
 
 function Select-ModeWithoutResident {
     if ($nonInteractive) {
-        throw "No resident is running. Supply -TestEditorPath or run interactively to choose a mode."
+        throw (Get-Text "noResidentNonInteractive")
     }
-    Write-Host "[SELECT] No resident is running."
-    Write-Host "  1. Start STABLE"
-    Write-Host "  2. Start TEST"
+    Write-SwitchMessage -Kind Select -Message (Get-Text "noResidentChoose")
+    Write-SwitchDetail (Get-Text "startStable")
+    Write-SwitchDetail (Get-Text "startTest")
     while ($true) {
-        $answer = Read-Host "Choose 1 or 2, or Q to cancel"
+        $answer = Read-Host (Get-Text "chooseMode")
         switch -Regex ($answer) {
             '^1$' { return "STABLE" }
             '^2$' { return "TEST" }
-            '^[Qq]$' { throw "Switch cancelled." }
-            default { Write-Host "[GUIDE] Enter 1, 2, or Q." }
+            '^[Qq]$' { throw (Get-Text "cancelled") }
+            default {
+                Write-SwitchMessage -Kind Guide -Message (Get-Text "chooseModeAgain")
+            }
         }
     }
 }
@@ -309,51 +491,50 @@ function Stop-CurrentEditor {
     )
 
     if ($UseIsolatedTermination) {
-        Write-Host ("[STOPPING] Waiting for isolated test work before stopping PID {0}." -f
-            $Identity.Pid)
+        Write-SwitchMessage -Kind Stopping -Message `
+            (Get-Text "waitingIsolated" $Identity.Pid)
         $idle = Invoke-EditorCommand -Command "testWaitForClipboardHistoryIdle" -TimeoutMs 6000
         if ($null -eq $idle -or -not [bool]$idle.ok) {
-            throw "The isolated clipboard-history coordinator did not become idle; nothing was stopped."
+            throw (Get-Text "isolatedNotIdle")
         }
         $freshStatus = Invoke-EditorCommand -Command "status" -TimeoutMs 500
         if (-not (Test-ProcessIdentity -Expected $Identity -Status $freshStatus)) {
-            throw "The isolated process identity changed; nothing was stopped."
+            throw (Get-Text "isolatedIdentityChanged")
         }
         Stop-Process -Id $Identity.Pid -Force -ErrorAction Stop
         if (-not (Wait-ForProcessExit -ProcessId $Identity.Pid -TimeoutMs 2000)) {
-            throw "The verified isolated process did not exit after Stop-Process."
+            throw (Get-Text "isolatedStopFailed")
         }
-        Write-Host "[STOPPED] Verified isolated test process was stopped."
+        Write-SwitchMessage -Kind Stopped -Message (Get-Text "isolatedStopped")
         return
     }
 
-    Write-Host ("[STOPPING] Requesting a normal save and shutdown for PID {0}." -f
-        $Identity.Pid)
+    Write-SwitchMessage -Kind Stopping -Message (Get-Text "normalShutdown" $Identity.Pid)
     $null = Invoke-EditorCommand -Command "shutdownForUpdate" -TimeoutMs 1000
     if (Wait-ForProcessExit -ProcessId $Identity.Pid) {
-        Write-Host "[STOPPED] Previous resident exited normally."
+        Write-SwitchMessage -Kind Stopped -Message (Get-Text "normalStopped")
         return
     }
 
     $freshStatus = Invoke-EditorCommand -Command "status" -TimeoutMs 500
     if (-not (Test-ProcessIdentity -Expected $Identity -Status $freshStatus)) {
-        throw "The old process did not exit and its identity can no longer be verified. No process was forced to stop."
+        throw (Get-Text "oldIdentityLost")
     }
-    Write-Host "[WARNING] Normal shutdown timed out."
-    Write-Host ("          Verified PID: {0}" -f $Identity.Pid)
-    Write-Host ("          Verified path: {0}" -f $Identity.Path)
+    Write-SwitchMessage -Kind Warning -Message (Get-Text "normalTimeout")
+    Write-SwitchDetail (Get-Text "verifiedPid" $Identity.Pid)
+    Write-SwitchDetail (Get-Text "verifiedPath" $Identity.Path)
     if ($nonInteractive) {
-        throw "Forced termination requires an interactive confirmation."
+        throw (Get-Text "forceNeedsInteractive")
     }
-    $answer = Read-Host "Force-stop only this verified PID? [y/N]"
+    $answer = Read-Host (Get-Text "forcePrompt")
     if ($answer -notmatch '^[Yy]$') {
-        throw "Switch cancelled; the previous resident is still running."
+        throw (Get-Text "cancelStillRunning")
     }
     Stop-Process -Id $Identity.Pid -Force -ErrorAction Stop
     if (-not (Wait-ForProcessExit -ProcessId $Identity.Pid -TimeoutMs 2000)) {
-        throw "The verified process did not exit after Stop-Process."
+        throw (Get-Text "forceStopFailed")
     }
-    Write-Host "[STOPPED] Verified previous resident was force-stopped."
+    Write-SwitchMessage -Kind Stopped -Message (Get-Text "forceStopped")
 }
 
 function Start-EditorTarget {
@@ -393,10 +574,10 @@ function Start-EditorTarget {
             $status = Invoke-EditorCommand -Command "status" -TimeoutMs 100
             if ($null -ne $status) {
                 if (-not (Test-SamePath ([string]$status.executableFile) $Path)) {
-                    throw "Pipe ownership mismatch: expected $Path, actual $($status.executableFile)"
+                    throw (Get-Text "pipePathMismatch" $Path $status.executableFile)
                 }
                 if ([int]$status.pid -ne $process.Id) {
-                    throw "Pipe PID mismatch: expected $($process.Id), actual $($status.pid)"
+                    throw (Get-Text "pipePidMismatch" $process.Id $status.pid)
                 }
                 if (-not [bool]$status.ready) {
                     continue
@@ -404,10 +585,10 @@ function Start-EditorTarget {
                 return $status
             }
             if ($process.HasExited) {
-                throw "Target exited during startup with code $($process.ExitCode): $Path"
+                throw (Get-Text "targetExited" $process.ExitCode $Path)
             }
         }
-        throw "Target did not become ready within 5 seconds: $Path"
+        throw (Get-Text "targetNotReady" $Path)
     }
     catch {
         if (-not $process.HasExited) {
@@ -419,30 +600,44 @@ function Start-EditorTarget {
 }
 
 function Invoke-Switch {
+    if ($ListCandidates) {
+        $candidates = @(Get-TestEditorCandidates)
+        if ($candidates.Count -eq 0) {
+            Write-SwitchMessage -Kind Guide -Message (Get-Text "noCandidates")
+            Write-SwitchMessage -Kind Guide -Message (Get-Text "buildFirst")
+            Write-SwitchDetail (Get-Text "buildCommand")
+            return
+        }
+        Write-TestEditorCandidates -Candidates $candidates
+        Write-SwitchMessage -Kind Done -Message (Get-Text "listOnlyDone" $candidates.Count)
+        return
+    }
+
     $currentStatus = Invoke-EditorCommand -Command "status"
     if ($null -eq $currentStatus -and
             ($script:lastPipeConnectionState -in @("ConnectedNoResponse", "AccessDenied") -or
                 (Test-ServerPipeExists))) {
         $reason = if ($script:lastPipeConnectionState -eq "AccessDenied") {
-            "access denied"
+            Get-Text "reasonAccessDenied"
         }
         elseif ($script:lastPipeConnectionState -eq "ConnectedNoResponse") {
-            "no status response"
+            Get-Text "reasonNoResponse"
         }
         else {
-            "pipe is present but unavailable"
+            Get-Text "reasonUnavailable"
         }
-        Write-Host ("[CURRENT] UNKNOWN | {0} ({1})" -f $serverName, $reason)
+        Write-SwitchMessage -Kind Current -Message `
+            (Get-Text "unknownCurrent" $serverName $reason)
         if ($script:lastPipeConnectionState -eq "AccessDenied") {
-            Write-Host "[GUIDE] Re-run the command from an elevated PowerShell window."
+            Write-SwitchMessage -Kind Guide -Message (Get-Text "runElevated")
         }
-        throw "The current resident cannot be identified safely; nothing was changed."
+        throw (Get-Text "unsafeCurrent")
     }
     Write-EditorState -Label "CURRENT" -Status $currentStatus
 
     if ($StatusOnly) {
         if ($null -eq $currentStatus) {
-            Write-Host "[GUIDE] Run without -StatusOnly to choose and start a resident."
+            Write-SwitchMessage -Kind Guide -Message (Get-Text "statusGuide")
         }
         return
     }
@@ -485,7 +680,7 @@ function Invoke-Switch {
 
     $targetPath = Assert-EditorTarget -Path $targetPath -Role $targetMode
     if ($targetMode -eq "TEST" -and (Test-SamePath $targetPath $stableEditor)) {
-        throw "The test target resolves to the stable installation. Choose a build output instead."
+        throw (Get-Text "sameAsStable")
     }
     Write-EditorState -Label "TARGET" -Status $null -TargetPath $targetPath
 
@@ -494,34 +689,36 @@ function Invoke-Switch {
     if ($null -ne $currentStatus) {
         $previousIdentity = Get-ProcessIdentity $currentStatus
         if ($null -eq $previousIdentity) {
-            throw "The current resident identity could not be verified; nothing was stopped."
+            throw (Get-Text "currentIdentityFailed")
         }
-        $previousPath = Assert-EditorTarget -Path ([string]$currentStatus.executableFile) -Role "Current"
+        $previousPath = Assert-EditorTarget -Path ([string]$currentStatus.executableFile) `
+            -Role $currentMode
         Stop-CurrentEditor -Identity $previousIdentity `
             -UseIsolatedTermination:($isolatedMode -and [bool]$currentStatus.testMode)
     }
 
     try {
-        Write-Host ("[STARTING] {0}" -f $targetPath)
+        Write-SwitchMessage -Kind Starting -Message (Get-Text "starting" $targetPath)
         $activeStatus = Start-EditorTarget -Path $targetPath
         Write-EditorState -Label "ACTIVE" -Status $activeStatus
-        Write-Host "[DONE] Hotkeys now route to the active resident shown above."
+        Write-SwitchMessage -Kind Done -Message (Get-Text "routingDone")
     }
     catch {
         $targetError = $_.Exception.Message
-        Write-Host ("[ERROR] Target startup failed: {0}" -f $targetError)
+        Write-SwitchMessage -Kind Error -Message (Get-Text "targetStartupFailed" $targetError)
         if (-not [string]::IsNullOrWhiteSpace($previousPath) -and
                 (Test-Path -LiteralPath $previousPath -PathType Leaf)) {
-            Write-Host ("[RECOVERY] Restoring previous resident: {0}" -f $previousPath)
+            Write-SwitchMessage -Kind Recovery -Message (Get-Text "restoring" $previousPath)
             try {
                 $restoredStatus = Start-EditorTarget -Path $previousPath
                 Write-EditorState -Label "ACTIVE" -Status $restoredStatus
-                Write-Host "[RECOVERED] The previous resident is active again."
+                Write-SwitchMessage -Kind Recovered -Message (Get-Text "restored")
             }
             catch {
-                Write-Host ("[RECOVERY-FAILED] {0}" -f $_.Exception.Message)
-                Write-Host "[GUIDE] Start the stable resident manually:"
-                Write-Host ("        & '{0}' --background" -f $stableEditor.Replace("'", "''"))
+                Write-SwitchMessage -Kind RecoveryFailed -Message `
+                    (Get-Text "recoveryFailed" $_.Exception.Message)
+                Write-SwitchMessage -Kind Guide -Message (Get-Text "startStableManually")
+                Write-SwitchDetail ("& '{0}' --background" -f $stableEditor.Replace("'", "''"))
             }
         }
         throw $targetError
@@ -533,8 +730,8 @@ try {
     exit 0
 }
 catch {
-    Write-Host ("[ERROR] {0}" -f $_.Exception.Message)
-    Write-Host "[GUIDE] Inspect the current state with:"
-    Write-Host "        powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\switch-ahk-editor.ps1 -StatusOnly"
+    Write-SwitchMessage -Kind Error -Message $_.Exception.Message
+    Write-SwitchMessage -Kind Guide -Message (Get-Text "inspectStatus")
+    Write-SwitchDetail "powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\switch-ahk-editor.ps1 -StatusOnly"
     exit 1
 }

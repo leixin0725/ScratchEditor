@@ -33,6 +33,8 @@ $tempDirectory = Join-Path $env:TEMP (
     "ScratchEditor-Switch\validation-" + [guid]::NewGuid().ToString("N")
 )
 $settingsFile = Join-Path $tempDirectory "settings.ini"
+$testWorktreeDirectory = Join-Path $tempDirectory "registered-worktree"
+$testWorktreeEditor = Join-Path $testWorktreeDirectory "build\worktree-test\ScratchEditor.exe"
 
 function Invoke-EditorCommand {
     param(
@@ -94,7 +96,10 @@ function Invoke-EditorCommand {
 }
 
 function Invoke-SwitchScript {
-    param([string[]]$Arguments)
+    param(
+        [string[]]$Arguments,
+        [switch]$CaptureOutput
+    )
 
     $startInfo = [System.Diagnostics.ProcessStartInfo]::new()
     $startInfo.FileName = "powershell.exe"
@@ -112,18 +117,26 @@ function Invoke-SwitchScript {
     $startInfo.Arguments = $quotedArguments -join " "
     $startInfo.UseShellExecute = $false
     $startInfo.CreateNoWindow = $true
+    $startInfo.RedirectStandardOutput = $CaptureOutput
+    $startInfo.RedirectStandardError = $CaptureOutput
     $startInfo.EnvironmentVariables["SCRATCHEDITOR_SWITCH_SERVER_NAME"] = $serverName
     $startInfo.EnvironmentVariables["SCRATCHEDITOR_SWITCH_STABLE_EDITOR"] = $stableEditor
     $startInfo.EnvironmentVariables["SCRATCHEDITOR_SWITCH_SETTINGS_FILE"] = $settingsFile
     $startInfo.EnvironmentVariables["SCRATCHEDITOR_SWITCH_NONINTERACTIVE"] = "1"
+    $startInfo.EnvironmentVariables["SCRATCHEDITOR_SWITCH_TEST_WORKTREES"] =
+        $testWorktreeDirectory
 
     $process = [System.Diagnostics.Process]::Start($startInfo)
+    $stdoutTask = if ($CaptureOutput) { $process.StandardOutput.ReadToEndAsync() } else { $null }
+    $stderrTask = if ($CaptureOutput) { $process.StandardError.ReadToEndAsync() } else { $null }
     if (-not $process.WaitForExit(15000)) {
         Stop-Process -Id $process.Id -Force -ErrorAction SilentlyContinue
         throw "Switch script timed out; PID $($process.Id)."
     }
     return [pscustomobject]@{
         ExitCode = $process.ExitCode
+        Stdout = if ($CaptureOutput) { $stdoutTask.Result.Trim() } else { "" }
+        Stderr = if ($CaptureOutput) { $stderrTask.Result.Trim() } else { "" }
     }
 }
 
@@ -157,9 +170,18 @@ foreach ($path in @($stableEditor, $testEditor)) {
 }
 
 New-Item -ItemType Directory -Path $tempDirectory -Force | Out-Null
+New-Item -ItemType Directory -Path (Split-Path -Parent $testWorktreeEditor) -Force |
+    Out-Null
+Copy-Item -LiteralPath $testEditor -Destination $testWorktreeEditor
 $startedPids = [System.Collections.Generic.HashSet[int]]::new()
 
 try {
+    $listed = Invoke-SwitchScript -Arguments @("-ListCandidates") -CaptureOutput
+    Assert-True "registered worktree candidate is listed" `
+        ($listed.ExitCode -eq 0 -and $listed.Stdout.Contains("registered-worktree") -and
+            $listed.Stdout.Contains("worktree-test\ScratchEditor.exe")) `
+        ($listed.Stdout + $listed.Stderr) "registered-worktree/build/worktree-test"
+
     $startTest = Invoke-SwitchScript -Arguments @("-TestEditorPath", $testEditor)
     Assert-True "no instance starts explicit test target" ($startTest.ExitCode -eq 0) `
         $startTest.ExitCode "exit 0"
