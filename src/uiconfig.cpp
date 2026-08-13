@@ -281,6 +281,7 @@ UiConfig UiConfig::defaults()
     put({"panels", "history", "minWidth"}, 200);
     put({"panels", "history", "maxWidth"}, 360);
     put({"panels", "history", "overlayThreshold"}, 320);
+    put({"panels", "history", "cornerRadius"}, 8);
     put({"panels", "history", "cardHeightDefault"}, 58);
     put({"panels", "history", "cardHeightMin"}, 44);
     put({"panels", "history", "cardHeightMax"}, 200);
@@ -504,6 +505,7 @@ QVariantMap UiConfig::sanitize(const QVariantMap &input)
     fixInt({"panels", "history", "minWidth"}, 50, 2000);
     fixInt({"panels", "history", "maxWidth"}, 50, 4000);
     fixInt({"panels", "history", "overlayThreshold"}, 50, 4000);
+    fixInt({"panels", "history", "cornerRadius"}, 0, 100);
     fixInt({"panels", "history", "cardHeightMin"}, 20, 300);
     fixInt({"panels", "history", "cardHeightMax"}, 50, 1000);
     fixInt({"panels", "history", "titleX"}, 0, 1000);
