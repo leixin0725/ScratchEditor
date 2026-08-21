@@ -1321,6 +1321,76 @@ int main(int argc, char *argv[])
                          {QStringLiteral("ellipsis"), deletedEllipsis},
                          {QStringLiteral("dash"), deletedDash}});
 
+    setTextAndSelection(QString(), 0, 0);
+    const QJsonObject autoQuoteSpace = keyPress(QStringLiteral(">"));
+    const QJsonObject autoQuoteSpaceUndo = request(QStringLiteral("testUndo"));
+    setTextAndSelection(QStringLiteral("正文"), 0, 0);
+    const QJsonObject fullwidthQuoteBeforeText = keyPress(QStringLiteral("》"));
+    const QJsonObject fullwidthQuoteUndo = request(QStringLiteral("testUndo"));
+    setTextAndSelection(QStringLiteral("内容"), 0, 0);
+    inputMethodCommit(QStringLiteral("》"));
+    QThread::msleep(30);
+    const QJsonObject imeFullwidthQuote = editorStatus();
+    const QString imeFullwidthQuoteText = editorText();
+    const QJsonObject imeFullwidthQuoteUndo = request(QStringLiteral("testUndo"));
+    addCheck(checks, details, QStringLiteral("lineStartQuoteAliasesAndUndo"),
+             autoQuoteSpace.value(QStringLiteral("text")).toString() == QStringLiteral("> ")
+                 && autoQuoteSpace.value(QStringLiteral("cursorPosition")).toInt() == 2
+                 && autoQuoteSpaceUndo.value(QStringLiteral("text")).toString().isEmpty()
+                 && autoQuoteSpaceUndo.value(QStringLiteral("cursorPosition")).toInt() == 0
+                 && fullwidthQuoteBeforeText.value(QStringLiteral("text")).toString()
+                    == QStringLiteral("> 正文")
+                 && fullwidthQuoteBeforeText.value(QStringLiteral("cursorPosition")).toInt() == 2
+                 && fullwidthQuoteUndo.value(QStringLiteral("text")).toString()
+                    == QStringLiteral("正文")
+                 && fullwidthQuoteUndo.value(QStringLiteral("cursorPosition")).toInt() == 0
+                 && imeFullwidthQuoteText == QStringLiteral("> 内容")
+                 && imeFullwidthQuote.value(QStringLiteral("cursorPosition")).toInt() == 2
+                 && imeFullwidthQuoteUndo.value(QStringLiteral("text")).toString()
+                    == QStringLiteral("内容")
+                 && imeFullwidthQuoteUndo.value(QStringLiteral("cursorPosition")).toInt() == 0,
+             QJsonObject{{QStringLiteral("ascii"), autoQuoteSpace},
+                         {QStringLiteral("asciiUndo"), autoQuoteSpaceUndo},
+                         {QStringLiteral("fullwidth"), fullwidthQuoteBeforeText},
+                         {QStringLiteral("fullwidthUndo"), fullwidthQuoteUndo},
+                         {QStringLiteral("ime"), imeFullwidthQuote},
+                         {QStringLiteral("imeText"), imeFullwidthQuoteText},
+                         {QStringLiteral("imeUndo"), imeFullwidthQuoteUndo}});
+
+    setTextAndSelection(QStringLiteral("正文"), 1, 1);
+    inputMethodCommit(QStringLiteral(">"));
+    QThread::msleep(30);
+    const QJsonObject quoteAliasMidline = editorStatus();
+    const QString quoteAliasMidlineText = editorText();
+    setTextAndSelection(QStringLiteral("  正文"), 2, 2);
+    inputMethodCommit(QStringLiteral("》"));
+    QThread::msleep(30);
+    const QJsonObject quoteAliasAfterIndent = editorStatus();
+    const QString quoteAliasAfterIndentText = editorText();
+    setTextAndSelection(QStringLiteral("正文"), 0, 2);
+    inputMethodCommit(QStringLiteral(">"));
+    QThread::msleep(30);
+    const QJsonObject quoteAliasSelection = editorStatus();
+    const QString quoteAliasSelectionText = editorText();
+    setTextAndSelection(QStringLiteral("```\n\n```"), 4, 4);
+    inputMethodCommit(QStringLiteral(">"));
+    QThread::msleep(30);
+    const QJsonObject quoteAliasInFence = editorStatus();
+    const QString quoteAliasInFenceText = editorText();
+    addCheck(checks, details, QStringLiteral("lineStartQuoteAliasesRespectBoundaries"),
+             quoteAliasMidlineText == QStringLiteral("正>文")
+                 && quoteAliasAfterIndentText == QStringLiteral("  》正文")
+                 && quoteAliasSelectionText == QStringLiteral(">")
+                 && quoteAliasInFenceText == QStringLiteral("```\n>\n```"),
+             QJsonObject{{QStringLiteral("midline"), quoteAliasMidline},
+                         {QStringLiteral("midlineText"), quoteAliasMidlineText},
+                         {QStringLiteral("indent"), quoteAliasAfterIndent},
+                         {QStringLiteral("indentText"), quoteAliasAfterIndentText},
+                         {QStringLiteral("selection"), quoteAliasSelection},
+                         {QStringLiteral("selectionText"), quoteAliasSelectionText},
+                         {QStringLiteral("fence"), quoteAliasInFence},
+                         {QStringLiteral("fenceText"), quoteAliasInFenceText}});
+
     setTextAndSelection(QStringLiteral("- one"), 5, 5);
     const QJsonObject continuedBullet = keyPress({}, QStringLiteral("Enter"));
     const QJsonObject exitedBullet = keyPress({}, QStringLiteral("Enter"));
@@ -1344,6 +1414,83 @@ int main(int argc, char *argv[])
                          {QStringLiteral("exit"), exitedBullet},
                          {QStringLiteral("task"), continuedTask},
                          {QStringLiteral("parenthesized"), continuedParenthesizedNumber}});
+
+    setTextAndSelection(QStringLiteral("> 引用"), 4, 4);
+    const QJsonObject continuedQuote = keyPress({}, QStringLiteral("Enter"));
+    setTextAndSelection(QStringLiteral("> 前后"), 3, 3);
+    const QJsonObject splitQuote = keyPress({}, QStringLiteral("Enter"));
+    setTextAndSelection(QStringLiteral("> > 内容"), 6, 6);
+    const QJsonObject continuedNestedQuote = keyPress({}, QStringLiteral("Enter"));
+    setTextAndSelection(QStringLiteral("> "), 2, 2);
+    const QJsonObject exitedQuote = keyPress({}, QStringLiteral("Enter"));
+    setTextAndSelection(QStringLiteral("> > "), 4, 4);
+    const QJsonObject exitedNestedQuoteOnce = keyPress({}, QStringLiteral("Enter"));
+    const QJsonObject exitedNestedQuoteTwice = keyPress({}, QStringLiteral("Enter"));
+    addCheck(checks, details, QStringLiteral("enterContinuesAndExitsQuotes"),
+             continuedQuote.value(QStringLiteral("text")).toString()
+                    == QStringLiteral("> 引用\n> ")
+                 && continuedQuote.value(QStringLiteral("cursorPosition")).toInt() == 7
+                 && splitQuote.value(QStringLiteral("text")).toString()
+                    == QStringLiteral("> 前\n> 后")
+                 && splitQuote.value(QStringLiteral("cursorPosition")).toInt() == 6
+                 && continuedNestedQuote.value(QStringLiteral("text")).toString()
+                    == QStringLiteral("> > 内容\n> > ")
+                 && continuedNestedQuote.value(QStringLiteral("cursorPosition")).toInt() == 11
+                 && exitedQuote.value(QStringLiteral("text")).toString().isEmpty()
+                 && exitedQuote.value(QStringLiteral("cursorPosition")).toInt() == 0
+                 && exitedNestedQuoteOnce.value(QStringLiteral("text")).toString()
+                    == QStringLiteral("> ")
+                 && exitedNestedQuoteOnce.value(QStringLiteral("cursorPosition")).toInt() == 2
+                 && exitedNestedQuoteTwice.value(QStringLiteral("text")).toString().isEmpty()
+                 && exitedNestedQuoteTwice.value(QStringLiteral("cursorPosition")).toInt() == 0,
+             QJsonObject{{QStringLiteral("continued"), continuedQuote},
+                         {QStringLiteral("split"), splitQuote},
+                         {QStringLiteral("nested"), continuedNestedQuote},
+                         {QStringLiteral("exit"), exitedQuote},
+                         {QStringLiteral("nestedExitOnce"), exitedNestedQuoteOnce},
+                         {QStringLiteral("nestedExitTwice"), exitedNestedQuoteTwice}});
+
+    setTextAndSelection(QStringLiteral("> > "), 4, 4);
+    const QJsonObject softEmptyQuote = keyPress({}, QStringLiteral("Enter"), true);
+    setTextAndSelection(QStringLiteral("> 文"), 3, 3);
+    const QJsonObject softContentQuote = keyPress({}, QStringLiteral("Enter"), true);
+    setTextAndSelection(QStringLiteral("> - item"), 8, 8);
+    const QJsonObject continuedQuotedList = keyPress({}, QStringLiteral("Enter"));
+    setTextAndSelection(QStringLiteral("> - item"), 8, 8);
+    const QJsonObject softQuotedList = keyPress({}, QStringLiteral("Enter"), true);
+    setTextAndSelection(QStringLiteral("```\n> code\n```"), 10, 10);
+    const QJsonObject softQuoteInFence = keyPress({}, QStringLiteral("Enter"), true);
+    setTextAndSelection(QStringLiteral("> text"), 1, 1);
+    const QJsonObject enterInsideQuotePrefix = keyPress({}, QStringLiteral("Enter"));
+    setTextAndSelection(QStringLiteral("> 😀"), 4, 4);
+    const QJsonObject continuedSupplementaryQuote = keyPress({}, QStringLiteral("Enter"));
+    addCheck(checks, details, QStringLiteral("quoteContinuationShiftListAndBoundaries"),
+             softEmptyQuote.value(QStringLiteral("text")).toString()
+                    == QStringLiteral("> > \n> > ")
+                 && softEmptyQuote.value(QStringLiteral("cursorPosition")).toInt() == 9
+                 && softContentQuote.value(QStringLiteral("text")).toString()
+                    == QStringLiteral("> 文\n> ")
+                 && continuedQuotedList.value(QStringLiteral("text")).toString()
+                    == QStringLiteral("> - item\n> - ")
+                 && continuedQuotedList.value(QStringLiteral("cursorPosition")).toInt() == 13
+                 && softQuotedList.value(QStringLiteral("text")).toString()
+                    == QStringLiteral("> - item\n> ")
+                 && softQuotedList.value(QStringLiteral("cursorPosition")).toInt() == 11
+                 && softQuoteInFence.value(QStringLiteral("text")).toString()
+                    == QStringLiteral("```\n> code\n\n```")
+                 && enterInsideQuotePrefix.value(QStringLiteral("text")).toString()
+                    == QStringLiteral(">\n text")
+                 && continuedSupplementaryQuote.value(QStringLiteral("text")).toString()
+                    == QStringLiteral("> 😀\n> ")
+                 && continuedSupplementaryQuote.value(QStringLiteral("cursorPosition")).toInt()
+                    == 7,
+             QJsonObject{{QStringLiteral("softEmpty"), softEmptyQuote},
+                         {QStringLiteral("softContent"), softContentQuote},
+                         {QStringLiteral("list"), continuedQuotedList},
+                         {QStringLiteral("softList"), softQuotedList},
+                         {QStringLiteral("fence"), softQuoteInFence},
+                         {QStringLiteral("insidePrefix"), enterInsideQuotePrefix},
+                         {QStringLiteral("supplementary"), continuedSupplementaryQuote}});
 
     const QString orderedList = QStringLiteral("1. one\n2. two\n3. three");
     setTextAndSelection(orderedList, 6, 6);

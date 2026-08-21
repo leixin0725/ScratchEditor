@@ -492,6 +492,34 @@ struct MarkdownListItem {
     }
 };
 
+struct MarkdownQuoteLine {
+    bool valid = false;
+    QString prefix;
+    QString content;
+    int contentStart = -1;
+    int deepestPrefixStart = -1;
+
+    bool isEmpty() const { return content.trimmed().isEmpty(); }
+};
+
+MarkdownQuoteLine parseMarkdownQuoteLine(const QString &line)
+{
+    static const QRegularExpression quotePattern(
+        QStringLiteral(R"(^([\t ]*(?:>[\t ]*)+)(.*)$)"));
+    const QRegularExpressionMatch match = quotePattern.match(line);
+    if (!match.hasMatch()) {
+        return {};
+    }
+
+    MarkdownQuoteLine quote;
+    quote.valid = true;
+    quote.prefix = match.captured(1);
+    quote.content = match.captured(2);
+    quote.contentStart = match.capturedStart(2);
+    quote.deepestPrefixStart = quote.prefix.lastIndexOf(QLatin1Char('>'));
+    return quote;
+}
+
 int indentationColumns(const QString &prefix)
 {
     int columns = 0;
@@ -1621,13 +1649,26 @@ bool EditorCommandRegistry::handleEditorEvent(QEvent *event)
             queueInputAutoScrollCheck();
             return false;
         }
-        const bool plainEnter = (keyEvent->key() == Qt::Key_Return
-                                 || keyEvent->key() == Qt::Key_Enter)
+        const bool enterPressed = keyEvent->key() == Qt::Key_Return
+            || keyEvent->key() == Qt::Key_Enter;
+        const bool plainEnter = enterPressed
             && !(modifiers & (Qt::ShiftModifier | Qt::ControlModifier
                               | Qt::AltModifier | Qt::MetaModifier));
-        if (plainEnter && !m_editor->property("inputMethodComposing").toBool()) {
+        const bool softEnter = enterPressed
+            && modifiers == Qt::ShiftModifier;
+        if ((plainEnter || softEnter)
+            && !m_editor->property("inputMethodComposing").toBool()) {
             beginInputAutoScrollTracking(QStringLiteral("enter"));
-            if (handleListEnter()) {
+            const int enterPosition = m_editor->property("selectionStart").toInt();
+            const int enterLineStart = lineRangeAt(
+                m_documentTextSnapshot, enterPosition).start;
+            // 列表与引用处理共享同一次围栏分析，避免普通 Enter 候选链重复扫描全文。
+            const bool insideFencedBlock = isInsideFencedBlock(enterLineStart);
+            if (plainEnter && handleListEnter(insideFencedBlock)) {
+                queueInputAutoScrollCheck();
+                return true;
+            }
+            if (handleQuoteEnter(softEnter, insideFencedBlock)) {
                 queueInputAutoScrollCheck();
                 return true;
             }
@@ -1756,6 +1797,8 @@ bool EditorCommandRegistry::handleEditorEvent(QEvent *event)
         const bool relevant = committedText == QStringLiteral("```")
             || committedText == QStringLiteral("`")
             || committedText == QStringLiteral("·")
+            || committedText == QStringLiteral(">")
+            || committedText == QStringLiteral("》")
             || pairForOpening(committedText)
             || isClosingDelimiter(committedText);
         const int start = m_editor->property("selectionStart").toInt();
@@ -3139,6 +3182,21 @@ EditorCommandRegistry::TypedEditResult EditorCommandRegistry::handleTypedText(co
 
     const QString documentText = m_documentTextSnapshot;
 
+    if (!hasSelection
+        && (text == QStringLiteral(">") || text == QStringLiteral("》"))) {
+        const LineRange line = lineRangeAt(documentText, start);
+        if (start == line.start && !isInsideFencedBlock(start)) {
+            QTextCursor cursor(m_document);
+            cursor.setPosition(start);
+            cursor.insertText(QStringLiteral("> "));
+            m_editor->setProperty("cursorPosition", start + 2);
+            focusEditor();
+            result.consumed = true;
+            result.textChanged = true;
+            return result;
+        }
+    }
+
     if (text == QStringLiteral("-") && !hasSelection) {
         const LineRange line = lineRangeAt(documentText, start);
         if (start == line.start && start == line.end) {
@@ -3687,7 +3745,7 @@ bool EditorCommandRegistry::handleSpecialBackspace()
     return true;
 }
 
-bool EditorCommandRegistry::handleListEnter()
+bool EditorCommandRegistry::handleListEnter(bool insideFencedBlock)
 {
     const int start = m_editor->property("selectionStart").toInt();
     const int end = m_editor->property("selectionEnd").toInt();
@@ -3699,7 +3757,7 @@ bool EditorCommandRegistry::handleListEnter()
     const LineRange line = lineRangeAt(text, start);
     const int lineStart = line.start;
     const int lineEnd = line.end;
-    if (isInsideFencedBlock(lineStart)) {
+    if (insideFencedBlock) {
         return false;
     }
 
@@ -3735,6 +3793,54 @@ bool EditorCommandRegistry::handleListEnter()
     if (item.ordered) {
         repairOrderedLists(text, m_document->toPlainText(), true);
     }
+    editCursor.endEditBlock();
+    focusEditor();
+    return true;
+}
+
+bool EditorCommandRegistry::handleQuoteEnter(bool preserveEmptyQuote,
+                                             bool insideFencedBlock)
+{
+    const int start = m_editor->property("selectionStart").toInt();
+    const int end = m_editor->property("selectionEnd").toInt();
+    if (start != end) {
+        return false;
+    }
+
+    const QString text = m_documentTextSnapshot;
+    const LineRange line = lineRangeAt(text, start);
+    if (insideFencedBlock) {
+        return false;
+    }
+
+    const MarkdownQuoteLine quote = parseMarkdownQuoteLine(
+        text.mid(line.start, line.end - line.start));
+    const int positionInLine = start - line.start;
+    if (!quote.valid || positionInLine < quote.contentStart) {
+        return false;
+    }
+
+    QTextCursor editCursor(m_document);
+    editCursor.setPosition(start);
+    editCursor.beginEditBlock();
+    if (quote.isEmpty() && !preserveEmptyQuote) {
+        // 普通 Enter 每次只退出最内层引用；最外层退出后保留当前空行。
+        const QString retainedPrefix = quote.prefix.left(quote.deepestPrefixStart);
+        QTextCursor replacementCursor(m_document);
+        replacementCursor.setPosition(line.start);
+        replacementCursor.setPosition(line.start + quote.contentStart,
+                                      QTextCursor::KeepAnchor);
+        replacementCursor.insertText(retainedPrefix);
+        m_editor->setProperty("cursorPosition", line.start + retainedPrefix.size());
+        editCursor.endEditBlock();
+        focusEditor();
+        return true;
+    }
+
+    QTextCursor insertionCursor(m_document);
+    insertionCursor.setPosition(start);
+    insertionCursor.insertText(QLatin1Char('\n') + quote.prefix);
+    m_editor->setProperty("cursorPosition", start + 1 + quote.prefix.size());
     editCursor.endEditBlock();
     focusEditor();
     return true;
@@ -4176,6 +4282,23 @@ EditorCommandRegistry::completeInputMethodCommit(const QString &committedText,
     expectedText.replace(selectionStart, selectionEnd - selectionStart, committedText);
     if (m_document->toPlainText() != expectedText) {
         return std::nullopt;
+    }
+
+    if (selectionStart == selectionEnd
+        && (committedText == QStringLiteral(">")
+            || committedText == QStringLiteral("》"))) {
+        const LineRange line = lineRangeAt(beforeText, selectionStart);
+        if (selectionStart == line.start && !isInsideFencedBlock(selectionStart)) {
+            QTextCursor cursor(m_document);
+            cursor.setPosition(selectionStart);
+            cursor.setPosition(selectionStart + committedText.size(),
+                               QTextCursor::KeepAnchor);
+            cursor.insertText(QStringLiteral("> "));
+            m_editor->setProperty("cursorPosition", selectionStart + 2);
+            focusEditor();
+            return CompletionResult{{selectionStart, selectionStart + 2},
+                                    /*autoSpace=*/false};
+        }
     }
 
     // 行中引号与键盘路径一致：只保留单个开符号；闭合时收尾并格式化。

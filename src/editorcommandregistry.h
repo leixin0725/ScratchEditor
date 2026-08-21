@@ -116,7 +116,8 @@ private:
                                                QChar opening);
     bool handleSpecialBackspace();
     bool handleStructuralDelete(bool backwards);
-    bool handleListEnter();
+    bool handleListEnter(bool insideFencedBlock);
+    bool handleQuoteEnter(bool preserveEmptyQuote, bool insideFencedBlock);
     void repairOrderedLists(const QString &beforeText, const QString &afterText,
                             bool preservePreviousStart);
     bool jumpOutOfPair();
