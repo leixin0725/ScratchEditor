@@ -1492,6 +1492,28 @@ int main(int argc, char *argv[])
                          {QStringLiteral("insidePrefix"), enterInsideQuotePrefix},
                          {QStringLiteral("supplementary"), continuedSupplementaryQuote}});
 
+    const QString listUndoSource = QStringLiteral("文档开头\n- 示例文本第一行");
+    setTextAndSelection(listUndoSource, listUndoSource.size(), listUndoSource.size());
+    const QJsonObject listContinuationBeforeUndo = keyPress({}, QStringLiteral("Enter"));
+    const QJsonObject listContinuationUndo = request(QStringLiteral("testUndo"));
+    const QJsonObject listContinuationRedo = request(QStringLiteral("testRedo"));
+    addCheck(checks, details, QStringLiteral("listContinuationUndoRestoresCursor"),
+             listContinuationBeforeUndo.value(QStringLiteral("text")).toString()
+                    == listUndoSource + QStringLiteral("\n- ")
+                 && listContinuationBeforeUndo.value(QStringLiteral("cursorPosition")).toInt()
+                    == listUndoSource.size() + 3
+                 && listContinuationUndo.value(QStringLiteral("text")).toString()
+                    == listUndoSource
+                 && listContinuationUndo.value(QStringLiteral("cursorPosition")).toInt()
+                    == listUndoSource.size()
+                 && listContinuationRedo.value(QStringLiteral("text")).toString()
+                    == listUndoSource + QStringLiteral("\n- ")
+                 && listContinuationRedo.value(QStringLiteral("cursorPosition")).toInt()
+                    == listUndoSource.size() + 3,
+             QJsonObject{{QStringLiteral("continued"), listContinuationBeforeUndo},
+                         {QStringLiteral("undo"), listContinuationUndo},
+                         {QStringLiteral("redo"), listContinuationRedo}});
+
     const QString orderedList = QStringLiteral("1. one\n2. two\n3. three");
     setTextAndSelection(orderedList, 6, 6);
     const QJsonObject insertedOrderedItem = keyPress({}, QStringLiteral("Enter"));

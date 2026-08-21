@@ -3769,6 +3769,9 @@ bool EditorCommandRegistry::handleListEnter(bool insideFencedBlock)
     }
 
     QTextCursor editCursor(m_document);
+    // QTextCursor(document) 默认位于文档开头；事务必须锚定实际输入点，
+    // 否则撤销列表续行时可见光标会错误回到位置 0。
+    editCursor.setPosition(start);
     editCursor.beginEditBlock();
     if (item.isEmpty()) {
         const int removeStart = lineStart + item.markerStart;
