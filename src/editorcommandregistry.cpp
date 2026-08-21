@@ -3668,6 +3668,24 @@ bool EditorCommandRegistry::handleSpecialBackspace()
         return true;
     }
 
+    const MarkdownQuoteLine quote = parseMarkdownQuoteLine(
+        text.mid(lineStart, lineEnd - lineStart));
+    if (quote.valid && start == lineStart + quote.contentStart
+        && !isInsideFencedBlock(lineStart)) {
+        const int removeStart = lineStart + quote.deepestPrefixStart;
+        QTextCursor editCursor(m_document);
+        editCursor.setPosition(start);
+        editCursor.beginEditBlock();
+        QTextCursor removalCursor(m_document);
+        removalCursor.setPosition(removeStart);
+        removalCursor.setPosition(start, QTextCursor::KeepAnchor);
+        removalCursor.removeSelectedText();
+        m_editor->setProperty("cursorPosition", removeStart);
+        editCursor.endEditBlock();
+        focusEditor();
+        return true;
+    }
+
     const int headingPrefixLength = start - lineStart;
     const int headingMarkerLength = headingPrefixLength - 1;
     bool exactHeadingPrefix = headingMarkerLength >= 1 && headingMarkerLength <= 6

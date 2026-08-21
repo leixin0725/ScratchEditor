@@ -1306,6 +1306,47 @@ int main(int argc, char *argv[])
                          {QStringLiteral("quoted"), quotedHeadingBackspace},
                          {QStringLiteral("fenced"), fencedHeadingBackspace}});
 
+    setTextAndSelection(QStringLiteral("> "), 2, 2);
+    const QJsonObject deletedEmptyQuotePrefix = keyPress({}, QStringLiteral("Backspace"));
+    const QJsonObject deletedEmptyQuotePrefixUndo = request(QStringLiteral("testUndo"));
+    setTextAndSelection(QStringLiteral("> text"), 2, 2);
+    const QJsonObject deletedQuotePrefixBeforeContent =
+        keyPress({}, QStringLiteral("Backspace"));
+    setTextAndSelection(QStringLiteral("> > "), 4, 4);
+    const QJsonObject deletedNestedQuotePrefix = keyPress({}, QStringLiteral("Backspace"));
+    setTextAndSelection(QStringLiteral("> > text"), 4, 4);
+    const QJsonObject deletedNestedQuotePrefixBeforeContent =
+        keyPress({}, QStringLiteral("Backspace"));
+    setTextAndSelection(QStringLiteral("```\n> \n```"), 6, 6);
+    const QJsonObject fencedQuotePrefixBackspace = keyPress({}, QStringLiteral("Backspace"));
+    addCheck(checks, details, QStringLiteral("backspaceDeletesQuotePrefixAsUnit"),
+             deletedEmptyQuotePrefix.value(QStringLiteral("text")).toString().isEmpty()
+                 && deletedEmptyQuotePrefix.value(QStringLiteral("cursorPosition")).toInt() == 0
+                 && deletedEmptyQuotePrefixUndo.value(QStringLiteral("text")).toString()
+                    == QStringLiteral("> ")
+                 && deletedEmptyQuotePrefixUndo.value(QStringLiteral("cursorPosition")).toInt()
+                    == 2
+                 && deletedQuotePrefixBeforeContent.value(QStringLiteral("text")).toString()
+                    == QStringLiteral("text")
+                 && deletedQuotePrefixBeforeContent.value(
+                        QStringLiteral("cursorPosition")).toInt() == 0
+                 && deletedNestedQuotePrefix.value(QStringLiteral("text")).toString()
+                    == QStringLiteral("> ")
+                 && deletedNestedQuotePrefix.value(QStringLiteral("cursorPosition")).toInt() == 2
+                 && deletedNestedQuotePrefixBeforeContent.value(
+                        QStringLiteral("text")).toString() == QStringLiteral("> text")
+                 && deletedNestedQuotePrefixBeforeContent.value(
+                        QStringLiteral("cursorPosition")).toInt() == 2
+                 && fencedQuotePrefixBackspace.value(QStringLiteral("text")).toString()
+                    == QStringLiteral("```\n>\n```"),
+             QJsonObject{{QStringLiteral("empty"), deletedEmptyQuotePrefix},
+                         {QStringLiteral("emptyUndo"), deletedEmptyQuotePrefixUndo},
+                         {QStringLiteral("content"), deletedQuotePrefixBeforeContent},
+                         {QStringLiteral("nested"), deletedNestedQuotePrefix},
+                         {QStringLiteral("nestedContent"),
+                          deletedNestedQuotePrefixBeforeContent},
+                         {QStringLiteral("fence"), fencedQuotePrefixBackspace}});
+
     setTextAndSelection(QString(), 0, 0);
     const QJsonObject autoListSpace = keyPress(QStringLiteral("-"));
     setTextAndSelection(QStringLiteral("……"), 2, 2);
