@@ -99,8 +99,9 @@ Loader {
 
             Text {
                 id: historyTitle
-                x: uiConfig.panels.history.titleX
-                y: uiConfig.panels.history.titleY
+                objectName: "historyTitle"
+                x: host.headerTitleLeft
+                y: host.headerTitleCenterY - height / 2
                 text: "剪贴板历史"
                 color: host.themeStrongTextColor
                 font.family: host.uiFontFamily
@@ -110,8 +111,9 @@ Loader {
 
             Rectangle {
                 id: historySearchFrame
+                objectName: "historySearchFrame"
                 x: uiConfig.panels.history.searchX
-                y: uiConfig.panels.history.searchY
+                y: host.editorContentTop
                 width: parent.width - uiConfig.panels.history.searchInsetX
                 height: uiConfig.layout.controlHeightNormal
                 radius: uiConfig.layout.radiusNormal
@@ -158,10 +160,15 @@ Loader {
 
             ListView {
                 id: historyList
+                objectName: "historyList"
                 x: uiConfig.panels.history.listX
-                y: uiConfig.panels.history.listY
+                y: historySearchFrame.y + historySearchFrame.height
+                   + uiConfig.layout.spacingMedium
                 width: parent.width - uiConfig.panels.history.listInsetX
-                height: parent.height - uiConfig.panels.history.listBottomInset
+                height: parent.height - y
+                        - uiConfig.panels.history.footerBottomGap
+                        - uiConfig.layout.controlHeightCompact
+                        - uiConfig.layout.spacingLarge
                 clip: true
                 spacing: uiConfig.layout.spacingSmall
                 model: root.appController.clipboardHistoryModel
@@ -250,6 +257,7 @@ Loader {
             }
 
             Rectangle {
+                objectName: "historyDeleteButton"
                 x: uiConfig.panels.history.footerMarginX
                 anchors.bottom: parent.bottom
                 anchors.bottomMargin: uiConfig.panels.history.footerBottomGap

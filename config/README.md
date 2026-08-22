@@ -30,7 +30,7 @@
 
 - `window`：初始与最小尺寸（逻辑像素）。
 - `layout`：边距、拖拽区、圆角、控件高度、间距、滚动条、编辑区内边距，
-  以及标题折叠标记的 `headingFoldGutterWidth` / `headingFoldMarkerSize`。
+  以及标题折叠图标的 `headingFoldGutterWidth` / `headingFoldIconSize`。
 - `fonts`：界面字体、等宽字体与字号角色；`editorDefaultSize`、
   `statusPanelDefaultSize` 同时是 `settings.ini` 对应设置的默认值来源。
 - `animation`：过渡动画时长、窗口开合缩放比例、标题导航高亮的透明度/停留/淡出时长、

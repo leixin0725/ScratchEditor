@@ -335,11 +335,13 @@ int main(int argc, char *argv[])
                  && headingFoldExpanded.value(QStringLiteral("headingFoldMarkerCount")).toInt()
                     == 3
                  && headingFoldExpanded.value(
-                        QStringLiteral("headingFoldExpandedGlyph")).toString()
-                    == QStringLiteral("v")
+                        QStringLiteral("headingFoldIconSize")).toInt() == 16
                  && headingFoldExpanded.value(
-                        QStringLiteral("headingFoldCollapsedGlyph")).toString()
-                    == QStringLiteral(">")
+                        QStringLiteral("headingFoldExpandedIconName")).toString()
+                    == QStringLiteral("chevron-down")
+                 && headingFoldExpanded.value(
+                        QStringLiteral("headingFoldCollapsedIconName")).toString()
+                    == QStringLiteral("chevron-right")
                  && headingFoldExpanded.value(
                         QStringLiteral("headingFoldExpandedColor")).toString()
                     != headingFoldExpanded.value(QStringLiteral("themeAccentColor")).toString()
@@ -349,6 +351,10 @@ int main(int argc, char *argv[])
              headingFoldExpanded);
     addCheck(checks, details, QStringLiteral("headingFoldGutterClickTogglesSection"),
              headingFoldClicked.value(QStringLiteral("markerFound")).toBool()
+                 && headingFoldClicked.value(QStringLiteral("markerIconName")).toString()
+                    == QStringLiteral("chevron-right")
+                 && headingFoldClicked.value(QStringLiteral("markerIconValid")).toBool()
+                 && headingFoldClicked.value(QStringLiteral("markerIconSize")).toInt() == 16
                  && headingFoldCollapsedState.value(
                         QStringLiteral("collapsedHeadingCount")).toInt() == 1
                  && headingFoldClicked.value(QStringLiteral("cursorPosition")).toInt()
@@ -362,6 +368,11 @@ int main(int argc, char *argv[])
                  && headingFoldExpandedAgain.value(QStringLiteral("markerFound")).toBool()
                  && headingFoldExpandedAgain.value(QStringLiteral("cursorPosition")).toInt()
                     == headingFoldBodyCursor
+                 && headingFoldExpandedAgain.value(
+                        QStringLiteral("markerIconName")).toString()
+                    == QStringLiteral("chevron-down")
+                 && headingFoldExpandedAgain.value(
+                        QStringLiteral("markerIconValid")).toBool()
                  && headingFoldExpandedState.value(
                         QStringLiteral("collapsedHeadingCount")).toInt() == 0,
              QJsonObject{{QStringLiteral("expanded"), headingFoldExpanded},
@@ -972,6 +983,53 @@ int main(int argc, char *argv[])
     addCheck(checks, details, QStringLiteral("historyPanelCornerShapeOpen"),
              hasHistoryPanelCornerShape(wideHistory),
              historyPanelCornerDetails(wideHistory));
+    const double titleXDiff = qAbs(
+        wideHistory.value(QStringLiteral("historyTitleX")).toDouble()
+        - wideHistory.value(QStringLiteral("headerTitleX")).toDouble());
+    const double titleYDiff = qAbs(
+        wideHistory.value(QStringLiteral("historyTitleY")).toDouble()
+        - wideHistory.value(QStringLiteral("headerTitleY")).toDouble());
+    addCheck(checks, details, QStringLiteral("historyTitleMatchesEditorTitle"),
+             titleXDiff <= 0.5 && titleYDiff <= 0.5,
+             QJsonObject{{QStringLiteral("actual"),
+                          QJsonObject{{QStringLiteral("x"),
+                                       wideHistory.value(QStringLiteral("historyTitleX"))},
+                                      {QStringLiteral("y"),
+                                       wideHistory.value(QStringLiteral("historyTitleY"))}}},
+                         {QStringLiteral("expected"),
+                          QJsonObject{{QStringLiteral("x"),
+                                       wideHistory.value(QStringLiteral("headerTitleX"))},
+                                      {QStringLiteral("y"),
+                                       wideHistory.value(QStringLiteral("headerTitleY"))}}},
+                         {QStringLiteral("diff"),
+                          QJsonObject{{QStringLiteral("x"), titleXDiff},
+                                      {QStringLiteral("y"), titleYDiff}}}});
+    const double searchTopDiff = qAbs(
+        wideHistory.value(QStringLiteral("historySearchFrameY")).toDouble()
+        - wideHistory.value(QStringLiteral("editorViewportY")).toDouble());
+    addCheck(checks, details, QStringLiteral("historySearchMatchesEditorTop"),
+             searchTopDiff <= 0.5,
+             QJsonObject{{QStringLiteral("actual"),
+                          wideHistory.value(QStringLiteral("historySearchFrameY"))},
+                         {QStringLiteral("expected"),
+                          wideHistory.value(QStringLiteral("editorViewportY"))},
+                         {QStringLiteral("diff"), searchTopDiff}});
+    const double listGap =
+        wideHistory.value(QStringLiteral("historyListY")).toDouble()
+        - wideHistory.value(QStringLiteral("historySearchFrameY")).toDouble()
+        - wideHistory.value(QStringLiteral("historySearchFrameHeight")).toDouble();
+    addCheck(checks, details, QStringLiteral("historyListKeepsSearchGap"),
+             qAbs(listGap - 8.0) <= 0.5,
+             QJsonObject{{QStringLiteral("actual"), listGap},
+                         {QStringLiteral("expected"), 8}});
+    const double footerGap =
+        wideHistory.value(QStringLiteral("historyDeleteButtonY")).toDouble()
+        - wideHistory.value(QStringLiteral("historyListY")).toDouble()
+        - wideHistory.value(QStringLiteral("historyListHeight")).toDouble();
+    addCheck(checks, details, QStringLiteral("historyListKeepsFooterGap"),
+             qAbs(footerGap - 10.0) <= 0.5,
+             QJsonObject{{QStringLiteral("actual"), footerGap},
+                         {QStringLiteral("expected"), 10}});
 
     // 动画开启、历史面板打开（推挤模式）时缩放：编辑区必须即时跟随窗口边缘，
     // 不允许 x/width 的 Behavior 逐帧重启动画造成滞后追赶（修复前 30ms 处差值约 20px）。
@@ -1134,6 +1192,34 @@ int main(int argc, char *argv[])
                          - 200.0) < 1.0
                  && narrowHistory.value(QStringLiteral("editorVisibleWidth")).toDouble() >= 320.0,
              narrowHistory);
+    const double overlayTitleXDiff = qAbs(
+        narrowHistory.value(QStringLiteral("historyTitleX")).toDouble()
+        - narrowHistory.value(QStringLiteral("headerTitleX")).toDouble());
+    const double overlayTitleYDiff = qAbs(
+        narrowHistory.value(QStringLiteral("historyTitleY")).toDouble()
+        - narrowHistory.value(QStringLiteral("headerTitleY")).toDouble());
+    addCheck(checks, details, QStringLiteral("historyTitleAlignmentPersistsInOverlay"),
+             overlayTitleXDiff <= 0.5 && overlayTitleYDiff <= 0.5,
+             QJsonObject{{QStringLiteral("actual"),
+                          QJsonObject{{QStringLiteral("x"),
+                                       narrowHistory.value(QStringLiteral("historyTitleX"))},
+                                      {QStringLiteral("y"),
+                                       narrowHistory.value(QStringLiteral("historyTitleY"))}}},
+                         {QStringLiteral("expected"),
+                          QJsonObject{{QStringLiteral("x"),
+                                       narrowHistory.value(QStringLiteral("headerTitleX"))},
+                                      {QStringLiteral("y"),
+                                       narrowHistory.value(QStringLiteral("headerTitleY"))}}}});
+    const double overlaySearchTopDiff = qAbs(
+        narrowHistory.value(QStringLiteral("historySearchFrameY")).toDouble()
+        - narrowHistory.value(QStringLiteral("editorViewportY")).toDouble());
+    addCheck(checks, details, QStringLiteral("historySearchAlignmentPersistsInOverlay"),
+             overlaySearchTopDiff <= 0.5,
+             QJsonObject{{QStringLiteral("actual"),
+                          narrowHistory.value(QStringLiteral("historySearchFrameY"))},
+                         {QStringLiteral("expected"),
+                          narrowHistory.value(QStringLiteral("editorViewportY"))},
+                         {QStringLiteral("diff"), overlaySearchTopDiff}});
     historyAction(QStringLiteral("historyClose"));
     historyAction(QStringLiteral("historyHoverTriggerEnter"));
     QThread::msleep(60);

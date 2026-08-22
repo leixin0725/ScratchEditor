@@ -982,10 +982,13 @@ int main(int argc, char *argv[])
     addCheck(checks, details, QStringLiteral("headingFoldGutterContract"),
              foldedAllUi.value(QStringLiteral("headingFoldGutterWidth")).toInt() == 16
                  && foldedAllUi.value(QStringLiteral("headingFoldMarkerCount")).toInt() == 2
-                 && foldedAllUi.value(QStringLiteral("headingFoldExpandedGlyph")).toString()
-                    == QStringLiteral("v")
-                 && foldedAllUi.value(QStringLiteral("headingFoldCollapsedGlyph")).toString()
-                    == QStringLiteral(">")
+                 && foldedAllUi.value(QStringLiteral("headingFoldIconSize")).toInt() == 16
+                 && foldedAllUi.value(
+                        QStringLiteral("headingFoldExpandedIconName")).toString()
+                    == QStringLiteral("chevron-down")
+                 && foldedAllUi.value(
+                        QStringLiteral("headingFoldCollapsedIconName")).toString()
+                    == QStringLiteral("chevron-right")
                  && foldedAllUi.value(QStringLiteral("headingFoldExpandedColor")).toString()
                     != foldedAllUi.value(QStringLiteral("themeAccentColor")).toString()
                  && foldedAllUi.value(QStringLiteral("headingFoldCollapsedColor")).toString()
