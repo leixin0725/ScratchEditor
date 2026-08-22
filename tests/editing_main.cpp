@@ -4972,6 +4972,17 @@ int main(int argc, char *argv[])
                              {QStringLiteral("expected"), expected},
                              {QStringLiteral("actual"), actual}});
     };
+    const auto hanCountExpect = [&](const QString &name, const QString &text,
+                                    int expected) {
+        const int actual = CjkText::countHanCharacters(text);
+        addCheck(checks, details, name, actual == expected,
+                 QJsonObject{{QStringLiteral("input"), text},
+                             {QStringLiteral("expected"), expected},
+                             {QStringLiteral("actual"), actual}});
+    };
+    const auto ucs4 = [](char32_t codePoint) {
+        return QString::fromUcs4(&codePoint, 1);
+    };
     const auto wordRangeCursorExpect = [&](const QString &name, const QString &text,
                                            int position, int expectedStart,
                                            int expectedEnd) {
@@ -5005,6 +5016,40 @@ int main(int argc, char *argv[])
     wordRangeExpect(QStringLiteral("wordRangeCjkRunMiddle"), cjkRunText, 3, 0, 6);
     wordRangeExpect(QStringLiteral("wordRangeCjkRunEnd"), cjkRunText, 6, 0, 6);
     spanCjkExpect(QStringLiteral("spanCjkRunAll"), cjkRunText, 0, 6, true);
+
+    // --- 汉字字符数统计（HAN-001..）：只计汉字表意字符，按码点计数 ---
+    hanCountExpect(QStringLiteral("hanCountPlainCjk"), QStringLiteral("你好世界"), 4);
+    hanCountExpect(QStringLiteral("hanCountMixedLatin"), QStringLiteral("你好 World 123"), 2);
+    hanCountExpect(QStringLiteral("hanCountExtensionA"), ucs4(0x3400), 1);
+    hanCountExpect(QStringLiteral("hanCountCompatibilityIdeograph"), ucs4(0xFA0E), 1);
+    hanCountExpect(QStringLiteral("hanCountSupplementaryPlane"), ucs4(0x20000), 1);
+    hanCountExpect(QStringLiteral("hanCountExcludesKana"), QStringLiteral("こんにちは"), 0);
+    hanCountExpect(QStringLiteral("hanCountExcludesHangul"), QStringLiteral("한글"), 0);
+    hanCountExpect(QStringLiteral("hanCountExcludesCjkPunctuation"),
+                   QStringLiteral("，。！？、"), 0);
+    hanCountExpect(QStringLiteral("hanCountExcludesAscii"), QStringLiteral("abc 123 !"), 0);
+    hanCountExpect(QStringLiteral("hanCountEmpty"), QString(), 0);
+
+    const QString hanRangeText = QStringLiteral("你好abc好");
+    addCheck(checks, details, QStringLiteral("hanCountRangeSubset"),
+             CjkText::countHanCharacters(hanRangeText, 0, 2) == 2
+                 && CjkText::countHanCharacters(hanRangeText, 2, 5) == 0
+                 && CjkText::countHanCharacters(hanRangeText, 5, 6) == 1
+                 && CjkText::countHanCharacters(hanRangeText, 1, 6) == 2
+                 && CjkText::countHanCharacters(hanRangeText, 3, 3) == 0
+                 && CjkText::countHanCharacters(hanRangeText, -3, 99) == 3
+                 && CjkText::countHanCharacters(hanRangeText, 4, 2) == 0
+                 && CjkText::countHanCharacters(hanRangeText, 0, -1) == 3,
+             QJsonObject{{QStringLiteral("input"), hanRangeText}});
+
+    const char32_t supplementaryCodes[] = {0x20000, 0x4E00};
+    const QString hanPairText = QString::fromUcs4(supplementaryCodes, 2);
+    addCheck(checks, details, QStringLiteral("hanCountRangeSurrogateBoundary"),
+             CjkText::countHanCharacters(hanPairText) == 2
+                 && CjkText::countHanCharacters(hanPairText, 0, 2) == 1
+                 && CjkText::countHanCharacters(hanPairText, 0, 1) == 0
+                 && CjkText::countHanCharacters(hanPairText, 1, 3) == 1,
+             QJsonObject{{QStringLiteral("input"), hanPairText}});
 
     const QString cjkPunctText = QStringLiteral("今天，天气真好！我们走吧");
     wordBoundaryExpect(QStringLiteral("wordBoundaryCjkPunctRightRun"),

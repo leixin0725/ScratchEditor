@@ -43,6 +43,10 @@ struct WordRange {
 bool isCjk(QChar ch);
 bool isAsciiAlnum(QChar ch);
 bool isSoftSeparator(QChar ch);
+// 统计 [start, end)（end < 0 表示到文本末尾）内汉字表意字符个数：
+// 按 Unicode 码点计数，代理对视为一个字符，只统计完整落在区间内的码点；
+// 不含日文假名、韩文谚文与中文标点。
+int countHanCharacters(const QString &text, int start = 0, int end = -1);
 DocumentAnalysis analyzeDocument(const QString &text);
 QVector<int> collectSpacingInsertions(
     const QString &text,

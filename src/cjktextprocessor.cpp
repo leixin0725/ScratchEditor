@@ -345,6 +345,19 @@ bool isSupplementaryCjkCodePoint(char32_t codePoint)
     return codePoint >= 0x20000 && codePoint <= 0x323AF;
 }
 
+// 汉字表意字符（不含假名、谚文与标点）。
+bool isHanCodePoint(char32_t codePoint)
+{
+    // CJK 扩展 A
+    if (codePoint >= 0x3400 && codePoint <= 0x4DBF) return true;
+    // CJK 统一表意文字
+    if (codePoint >= 0x4E00 && codePoint <= 0x9FFF) return true;
+    // CJK 兼容表意文字
+    if (codePoint >= 0xF900 && codePoint <= 0xFAFF) return true;
+    // CJK 扩展 B–H 与兼容补充平面（代理对编码）
+    return isSupplementaryCjkCodePoint(codePoint);
+}
+
 // 返回 index 处字符占用的 UTF-16 code unit 数（配对的代理视为 2，其余为 1）。
 int charUnitLengthAt(const QString &text, int index)
 {
@@ -436,6 +449,33 @@ bool isSeparatorWhitespace(const QString &text, int index)
 }
 
 } // namespace
+
+int countHanCharacters(const QString &text, int start, int end)
+{
+    const int size = text.size();
+    start = qBound(0, start, size);
+    end = end < 0 ? size : qMin(end, size);
+    if (end <= start) {
+        return 0;
+    }
+    int count = 0;
+    int i = start;
+    while (i < end) {
+        const char16_t unit = text.at(i).unicode();
+        char32_t codePoint = unit;
+        int units = 1;
+        if (QChar::isHighSurrogate(unit) && i + 1 < end
+            && QChar::isLowSurrogate(text.at(i + 1).unicode())) {
+            codePoint = QChar::surrogateToUcs4(unit, text.at(i + 1).unicode());
+            units = 2;
+        }
+        if (isHanCodePoint(codePoint)) {
+            ++count;
+        }
+        i += units;
+    }
+    return count;
+}
 
 DocumentAnalysis analyzeDocument(const QString &text)
 {
