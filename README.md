@@ -51,6 +51,8 @@ UTF-16 code unit 精确去重；再次复制完全相同的文本会保留稳定
 鼠标悬停卡片时会显示中性背景高亮，但不会改变当前选中项；单击后才会更新选择。
 历史面板打开时，左上、左下两个内部圆角默认使用专用的 8px 半径，以清晰露出边缘；右侧与
 正文编辑区保持直线拼接。该半径可通过 `config/ui.json` 的 `panels.history.cornerRadius` 调整。
+面板标题与主窗口标题共用左边缘和垂直中心；搜索框顶部与右侧编辑视口顶部对齐，
+下方列表与搜索框、页脚按钮分别保持 8px 和 10px 间距。
 
 历史文件与 `settings.ini` 同目录，正式环境通常为
 `%LOCALAPPDATA%\ScratchEditor\ScratchEditor\clipboard-history.dat`。文件使用当前 Windows 用户

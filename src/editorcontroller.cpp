@@ -3339,6 +3339,28 @@ QJsonObject EditorController::statusObject() const
                 status.insert(QStringLiteral("historyPanelBottomRightRadius"),
                               historyPanel->property("bottomRightRadius").toDouble());
             }
+            const auto insertItemGeometry = [this, &status](const QString &objectName,
+                                                            const QString &statusPrefix) {
+                if (QQuickItem *item = m_window->findChild<QQuickItem *>(objectName)) {
+                    const QPointF topLeft = item->mapToScene(QPointF(0, 0));
+                    status.insert(statusPrefix + QStringLiteral("X"), topLeft.x());
+                    status.insert(statusPrefix + QStringLiteral("Y"), topLeft.y());
+                    status.insert(statusPrefix + QStringLiteral("Width"), item->width());
+                    status.insert(statusPrefix + QStringLiteral("Height"), item->height());
+                }
+            };
+            insertItemGeometry(QStringLiteral("headerTitle"),
+                               QStringLiteral("headerTitle"));
+            insertItemGeometry(QStringLiteral("historyTitle"),
+                               QStringLiteral("historyTitle"));
+            insertItemGeometry(QStringLiteral("historySearchFrame"),
+                               QStringLiteral("historySearchFrame"));
+            insertItemGeometry(QStringLiteral("historyList"),
+                               QStringLiteral("historyList"));
+            insertItemGeometry(QStringLiteral("historyDeleteButton"),
+                               QStringLiteral("historyDeleteButton"));
+            insertItemGeometry(QStringLiteral("editorViewport"),
+                               QStringLiteral("editorViewport"));
         }
         status.insert(QStringLiteral("editorVisibleWidth"),
                       m_window->property("editorVisibleWidth").toDouble());
