@@ -321,11 +321,13 @@ int main(int argc, char *argv[])
                  && headingFoldExpanded.value(QStringLiteral("headingFoldMarkerCount")).toInt()
                     == 3
                  && headingFoldExpanded.value(
-                        QStringLiteral("headingFoldExpandedGlyph")).toString()
-                    == QStringLiteral("v")
+                        QStringLiteral("headingFoldIconSize")).toInt() == 16
                  && headingFoldExpanded.value(
-                        QStringLiteral("headingFoldCollapsedGlyph")).toString()
-                    == QStringLiteral(">")
+                        QStringLiteral("headingFoldExpandedIconName")).toString()
+                    == QStringLiteral("chevron-down")
+                 && headingFoldExpanded.value(
+                        QStringLiteral("headingFoldCollapsedIconName")).toString()
+                    == QStringLiteral("chevron-right")
                  && headingFoldExpanded.value(
                         QStringLiteral("headingFoldExpandedColor")).toString()
                     != headingFoldExpanded.value(QStringLiteral("themeAccentColor")).toString()
@@ -335,6 +337,10 @@ int main(int argc, char *argv[])
              headingFoldExpanded);
     addCheck(checks, details, QStringLiteral("headingFoldGutterClickTogglesSection"),
              headingFoldClicked.value(QStringLiteral("markerFound")).toBool()
+                 && headingFoldClicked.value(QStringLiteral("markerIconName")).toString()
+                    == QStringLiteral("chevron-right")
+                 && headingFoldClicked.value(QStringLiteral("markerIconValid")).toBool()
+                 && headingFoldClicked.value(QStringLiteral("markerIconSize")).toInt() == 16
                  && headingFoldCollapsedState.value(
                         QStringLiteral("collapsedHeadingCount")).toInt() == 1
                  && headingFoldCollapsed.value(QStringLiteral("headingFoldMarkerCount")).toInt()
@@ -344,6 +350,11 @@ int main(int argc, char *argv[])
                     < headingFoldExpanded.value(
                         QStringLiteral("editorVisibleContentHeight")).toDouble()
                  && headingFoldExpandedAgain.value(QStringLiteral("markerFound")).toBool()
+                 && headingFoldExpandedAgain.value(
+                        QStringLiteral("markerIconName")).toString()
+                    == QStringLiteral("chevron-down")
+                 && headingFoldExpandedAgain.value(
+                        QStringLiteral("markerIconValid")).toBool()
                  && headingFoldExpandedState.value(
                         QStringLiteral("collapsedHeadingCount")).toInt() == 0,
              QJsonObject{{QStringLiteral("expanded"), headingFoldExpanded},

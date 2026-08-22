@@ -1777,6 +1777,19 @@ void EditorController::buildCommandHandlers()
             QJsonObject response = statusObject();
             response.insert(QStringLiteral("command"), r.command);
             response.insert(QStringLiteral("markerFound"), invoked && markerResult.toBool());
+            QVariant markerState;
+            if (invoked && markerResult.toBool()
+                && QMetaObject::invokeMethod(
+                    m_window, "headingFoldMarkerStateForTest", Qt::DirectConnection,
+                    Q_RETURN_ARG(QVariant, markerState), Q_ARG(QVariant, QVariant(position)))) {
+                const QVariantMap state = markerState.toMap();
+                response.insert(QStringLiteral("markerIconName"),
+                                state.value(QStringLiteral("iconName")).toString());
+                response.insert(QStringLiteral("markerIconValid"),
+                                state.value(QStringLiteral("iconValid")).toBool());
+                response.insert(QStringLiteral("markerIconSize"),
+                                state.value(QStringLiteral("iconSize")).toInt());
+            }
             sendResponse(r.socket, response, r.startedNs, r.requestId);
         }}},
         {QStringLiteral("testEditorRenderSample"), {Gate::Test, [this](const DispatchRequest &r) {
@@ -3333,10 +3346,12 @@ QJsonObject EditorController::statusObject() const
                       m_window->property("editorViewportWidth").toDouble());
         status.insert(QStringLiteral("headingFoldGutterWidth"),
                       m_window->property("headingFoldGutterWidth").toInt());
-        status.insert(QStringLiteral("headingFoldExpandedGlyph"),
-                      m_window->property("headingFoldExpandedGlyph").toString());
-        status.insert(QStringLiteral("headingFoldCollapsedGlyph"),
-                      m_window->property("headingFoldCollapsedGlyph").toString());
+        status.insert(QStringLiteral("headingFoldIconSize"),
+                      m_window->property("headingFoldIconSize").toInt());
+        status.insert(QStringLiteral("headingFoldExpandedIconName"),
+                      m_window->property("headingFoldExpandedIconName").toString());
+        status.insert(QStringLiteral("headingFoldCollapsedIconName"),
+                      m_window->property("headingFoldCollapsedIconName").toString());
         status.insert(QStringLiteral("headingFoldExpandedColor"),
                       m_window->property("headingFoldExpandedColor").toString());
         status.insert(QStringLiteral("headingFoldCollapsedColor"),

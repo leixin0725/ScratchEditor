@@ -38,7 +38,7 @@
     "editorPaddingX": 12,
     "editorPaddingY": 8,
     "headingFoldGutterWidth": 16,
-    "headingFoldMarkerSize": 10,
+    "headingFoldIconSize": 16,
     "editorContentBottomGap": 20,
     "selectionCursorWidth": 2,
     "scrollbarWidth": 5,

@@ -14,6 +14,20 @@ Window {
         return false
     }
 
+    function headingFoldMarkerStateForTest(position) {
+        for (let index = 0; index < headingFoldRepeater.count; ++index) {
+            const marker = headingFoldRepeater.itemAt(index)
+            if (marker && marker.modelData.position === position) {
+                return {
+                    "iconName": marker.iconName,
+                    "iconValid": marker.iconValid,
+                    "iconSize": marker.iconSize
+                }
+            }
+        }
+        return {}
+    }
+
     readonly property var uiConfig: controller.uiConfig
 
     width: uiConfig.window.defaultWidth
@@ -67,8 +81,9 @@ Window {
     readonly property int commandPaletteMaximumWidth: uiConfig.panels.commandPalette.maxWidth
     readonly property color markdownTextColor: controller.markdownTextColor
     readonly property int headingFoldGutterWidth: uiConfig.layout.headingFoldGutterWidth
-    readonly property string headingFoldExpandedGlyph: "v"
-    readonly property string headingFoldCollapsedGlyph: ">"
+    readonly property int headingFoldIconSize: uiConfig.layout.headingFoldIconSize
+    readonly property string headingFoldExpandedIconName: "chevron-down"
+    readonly property string headingFoldCollapsedIconName: "chevron-right"
     readonly property color headingFoldExpandedColor: themeMutedTextColor
     readonly property color headingFoldCollapsedColor: themeAccentColor
     readonly property int headingFoldMarkerCount: controller.headingFoldMarkers.length
@@ -808,6 +823,11 @@ Window {
                     function activate() {
                         controller.toggleHeadingFoldAt(modelData.position)
                     }
+                    readonly property string iconName: modelData.collapsed
+                                                        ? root.headingFoldCollapsedIconName
+                                                        : root.headingFoldExpandedIconName
+                    readonly property bool iconValid: foldIcon.valid
+                    readonly property int iconSize: foldIcon.size
                     readonly property rect headingRectangle:
                         editor.positionToRectangle(modelData.position)
                     x: 0
@@ -817,17 +837,14 @@ Window {
                     width: headingFoldGutter.width
                     height: Math.max(1, headingRectangle.height)
 
-                    Text {
+                    LucideIcon {
+                        id: foldIcon
                         anchors.centerIn: parent
-                        text: modelData.collapsed
-                              ? root.headingFoldCollapsedGlyph
-                              : root.headingFoldExpandedGlyph
+                        name: parent.iconName
+                        size: root.headingFoldIconSize
                         color: modelData.collapsed
                                ? root.headingFoldCollapsedColor
                                : root.headingFoldExpandedColor
-                        font.family: root.uiMonospaceFontFamily
-                        font.pointSize: uiConfig.layout.headingFoldMarkerSize
-                        font.bold: modelData.collapsed
                     }
 
                     MouseArea {
