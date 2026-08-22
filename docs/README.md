@@ -83,7 +83,7 @@
 - [`archive/010-clipboard-history-coordinator/`](archive/010-clipboard-history-coordinator/)：
   剪贴板历史协调器的职责边界、兼容约束与验证记录。
 - [`archive/013-heading-folding-navigation/`](archive/013-heading-folding-navigation/)：
-  Markdown 标题折叠、常驻标记、标题导航与隐藏命中自动展开的实现和验收记录。
+  Markdown 标题折叠、Lucide 常驻图标、标题导航、隐藏命中自动展开与历史面板布局对齐的实现和验收记录。
 
 历史验收的机器可读证据统一保存在 [`../artifacts/baselines/`](../artifacts/baselines/)。
 中间调优结果在本地 `artifacts/archive/` 中保留，但不进入版本控制。
