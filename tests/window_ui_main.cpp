@@ -296,6 +296,63 @@ int main(int argc, char *argv[])
                   && initial.value(QStringLiteral("selectionDragColor")).toString()
                      == QStringLiteral("#85c7c0"),
              initial);
+
+    const QString headingFoldUiText = QStringLiteral(
+        "# Root\nbody\n## Child\nchild\n# Next\nnext");
+    request(QStringLiteral("testSetText"),
+            {{QStringLiteral("text"), headingFoldUiText}});
+    QThread::msleep(40);
+    const QJsonObject headingFoldExpanded = request(QStringLiteral("status"));
+    const QJsonObject headingFoldClicked = request(
+        QStringLiteral("testClickHeadingFoldMarker"),
+        {{QStringLiteral("position"), 0}});
+    QThread::msleep(40);
+    const QJsonObject headingFoldCollapsed = request(QStringLiteral("status"));
+    const QJsonObject headingFoldCollapsedState = request(
+        QStringLiteral("testHeadingFoldState"));
+    const QJsonObject headingFoldExpandedAgain = request(
+        QStringLiteral("testClickHeadingFoldMarker"),
+        {{QStringLiteral("position"), 0}});
+    QThread::msleep(40);
+    const QJsonObject headingFoldExpandedState = request(
+        QStringLiteral("testHeadingFoldState"));
+    addCheck(checks, details, QStringLiteral("headingFoldGutterPersistentMarkers"),
+             headingFoldExpanded.value(QStringLiteral("headingFoldGutterWidth")).toInt() == 16
+                 && headingFoldExpanded.value(QStringLiteral("headingFoldMarkerCount")).toInt()
+                    == 3
+                 && headingFoldExpanded.value(
+                        QStringLiteral("headingFoldExpandedGlyph")).toString()
+                    == QStringLiteral("v")
+                 && headingFoldExpanded.value(
+                        QStringLiteral("headingFoldCollapsedGlyph")).toString()
+                    == QStringLiteral(">")
+                 && headingFoldExpanded.value(
+                        QStringLiteral("headingFoldExpandedColor")).toString()
+                    != headingFoldExpanded.value(QStringLiteral("themeAccentColor")).toString()
+                 && headingFoldExpanded.value(
+                        QStringLiteral("headingFoldCollapsedColor")).toString()
+                    == headingFoldExpanded.value(QStringLiteral("themeAccentColor")).toString(),
+             headingFoldExpanded);
+    addCheck(checks, details, QStringLiteral("headingFoldGutterClickTogglesSection"),
+             headingFoldClicked.value(QStringLiteral("markerFound")).toBool()
+                 && headingFoldCollapsedState.value(
+                        QStringLiteral("collapsedHeadingCount")).toInt() == 1
+                 && headingFoldCollapsed.value(QStringLiteral("headingFoldMarkerCount")).toInt()
+                    == 2
+                 && headingFoldCollapsed.value(
+                        QStringLiteral("editorVisibleContentHeight")).toDouble()
+                    < headingFoldExpanded.value(
+                        QStringLiteral("editorVisibleContentHeight")).toDouble()
+                 && headingFoldExpandedAgain.value(QStringLiteral("markerFound")).toBool()
+                 && headingFoldExpandedState.value(
+                        QStringLiteral("collapsedHeadingCount")).toInt() == 0,
+             QJsonObject{{QStringLiteral("expanded"), headingFoldExpanded},
+                         {QStringLiteral("clicked"), headingFoldClicked},
+                         {QStringLiteral("collapsed"), headingFoldCollapsed},
+                         {QStringLiteral("collapsedState"), headingFoldCollapsedState},
+                         {QStringLiteral("expandedAgain"), headingFoldExpandedAgain},
+                         {QStringLiteral("expandedState"), headingFoldExpandedState}});
+    request(QStringLiteral("testSetText"), {{QStringLiteral("text"), QString()}});
     const QJsonArray initialHints = initial.value(QStringLiteral("statusPanelHints")).toArray();
     const QStringList expectedHints = StatusPanelHints::forMode(false);
     bool hintsMatch = initialHints.size() == expectedHints.size();

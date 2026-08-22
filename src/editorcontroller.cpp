@@ -277,6 +277,8 @@ EditorController::EditorController(bool testMode, QElapsedTimer *startupTimer,
         m_settings.get(), clipboardHistoryAvailable(), this);
     connect(m_commands.get(), &EditorCommandRegistry::commandsChanged,
             this, &EditorController::commandsChanged);
+    connect(m_commands.get(), &EditorCommandRegistry::headingFoldMarkersChanged,
+            this, &EditorController::headingFoldMarkersChanged);
     connect(m_commands.get(), &EditorCommandRegistry::uiCommandRequested,
             this, &EditorController::uiCommandRequested);
     m_commands->setClipboardAccess(
@@ -641,6 +643,16 @@ QVariantList EditorController::commands() const
     return m_commands ? m_commands->commands() : QVariantList{};
 }
 
+QVariantList EditorController::headingFoldMarkers() const
+{
+    return m_commands ? m_commands->headingFoldMarkers() : QVariantList{};
+}
+
+int EditorController::headingFoldVisibleEndPosition() const
+{
+    return m_commands ? m_commands->headingFoldVisibleEndPosition() : 0;
+}
+
 bool EditorController::markdownHighlighting() const
 {
     return !m_markdownHighlighter.isNull();
@@ -816,6 +828,11 @@ void EditorController::registerEditor(QObject *editor)
 bool EditorController::executeCommand(const QString &commandId)
 {
     return m_commands && m_commands->execute(commandId);
+}
+
+bool EditorController::toggleHeadingFoldAt(int headingPosition)
+{
+    return m_commands && m_commands->toggleHeadingFoldAt(headingPosition);
 }
 
 QString EditorController::shortcutFor(const QString &commandId) const
@@ -1174,6 +1191,9 @@ void EditorController::buildCommandHandlers()
             runAnimationBenchmark(r.socket, r.startedNs, r.requestId);
         }}},
         {QStringLiteral("clearTestText"), {Gate::Test, [this](const DispatchRequest &r) {
+            if (m_commands) {
+                m_commands->resetHeadingFolds();
+            }
             m_editor->setProperty("text", QString());
             m_editor->setProperty("cursorPosition", 0);
             QJsonObject response;
@@ -1188,6 +1208,9 @@ void EditorController::buildCommandHandlers()
         }}},
         {QStringLiteral("testSetText"), {Gate::Test, [this](const DispatchRequest &r) {
             const QString text = r.request.value(QStringLiteral("text")).toString();
+            if (m_commands) {
+                m_commands->resetHeadingFolds();
+            }
             m_editor->setProperty("text", text);
             m_editor->setProperty("cursorPosition", text.size());
             if (auto *quickDocument = qvariant_cast<QQuickTextDocument *>(
@@ -1738,6 +1761,24 @@ void EditorController::buildCommandHandlers()
             response.insert(QStringLiteral("shortcut"), shortcutFor(commandId));
             sendResponse(r.socket, response, r.startedNs, r.requestId);
         }}},
+        {QStringLiteral("testHeadingFoldState"), {Gate::Test, [this](const DispatchRequest &r) {
+            QJsonObject response = m_commands
+                ? QJsonObject::fromVariantMap(m_commands->headingFoldDiagnostics())
+                : QJsonObject{};
+            response.insert(QStringLiteral("command"), r.command);
+            sendResponse(r.socket, response, r.startedNs, r.requestId);
+        }}},
+        {QStringLiteral("testClickHeadingFoldMarker"), {Gate::Test, [this](const DispatchRequest &r) {
+            const int position = r.request.value(QStringLiteral("position")).toInt();
+            QVariant markerResult;
+            const bool invoked = m_window && QMetaObject::invokeMethod(
+                m_window, "clickHeadingFoldMarkerForTest", Qt::DirectConnection,
+                Q_RETURN_ARG(QVariant, markerResult), Q_ARG(QVariant, QVariant(position)));
+            QJsonObject response = statusObject();
+            response.insert(QStringLiteral("command"), r.command);
+            response.insert(QStringLiteral("markerFound"), invoked && markerResult.toBool());
+            sendResponse(r.socket, response, r.startedNs, r.requestId);
+        }}},
         {QStringLiteral("testHighlightSummary"), {Gate::Test, [this](const DispatchRequest &r) {
             int blocks = 0;
             int formattedRanges = 0;
@@ -2032,6 +2073,9 @@ void EditorController::showEditor()
             return;
         }
         if (!m_externalFileLoadedIntoEditor) {
+            if (m_commands) {
+                m_commands->resetHeadingFolds();
+            }
             m_editor->setProperty("text", m_externalFileText);
             m_editor->setProperty("cursorPosition", m_externalFileText.size());
             m_editorBaselineText = m_externalFileText;
@@ -2045,6 +2089,9 @@ void EditorController::showEditor()
         const bool clipboardReady = readClipboardText(&clipboardText, &clipboardError);
         if (clipboardReady) {
             if (m_editor->property("text").toString() != clipboardText) {
+                if (m_commands) {
+                    m_commands->resetHeadingFolds();
+                }
                 m_editor->setProperty("text", clipboardText);
                 // 新剪贴板内容默认光标落在文档末尾，与外部文件模式一致。
                 m_editor->setProperty("cursorPosition", clipboardText.size());
@@ -2475,6 +2522,9 @@ void EditorController::confirmLoadClipboardHistory()
     if (text.isNull()) {
         cancelLoadClipboardHistory();
         return;
+    }
+    if (m_commands) {
+        m_commands->resetHeadingFolds();
     }
     m_editor->setProperty("text", text);
     m_editor->setProperty("cursorPosition", text.size());
@@ -3165,6 +3215,20 @@ QJsonObject EditorController::statusObject() const
                       m_window->property("editorVisibleWidth").toDouble());
         status.insert(QStringLiteral("editorViewportWidth"),
                       m_window->property("editorViewportWidth").toDouble());
+        status.insert(QStringLiteral("headingFoldGutterWidth"),
+                      m_window->property("headingFoldGutterWidth").toInt());
+        status.insert(QStringLiteral("headingFoldExpandedGlyph"),
+                      m_window->property("headingFoldExpandedGlyph").toString());
+        status.insert(QStringLiteral("headingFoldCollapsedGlyph"),
+                      m_window->property("headingFoldCollapsedGlyph").toString());
+        status.insert(QStringLiteral("headingFoldExpandedColor"),
+                      m_window->property("headingFoldExpandedColor").toString());
+        status.insert(QStringLiteral("headingFoldCollapsedColor"),
+                      m_window->property("headingFoldCollapsedColor").toString());
+        status.insert(QStringLiteral("headingFoldMarkerCount"),
+                      m_window->property("headingFoldMarkerCount").toInt());
+        status.insert(QStringLiteral("editorVisibleContentHeight"),
+                      m_window->property("editorVisibleContentHeight").toDouble());
         status.insert(QStringLiteral("historyQueryFocused"),
                       m_window->property("historyQueryFocused").toBool());
         status.insert(QStringLiteral("historyPanelLoaded"),
@@ -3242,6 +3306,9 @@ void EditorController::runLargeDocumentBenchmark(QLocalSocket *socket, qint64 st
 
     QElapsedTimer phase;
     phase.start();
+    if (m_commands) {
+        m_commands->resetHeadingFolds();
+    }
     m_editor->setProperty("text", largeText);
     const double loadMs = phase.nsecsElapsed() / 1'000'000.0;
 
@@ -3269,6 +3336,9 @@ void EditorController::restoreTestDocument()
 {
     if (!m_hasSavedTestText || !m_editor) {
         return;
+    }
+    if (m_commands) {
+        m_commands->resetHeadingFolds();
     }
     m_editor->setProperty("text", m_savedTestText);
     if (m_window) {

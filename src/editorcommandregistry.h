@@ -12,10 +12,12 @@
 #include <QVector>
 
 #include <functional>
+#include <memory>
 #include <optional>
 
 class QTextDocument;
 class AppSettings;
+class HeadingFoldManager;
 class QEvent;
 class QMouseEvent;
 class QQuickItem;
@@ -28,6 +30,7 @@ class EditorCommandRegistry final : public QObject
 public:
     explicit EditorCommandRegistry(AppSettings *settings, bool clipboardHistoryAvailable = true,
                                    QObject *parent = nullptr);
+    ~EditorCommandRegistry() override;
 
     void setEditor(QObject *editor, QTextDocument *document);
     void setWindow(QQuickWindow *window);
@@ -36,10 +39,15 @@ public:
     void setClipboardAccess(ClipboardReader reader, ClipboardWriter writer);
     QVariantList commands() const;
     QString shortcut(const QString &commandId) const;
+    QVariantList headingFoldMarkers() const;
+    int headingFoldVisibleEndPosition() const;
+    QVariantMap headingFoldDiagnostics() const;
 
     bool setShortcut(const QString &commandId, const QString &sequence, QString *errorMessage);
     void resetShortcuts();
     bool execute(const QString &commandId);
+    bool toggleHeadingFoldAt(int headingPosition);
+    void resetHeadingFolds();
     bool handleEditorEvent(QEvent *event);
     bool performUndo();
     bool performRedo();
@@ -52,6 +60,7 @@ public:
 
 signals:
     void commandsChanged();
+    void headingFoldMarkersChanged();
     void uiCommandRequested(const QString &commandId);
 
 private:
@@ -200,6 +209,7 @@ private:
     void recordInputScrollEvent(InputScrollEvent event);
 
     AppSettings *m_settings = nullptr;
+    std::unique_ptr<HeadingFoldManager> m_headingFolds;
     QPointer<QObject> m_editor;
     QPointer<QTextDocument> m_document;
     QPointer<QQuickWindow> m_window;

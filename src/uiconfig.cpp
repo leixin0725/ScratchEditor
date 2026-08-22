@@ -214,6 +214,8 @@ UiConfig UiConfig::defaults()
     put({"layout", "controlHeightExtraTall"}, 40);
     put({"layout", "editorPaddingX"}, 12);
     put({"layout", "editorPaddingY"}, 8);
+    put({"layout", "headingFoldGutterWidth"}, 16);
+    put({"layout", "headingFoldMarkerSize"}, 10);
     put({"layout", "editorContentBottomGap"}, 20);
     put({"layout", "selectionCursorWidth"}, 2);
     put({"layout", "scrollbarWidth"}, 5);
@@ -442,6 +444,8 @@ QVariantMap UiConfig::sanitize(const QVariantMap &input)
     fixInt({"layout", "controlHeightExtraTall"}, 16, 200);
     fixInt({"layout", "editorPaddingX"}, 0, 200);
     fixInt({"layout", "editorPaddingY"}, 0, 200);
+    fixInt({"layout", "headingFoldGutterWidth"}, 12, 48);
+    fixInt({"layout", "headingFoldMarkerSize"}, 6, 24);
     fixInt({"layout", "editorContentBottomGap"}, 0, 400);
     fixInt({"layout", "selectionCursorWidth"}, 1, 20);
     fixInt({"layout", "scrollbarWidth"}, 1, 50);

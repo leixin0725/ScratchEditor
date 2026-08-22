@@ -3,6 +3,17 @@ import QtQuick
 Window {
     id: root
 
+    function clickHeadingFoldMarkerForTest(position) {
+        for (let index = 0; index < headingFoldRepeater.count; ++index) {
+            const marker = headingFoldRepeater.itemAt(index)
+            if (marker && marker.modelData.position === position) {
+                marker.activate()
+                return true
+            }
+        }
+        return false
+    }
+
     readonly property var uiConfig: controller.uiConfig
 
     width: uiConfig.window.defaultWidth
@@ -55,6 +66,27 @@ Window {
     readonly property color panelAccentTextColor: themeAccentTextColor
     readonly property int commandPaletteMaximumWidth: uiConfig.panels.commandPalette.maxWidth
     readonly property color markdownTextColor: controller.markdownTextColor
+    readonly property int headingFoldGutterWidth: uiConfig.layout.headingFoldGutterWidth
+    readonly property string headingFoldExpandedGlyph: "v"
+    readonly property string headingFoldCollapsedGlyph: ">"
+    readonly property color headingFoldExpandedColor: themeMutedTextColor
+    readonly property color headingFoldCollapsedColor: themeAccentColor
+    readonly property int headingFoldMarkerCount: controller.headingFoldMarkers.length
+    readonly property bool headingFoldActive: {
+        for (let index = 0; index < controller.headingFoldMarkers.length; ++index) {
+            if (controller.headingFoldMarkers[index].collapsed) {
+                return true
+            }
+        }
+        return false
+    }
+    readonly property rect headingFoldVisibleEndRectangle:
+        editor.positionToRectangle(controller.headingFoldVisibleEndPosition)
+    readonly property real editorVisibleContentHeight:
+        headingFoldActive
+            ? headingFoldVisibleEndRectangle.y + headingFoldVisibleEndRectangle.height
+              + editor.contentHeight * 0
+            : editor.contentHeight
     readonly property string uiFontFamily: uiConfig.fonts.family
     readonly property string uiMonospaceFontFamily: uiConfig.fonts.monospaceFamily
     readonly property int transitionDuration:
@@ -726,9 +758,9 @@ Window {
         // editorContentBottomGap 作为最小留白值参与计算（默认远小于 2/3 页）。
         contentHeight: Math.max(
             height,
-            editor.contentHeight + (root.inputScrollHoldBottom
+            root.editorVisibleContentHeight + (root.inputScrollHoldBottom
                 ? Math.max(Math.max(height * 2 / 3, uiConfig.layout.editorContentBottomGap),
-                           editorViewport.contentY + height - editor.contentHeight)
+                           editorViewport.contentY + height - root.editorVisibleContentHeight)
                 : Math.max(height * 2 / 3, uiConfig.layout.editorContentBottomGap)))
         pixelAligned: true
 
@@ -759,6 +791,56 @@ Window {
             onWheel: root.inputScrollHoldBottom = false
         }
 
+        Item {
+            id: headingFoldGutter
+            z: 3
+            x: uiConfig.layout.editorPaddingX
+            y: uiConfig.layout.editorPaddingY
+            width: root.headingFoldGutterWidth
+            height: editor.height
+
+            Repeater {
+                id: headingFoldRepeater
+                model: controller.headingFoldMarkers
+
+                delegate: Item {
+                    required property var modelData
+                    function activate() {
+                        controller.toggleHeadingFoldAt(modelData.position)
+                    }
+                    readonly property rect headingRectangle:
+                        editor.positionToRectangle(modelData.position)
+                    x: 0
+                    // contentHeight 参与绑定，确保折叠、换行、字号和窗口宽度改变后
+                    // 重新计算标题第一视觉行的位置。
+                    y: Math.round(headingRectangle.y + editor.contentHeight * 0)
+                    width: headingFoldGutter.width
+                    height: Math.max(1, headingRectangle.height)
+
+                    Text {
+                        anchors.centerIn: parent
+                        text: modelData.collapsed
+                              ? root.headingFoldCollapsedGlyph
+                              : root.headingFoldExpandedGlyph
+                        color: modelData.collapsed
+                               ? root.headingFoldCollapsedColor
+                               : root.headingFoldExpandedColor
+                        font.family: root.uiMonospaceFontFamily
+                        font.pointSize: uiConfig.layout.headingFoldMarkerSize
+                        font.bold: modelData.collapsed
+                    }
+
+                    MouseArea {
+                        objectName: "headingFoldMarker-" + modelData.position
+                        anchors.fill: parent
+                        acceptedButtons: Qt.LeftButton
+                        cursorShape: Qt.PointingHandCursor
+                        onClicked: parent.activate()
+                    }
+                }
+            }
+        }
+
         TextEdit {
             id: editor
             objectName: "scratchText"
@@ -767,9 +849,10 @@ Window {
                 selectionDragPosition >= 0
                     ? positionToRectangle(selectionDragPosition)
                     : Qt.rect(0, 0, 0, 0)
-            x: uiConfig.layout.editorPaddingX
+            x: uiConfig.layout.editorPaddingX + root.headingFoldGutterWidth
             y: uiConfig.layout.editorPaddingY
             width: editorViewport.width - uiConfig.layout.editorPaddingX * 2
+                   - root.headingFoldGutterWidth
             height: Math.max(
                 editorViewport.height - uiConfig.layout.editorPaddingY * 2, contentHeight)
             color: root.markdownTextColor

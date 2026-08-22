@@ -37,6 +37,8 @@
     "controlHeightExtraTall": 40,
     "editorPaddingX": 12,
     "editorPaddingY": 8,
+    "headingFoldGutterWidth": 16,
+    "headingFoldMarkerSize": 10,
     "editorContentBottomGap": 20,
     "selectionCursorWidth": 2,
     "scrollbarWidth": 5,
