@@ -11,11 +11,13 @@
 #include <QPointer>
 #include <QPointF>
 #include <QRect>
+#include <QRectF>
 #include <QObject>
 #include <QString>
 #include <QStringList>
 #include <QTimer>
 #include <QVariantList>
+#include <QVariantMap>
 #include <QVector>
 
 #include <functional>
@@ -64,6 +66,12 @@ class EditorController final : public QObject, public QAbstractNativeEventFilter
     Q_PROPERTY(bool historyClearConfirmationVisible READ historyClearConfirmationVisible NOTIFY clipboardHistoryUiStateChanged)
     Q_PROPERTY(int historyCardHeight READ historyCardHeight CONSTANT)
     Q_PROPERTY(QVariantList commands READ commands NOTIFY commandsChanged)
+    Q_PROPERTY(QVariantList headingFoldMarkers READ headingFoldMarkers
+                   NOTIFY headingFoldMarkersChanged)
+    Q_PROPERTY(int headingFoldVisibleEndPosition READ headingFoldVisibleEndPosition
+                   NOTIFY headingFoldMarkersChanged)
+    Q_PROPERTY(QVariantMap headingNavigationHighlight READ headingNavigationHighlight
+                   NOTIFY headingNavigationHighlightChanged)
     Q_PROPERTY(bool markdownHighlighting READ markdownHighlighting NOTIFY markdownHighlightingChanged)
     Q_PROPERTY(QString theme READ theme NOTIFY appearanceChanged)
     Q_PROPERTY(QString editorFontFamily READ editorFontFamily NOTIFY appearanceChanged)
@@ -116,6 +124,9 @@ public:
     bool historyClearConfirmationVisible() const;
     int historyCardHeight() const;
     QVariantList commands() const;
+    QVariantList headingFoldMarkers() const;
+    int headingFoldVisibleEndPosition() const;
+    QVariantMap headingNavigationHighlight() const;
     bool markdownHighlighting() const;
     QString theme() const;
     QString editorFontFamily() const;
@@ -138,6 +149,7 @@ public:
     Q_INVOKABLE bool saveExternalFile();
     Q_INVOKABLE void animationBenchmarkFinished();
     Q_INVOKABLE bool executeCommand(const QString &commandId);
+    Q_INVOKABLE bool toggleHeadingFoldAt(int headingPosition);
     Q_INVOKABLE QString shortcutFor(const QString &commandId) const;
     Q_INVOKABLE bool setShortcut(const QString &commandId, const QString &sequence);
     Q_INVOKABLE void resetShortcuts();
@@ -179,6 +191,8 @@ signals:
     void clipboardHistoryLoaded();
     void clipboardHistoryLeftEdgeExited();
     void commandsChanged();
+    void headingFoldMarkersChanged();
+    void headingNavigationHighlightChanged();
     void markdownHighlightingChanged();
     void markdownStyleChanged();
     void appearanceChanged();
@@ -229,6 +243,9 @@ private:
                         const QString &requestId, const QJsonObject &request);
     void waitForNextFrame(QLocalSocket *socket, QJsonObject response, qint64 startedNs,
                           const QString &requestId);
+    void captureEditorRenderSample(QLocalSocket *socket, QJsonObject response,
+                                   const QRectF &editorLocalRect, qint64 startedNs,
+                                   const QString &requestId);
     bool commitAndHide(bool deliverAfterHide = false, bool persistState = true);
     bool commitExternalFileAndExit();
     void setExternalFileState(bool healthy, const QString &message);

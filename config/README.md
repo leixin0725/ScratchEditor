@@ -29,11 +29,12 @@
 常用编辑入口：
 
 - `window`：初始与最小尺寸（逻辑像素）。
-- `layout`：边距、拖拽区、圆角、控件高度、间距、滚动条与编辑区内边距。
+- `layout`：边距、拖拽区、圆角、控件高度、间距、滚动条、编辑区内边距，
+  以及标题折叠图标的 `headingFoldGutterWidth` / `headingFoldIconSize`。
 - `fonts`：界面字体、等宽字体与字号角色；`editorDefaultSize`、
   `statusPanelDefaultSize` 同时是 `settings.ini` 对应设置的默认值来源。
-- `animation`：过渡动画时长、窗口开合缩放比例、历史面板悬停延迟、
-  滚动指标刷新节流与性能探针参数。
+- `animation`：过渡动画时长、窗口开合缩放比例、标题导航高亮的透明度/停留/淡出时长、
+  历史面板悬停延迟、滚动指标刷新节流与性能探针参数。
 - `panels`：状态文字、状态面板、查找面板、历史面板、确认对话框、
   命令面板与设置页的尺寸和布局参数。
 - `palette`：dark / light 两套界面基础色角色。

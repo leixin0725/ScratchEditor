@@ -277,6 +277,10 @@ EditorController::EditorController(bool testMode, QElapsedTimer *startupTimer,
         m_settings.get(), clipboardHistoryAvailable(), this);
     connect(m_commands.get(), &EditorCommandRegistry::commandsChanged,
             this, &EditorController::commandsChanged);
+    connect(m_commands.get(), &EditorCommandRegistry::headingFoldMarkersChanged,
+            this, &EditorController::headingFoldMarkersChanged);
+    connect(m_commands.get(), &EditorCommandRegistry::headingNavigationHighlightChanged,
+            this, &EditorController::headingNavigationHighlightChanged);
     connect(m_commands.get(), &EditorCommandRegistry::uiCommandRequested,
             this, &EditorController::uiCommandRequested);
     m_commands->setClipboardAccess(
@@ -641,6 +645,21 @@ QVariantList EditorController::commands() const
     return m_commands ? m_commands->commands() : QVariantList{};
 }
 
+QVariantList EditorController::headingFoldMarkers() const
+{
+    return m_commands ? m_commands->headingFoldMarkers() : QVariantList{};
+}
+
+int EditorController::headingFoldVisibleEndPosition() const
+{
+    return m_commands ? m_commands->headingFoldVisibleEndPosition() : 0;
+}
+
+QVariantMap EditorController::headingNavigationHighlight() const
+{
+    return m_commands ? m_commands->headingNavigationHighlight() : QVariantMap{};
+}
+
 bool EditorController::markdownHighlighting() const
 {
     return !m_markdownHighlighter.isNull();
@@ -816,6 +835,11 @@ void EditorController::registerEditor(QObject *editor)
 bool EditorController::executeCommand(const QString &commandId)
 {
     return m_commands && m_commands->execute(commandId);
+}
+
+bool EditorController::toggleHeadingFoldAt(int headingPosition)
+{
+    return m_commands && m_commands->toggleHeadingFoldAt(headingPosition);
 }
 
 QString EditorController::shortcutFor(const QString &commandId) const
@@ -1174,6 +1198,9 @@ void EditorController::buildCommandHandlers()
             runAnimationBenchmark(r.socket, r.startedNs, r.requestId);
         }}},
         {QStringLiteral("clearTestText"), {Gate::Test, [this](const DispatchRequest &r) {
+            if (m_commands) {
+                m_commands->resetHeadingFolds();
+            }
             m_editor->setProperty("text", QString());
             m_editor->setProperty("cursorPosition", 0);
             QJsonObject response;
@@ -1188,6 +1215,9 @@ void EditorController::buildCommandHandlers()
         }}},
         {QStringLiteral("testSetText"), {Gate::Test, [this](const DispatchRequest &r) {
             const QString text = r.request.value(QStringLiteral("text")).toString();
+            if (m_commands) {
+                m_commands->resetHeadingFolds();
+            }
             m_editor->setProperty("text", text);
             m_editor->setProperty("cursorPosition", text.size());
             if (auto *quickDocument = qvariant_cast<QQuickTextDocument *>(
@@ -1738,6 +1768,72 @@ void EditorController::buildCommandHandlers()
             response.insert(QStringLiteral("shortcut"), shortcutFor(commandId));
             sendResponse(r.socket, response, r.startedNs, r.requestId);
         }}},
+        {QStringLiteral("testHeadingFoldState"), {Gate::Test, [this](const DispatchRequest &r) {
+            QJsonObject response = m_commands
+                ? QJsonObject::fromVariantMap(m_commands->headingFoldDiagnostics())
+                : QJsonObject{};
+            response.insert(QStringLiteral("command"), r.command);
+            sendResponse(r.socket, response, r.startedNs, r.requestId);
+        }}},
+        {QStringLiteral("testClickHeadingFoldMarker"), {Gate::Test, [this](const DispatchRequest &r) {
+            const int position = r.request.value(QStringLiteral("position")).toInt();
+            QVariant markerResult;
+            const bool invoked = m_window && QMetaObject::invokeMethod(
+                m_window, "clickHeadingFoldMarkerForTest", Qt::DirectConnection,
+                Q_RETURN_ARG(QVariant, markerResult), Q_ARG(QVariant, QVariant(position)));
+            QJsonObject response = statusObject();
+            response.insert(QStringLiteral("command"), r.command);
+            response.insert(QStringLiteral("markerFound"), invoked && markerResult.toBool());
+            QVariant markerState;
+            if (invoked && markerResult.toBool()
+                && QMetaObject::invokeMethod(
+                    m_window, "headingFoldMarkerStateForTest", Qt::DirectConnection,
+                    Q_RETURN_ARG(QVariant, markerState), Q_ARG(QVariant, QVariant(position)))) {
+                const QVariantMap state = markerState.toMap();
+                response.insert(QStringLiteral("markerIconName"),
+                                state.value(QStringLiteral("iconName")).toString());
+                response.insert(QStringLiteral("markerIconValid"),
+                                state.value(QStringLiteral("iconValid")).toBool());
+                response.insert(QStringLiteral("markerIconSize"),
+                                state.value(QStringLiteral("iconSize")).toInt());
+            }
+            sendResponse(r.socket, response, r.startedNs, r.requestId);
+        }}},
+        {QStringLiteral("testEditorRenderSample"), {Gate::Test, [this](const DispatchRequest &r) {
+            QRectF sampleRect;
+            const QJsonObject requestedRect =
+                r.request.value(QStringLiteral("sampleRect")).toObject();
+            if (!requestedRect.isEmpty()) {
+                sampleRect = QRectF(requestedRect.value(QStringLiteral("x")).toDouble(),
+                                    requestedRect.value(QStringLiteral("y")).toDouble(),
+                                    requestedRect.value(QStringLiteral("width")).toDouble(),
+                                    requestedRect.value(QStringLiteral("height")).toDouble());
+            } else {
+                QRectF positionRect;
+                const int position = r.request.value(QStringLiteral("position")).toInt();
+                const bool invoked = m_editor && QMetaObject::invokeMethod(
+                    m_editor, "positionToRectangle", Qt::DirectConnection,
+                    Q_RETURN_ARG(QRectF, positionRect), Q_ARG(int, position));
+                if (!invoked || !positionRect.isValid()) {
+                    sendError(r.socket, r.command, QStringLiteral("editor position unavailable"),
+                              r.startedNs, r.requestId);
+                    return;
+                }
+                sampleRect = QRectF(positionRect.x(), positionRect.y(),
+                                    r.request.value(QStringLiteral("width")).toDouble(240.0),
+                                    positionRect.height());
+            }
+
+            if (!sampleRect.isValid()) {
+                sendError(r.socket, r.command, QStringLiteral("invalid sample rectangle"),
+                          r.startedNs, r.requestId);
+                return;
+            }
+            QJsonObject response;
+            response.insert(QStringLiteral("command"), r.command);
+            captureEditorRenderSample(r.socket, response, sampleRect,
+                                      r.startedNs, r.requestId);
+        }}},
         {QStringLiteral("testHighlightSummary"), {Gate::Test, [this](const DispatchRequest &r) {
             int blocks = 0;
             int formattedRanges = 0;
@@ -1993,6 +2089,87 @@ void EditorController::waitForNextFrame(QLocalSocket *socket, QJsonObject respon
     m_window->update();
 }
 
+void EditorController::captureEditorRenderSample(QLocalSocket *socket, QJsonObject response,
+                                                 const QRectF &editorLocalRect,
+                                                 qint64 startedNs,
+                                                 const QString &requestId)
+{
+    auto *editorItem = qobject_cast<QQuickItem *>(m_editor.data());
+    if (!m_window || !editorItem) {
+        sendError(socket, response.value(QStringLiteral("command")).toString(),
+                  QStringLiteral("editor unavailable"), startedNs, requestId);
+        return;
+    }
+
+    const QRectF sceneRect(editorItem->mapToScene(editorLocalRect.topLeft()),
+                           editorItem->mapToScene(editorLocalRect.bottomRight()));
+    QPointer<QLocalSocket> guardedSocket(socket);
+    connect(m_window, &QQuickWindow::frameSwapped, this,
+            [this, guardedSocket, response, editorLocalRect, sceneRect,
+             startedNs, requestId]() mutable {
+                QTimer::singleShot(0, this,
+                    [this, guardedSocket, response, editorLocalRect, sceneRect,
+                     startedNs, requestId]() mutable {
+                        if (!m_window) {
+                            sendError(guardedSocket,
+                                      response.value(QStringLiteral("command")).toString(),
+                                      QStringLiteral("window unavailable"),
+                                      startedNs, requestId);
+                            return;
+                        }
+                        const QImage image = m_window->grabWindow();
+                        if (image.isNull() || m_window->width() <= 0 || m_window->height() <= 0) {
+                            sendError(guardedSocket,
+                                      response.value(QStringLiteral("command")).toString(),
+                                      QStringLiteral("window capture failed"),
+                                      startedNs, requestId);
+                            return;
+                        }
+
+                        const qreal scaleX = static_cast<qreal>(image.width()) / m_window->width();
+                        const qreal scaleY = static_cast<qreal>(image.height()) / m_window->height();
+                        const QRect pixelRect = QRectF(sceneRect.x() * scaleX,
+                                                       sceneRect.y() * scaleY,
+                                                       sceneRect.width() * scaleX,
+                                                       sceneRect.height() * scaleY)
+                                                    .toAlignedRect()
+                                                    .intersected(image.rect());
+                        const QColor surfaceColor(
+                            m_window->property("themeEditorSurfaceColor").toString());
+                        int nonSurfacePixelCount = 0;
+                        for (int y = pixelRect.top(); y <= pixelRect.bottom(); ++y) {
+                            for (int x = pixelRect.left(); x <= pixelRect.right(); ++x) {
+                                const QColor pixel = image.pixelColor(x, y);
+                                const int channelDistance = std::max(
+                                    {qAbs(pixel.red() - surfaceColor.red()),
+                                     qAbs(pixel.green() - surfaceColor.green()),
+                                     qAbs(pixel.blue() - surfaceColor.blue())});
+                                if (channelDistance > 8) {
+                                    ++nonSurfacePixelCount;
+                                }
+                            }
+                        }
+
+                        response.insert(QStringLiteral("sampleRect"), QJsonObject{
+                            {QStringLiteral("x"), editorLocalRect.x()},
+                            {QStringLiteral("y"), editorLocalRect.y()},
+                            {QStringLiteral("width"), editorLocalRect.width()},
+                            {QStringLiteral("height"), editorLocalRect.height()}});
+                        response.insert(QStringLiteral("samplePixelCount"),
+                                        pixelRect.width() * pixelRect.height());
+                        response.insert(QStringLiteral("nonSurfacePixelCount"),
+                                        nonSurfacePixelCount);
+                        const QJsonObject status = statusObject();
+                        response.insert(QStringLiteral("editorVisibleWidth"),
+                                        status.value(QStringLiteral("editorVisibleWidth")));
+                        response.insert(QStringLiteral("historyPanelOpen"),
+                                        status.value(QStringLiteral("historyPanelOpen")));
+                        sendResponse(guardedSocket, response, startedNs, requestId);
+                    });
+            }, Qt::SingleShotConnection);
+    m_window->update();
+}
+
 void EditorController::showEditor()
 {
     if (!m_ready || isVisible()) {
@@ -2032,6 +2209,9 @@ void EditorController::showEditor()
             return;
         }
         if (!m_externalFileLoadedIntoEditor) {
+            if (m_commands) {
+                m_commands->resetHeadingFolds();
+            }
             m_editor->setProperty("text", m_externalFileText);
             m_editor->setProperty("cursorPosition", m_externalFileText.size());
             m_editorBaselineText = m_externalFileText;
@@ -2045,6 +2225,9 @@ void EditorController::showEditor()
         const bool clipboardReady = readClipboardText(&clipboardText, &clipboardError);
         if (clipboardReady) {
             if (m_editor->property("text").toString() != clipboardText) {
+                if (m_commands) {
+                    m_commands->resetHeadingFolds();
+                }
                 m_editor->setProperty("text", clipboardText);
                 // 新剪贴板内容默认光标落在文档末尾，与外部文件模式一致。
                 m_editor->setProperty("cursorPosition", clipboardText.size());
@@ -2475,6 +2658,9 @@ void EditorController::confirmLoadClipboardHistory()
     if (text.isNull()) {
         cancelLoadClipboardHistory();
         return;
+    }
+    if (m_commands) {
+        m_commands->resetHeadingFolds();
     }
     m_editor->setProperty("text", text);
     m_editor->setProperty("cursorPosition", text.size());
@@ -3041,6 +3227,8 @@ QJsonObject EditorController::statusObject() const
     status.insert(QStringLiteral("uiConfigLoaded"),
                   m_uiConfig && m_uiConfig->loadedFromFile());
     status.insert(QStringLiteral("commandCount"), commands().size());
+    status.insert(QStringLiteral("headingNavigationHighlight"),
+                  QJsonObject::fromVariantMap(headingNavigationHighlight()));
     status.insert(QStringLiteral("historyAvailable"), clipboardHistoryAvailable());
     status.insert(QStringLiteral("historyHealthy"), clipboardHistoryHealthy());
     status.insert(QStringLiteral("historyError"), clipboardHistoryError());
@@ -3160,11 +3348,69 @@ QJsonObject EditorController::statusObject() const
                 status.insert(QStringLiteral("historyPanelBottomRightRadius"),
                               historyPanel->property("bottomRightRadius").toDouble());
             }
+            const auto insertItemGeometry = [this, &status](const QString &objectName,
+                                                            const QString &statusPrefix) {
+                if (QQuickItem *item = m_window->findChild<QQuickItem *>(objectName)) {
+                    const QPointF topLeft = item->mapToScene(QPointF(0, 0));
+                    status.insert(statusPrefix + QStringLiteral("X"), topLeft.x());
+                    status.insert(statusPrefix + QStringLiteral("Y"), topLeft.y());
+                    status.insert(statusPrefix + QStringLiteral("Width"), item->width());
+                    status.insert(statusPrefix + QStringLiteral("Height"), item->height());
+                }
+            };
+            insertItemGeometry(QStringLiteral("headerTitle"),
+                               QStringLiteral("headerTitle"));
+            insertItemGeometry(QStringLiteral("historyTitle"),
+                               QStringLiteral("historyTitle"));
+            insertItemGeometry(QStringLiteral("historySearchFrame"),
+                               QStringLiteral("historySearchFrame"));
+            insertItemGeometry(QStringLiteral("historyList"),
+                               QStringLiteral("historyList"));
+            insertItemGeometry(QStringLiteral("historyDeleteButton"),
+                               QStringLiteral("historyDeleteButton"));
+            insertItemGeometry(QStringLiteral("editorViewport"),
+                               QStringLiteral("editorViewport"));
         }
         status.insert(QStringLiteral("editorVisibleWidth"),
                       m_window->property("editorVisibleWidth").toDouble());
         status.insert(QStringLiteral("editorViewportWidth"),
                       m_window->property("editorViewportWidth").toDouble());
+        status.insert(QStringLiteral("headingFoldGutterWidth"),
+                      m_window->property("headingFoldGutterWidth").toInt());
+        status.insert(QStringLiteral("headingFoldIconSize"),
+                      m_window->property("headingFoldIconSize").toInt());
+        status.insert(QStringLiteral("headingFoldExpandedIconName"),
+                      m_window->property("headingFoldExpandedIconName").toString());
+        status.insert(QStringLiteral("headingFoldCollapsedIconName"),
+                      m_window->property("headingFoldCollapsedIconName").toString());
+        status.insert(QStringLiteral("headingFoldExpandedColor"),
+                      m_window->property("headingFoldExpandedColor").toString());
+        status.insert(QStringLiteral("headingFoldCollapsedColor"),
+                      m_window->property("headingFoldCollapsedColor").toString());
+        status.insert(QStringLiteral("headingFoldMarkerCount"),
+                      m_window->property("headingFoldMarkerCount").toInt());
+        status.insert(QStringLiteral("headingNavigationHighlightOpacity"),
+                      m_window->property("headingNavigationHighlightOpacity").toDouble());
+        status.insert(QStringLiteral("headingNavigationHighlightHoldDurationMs"),
+                      m_window->property(
+                          "headingNavigationHighlightHoldDurationMs").toInt());
+        status.insert(QStringLiteral("headingNavigationHighlightFadeDurationMs"),
+                      m_window->property(
+                          "headingNavigationHighlightFadeDurationMs").toInt());
+        status.insert(QStringLiteral("headingNavigationHighlightVisible"),
+                      m_window->property("headingNavigationHighlightVisible").toBool());
+        status.insert(QStringLiteral("headingNavigationHighlightEffectiveOpacity"),
+                      m_window->property(
+                          "headingNavigationHighlightEffectiveOpacity").toDouble());
+        status.insert(QStringLiteral("headingNavigationHighlightRectCount"),
+                      m_window->property("headingNavigationHighlightRectCount").toInt());
+        status.insert(QStringLiteral("headingNavigationHighlightDrawnBeforeText"),
+                      m_window->property(
+                          "headingNavigationHighlightDrawnBeforeText").toBool());
+        status.insert(QStringLiteral("headingNavigationHighlightMaxWidth"),
+                      m_window->property("headingNavigationHighlightMaxWidth").toDouble());
+        status.insert(QStringLiteral("editorVisibleContentHeight"),
+                      m_window->property("editorVisibleContentHeight").toDouble());
         status.insert(QStringLiteral("historyQueryFocused"),
                       m_window->property("historyQueryFocused").toBool());
         status.insert(QStringLiteral("historyPanelLoaded"),
@@ -3242,6 +3488,9 @@ void EditorController::runLargeDocumentBenchmark(QLocalSocket *socket, qint64 st
 
     QElapsedTimer phase;
     phase.start();
+    if (m_commands) {
+        m_commands->resetHeadingFolds();
+    }
     m_editor->setProperty("text", largeText);
     const double loadMs = phase.nsecsElapsed() / 1'000'000.0;
 
@@ -3269,6 +3518,9 @@ void EditorController::restoreTestDocument()
 {
     if (!m_hasSavedTestText || !m_editor) {
         return;
+    }
+    if (m_commands) {
+        m_commands->resetHeadingFolds();
     }
     m_editor->setProperty("text", m_savedTestText);
     if (m_window) {

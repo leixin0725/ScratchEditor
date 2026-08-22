@@ -1,6 +1,7 @@
 #include "editorcommandregistry.h"
 #include "appsettings.h"
 #include "cjktextprocessor.h"
+#include "headingfoldmanager.h"
 
 #include <QCoreApplication>
 #include <QEvent>
@@ -1240,6 +1241,11 @@ EditorCommandRegistry::EditorCommandRegistry(AppSettings *settings,
     : QObject(parent)
     , m_settings(settings)
 {
+    m_headingFolds = std::make_unique<HeadingFoldManager>(this);
+    connect(m_headingFolds.get(), &HeadingFoldManager::markersChanged,
+            this, &EditorCommandRegistry::headingFoldMarkersChanged);
+    connect(m_headingFolds.get(), &HeadingFoldManager::navigationHighlightChanged,
+            this, &EditorCommandRegistry::headingNavigationHighlightChanged);
     m_definitions = {
         {QStringLiteral("toggleBold"), QStringLiteral("切换加粗"),
          QStringLiteral("Markdown"), QStringLiteral("Ctrl+B"), {}, false},
@@ -1263,6 +1269,18 @@ EditorCommandRegistry::EditorCommandRegistry(AppSettings *settings,
          QStringLiteral("Markdown"), QStringLiteral("Ctrl+Num+-"), {}, false},
         {QStringLiteral("decreaseHeadingLevel"), QStringLiteral("标题推进至上一级"),
          QStringLiteral("Markdown"), QStringLiteral("Ctrl+Num++"), {}, false},
+        {QStringLiteral("foldAllHeadings"), QStringLiteral("折叠所有标题"),
+         QStringLiteral("Markdown"), QStringLiteral("Ctrl+M"), {}, false},
+        {QStringLiteral("unfoldAllHeadings"), QStringLiteral("展开所有标题"),
+         QStringLiteral("Markdown"), QStringLiteral("Ctrl+Shift+M"), {}, false},
+        {QStringLiteral("foldCurrentHeading"), QStringLiteral("折叠所属标题"),
+         QStringLiteral("Markdown"), QStringLiteral("Ctrl+Shift+["), {}, false},
+        {QStringLiteral("unfoldCurrentHeading"), QStringLiteral("展开所属标题"),
+         QStringLiteral("Markdown"), QStringLiteral("Ctrl+Shift+]"), {}, false},
+        {QStringLiteral("previousHeading"), QStringLiteral("跳到上一个标题"),
+         QStringLiteral("导航"), QStringLiteral("Ctrl+Up"), {}, false},
+        {QStringLiteral("nextHeading"), QStringLiteral("跳到下一个标题"),
+         QStringLiteral("导航"), QStringLiteral("Ctrl+Down"), {}, false},
         {QStringLiteral("deleteLine"), QStringLiteral("删除整行"),
          QStringLiteral("编辑"), QStringLiteral("Ctrl+Shift+L"), {}, false},
         {QStringLiteral("copyLine"), QStringLiteral("复制整行"),
@@ -1325,6 +1343,16 @@ EditorCommandRegistry::EditorCommandRegistry(AppSettings *settings,
         {QStringLiteral("cutLine"), [this] { return cutLine(); }},
         {QStringLiteral("pasteClipboard"), [this] { return pasteClipboard(); }},
         {QStringLiteral("toggleCheckbox"), [this] { return toggleCurrentCheckbox(); }},
+        {QStringLiteral("foldAllHeadings"), [this] { return m_headingFolds->foldAll(); }},
+        {QStringLiteral("unfoldAllHeadings"), [this] { return m_headingFolds->unfoldAll(); }},
+        {QStringLiteral("foldCurrentHeading"),
+         [this] { return m_headingFolds->foldCurrent(); }},
+        {QStringLiteral("unfoldCurrentHeading"),
+         [this] { return m_headingFolds->unfoldCurrent(); }},
+        {QStringLiteral("previousHeading"),
+         [this] { return m_headingFolds->navigate(true); }},
+        {QStringLiteral("nextHeading"),
+         [this] { return m_headingFolds->navigate(false); }},
     };
 
     m_selectionDragScrollTimer.setInterval(30);
@@ -1332,6 +1360,8 @@ EditorCommandRegistry::EditorCommandRegistry(AppSettings *settings,
         updateSelectionDrag(m_selectionDragScenePosition, true);
     });
 }
+
+EditorCommandRegistry::~EditorCommandRegistry() = default;
 
 void EditorCommandRegistry::setEditor(QObject *editor, QTextDocument *document)
 {
@@ -1341,6 +1371,7 @@ void EditorCommandRegistry::setEditor(QObject *editor, QTextDocument *document)
     }
     m_editor = editor;
     m_document = document;
+    m_headingFolds->setEditor(editor, document);
     m_documentTextSnapshot = document ? document->toPlainText() : QString();
     m_documentTextSnapshotPrepared = false;
     if (m_document) {
@@ -1389,6 +1420,38 @@ QString EditorCommandRegistry::shortcut(const QString &commandId) const
 {
     const Definition *item = definition(commandId);
     return item ? item->shortcut : QString();
+}
+
+QVariantList EditorCommandRegistry::headingFoldMarkers() const
+{
+    return m_headingFolds ? m_headingFolds->markers() : QVariantList{};
+}
+
+int EditorCommandRegistry::headingFoldVisibleEndPosition() const
+{
+    return m_headingFolds ? m_headingFolds->visibleEndPosition() : 0;
+}
+
+QVariantMap EditorCommandRegistry::headingNavigationHighlight() const
+{
+    return m_headingFolds ? m_headingFolds->navigationHighlight() : QVariantMap{};
+}
+
+QVariantMap EditorCommandRegistry::headingFoldDiagnostics() const
+{
+    return m_headingFolds ? m_headingFolds->diagnostics() : QVariantMap{};
+}
+
+bool EditorCommandRegistry::toggleHeadingFoldAt(int headingPosition)
+{
+    return m_headingFolds && m_headingFolds->toggleAt(headingPosition);
+}
+
+void EditorCommandRegistry::resetHeadingFolds()
+{
+    if (m_headingFolds) {
+        m_headingFolds->reset();
+    }
 }
 
 bool EditorCommandRegistry::setShortcut(const QString &commandId, const QString &sequence,
@@ -2588,6 +2651,7 @@ bool EditorCommandRegistry::findNext(const QString &query, bool caseSensitive, b
     if (found.isNull()) {
         return false;
     }
+    m_headingFolds->revealPosition(found.selectionStart());
     selectRange(found.selectionStart(), found.selectionEnd());
     focusEditor();
     return true;

@@ -5,6 +5,14 @@
 
 ## 更新记录
 
+- `2026-08-22`：优化标题折叠与导航反馈：正文光标折叠后临时停在标题末尾，未主动移动时展开可恢复原位置；标题跳转增加先于文字绘制的半透明强调色高亮。
+- `2026-08-22`：剪贴板历史面板改用主窗口共享布局约束：面板标题与“临时编辑器”原位对齐，
+  搜索框顶部与编辑视口顶部对齐，历史列表继续保持搜索框和页脚的安全间距。
+- `2026-08-22`：新增基于 Qt Quick Shapes 的可复用 Lucide 图标组件，标题折叠标记改用
+  `chevron-down` / `chevron-right`，并保留原有状态配色、点击范围与布局语义。
+- `2026-08-22`：修复标题折叠状态已变化但编辑区画面未实时刷新的问题；Qt Quick 文本尺寸和场景图节点现随 block 可见性同步失效，`window-ui` 新增不改变历史栏或编辑器宽度的下一帧像素回归检查。
+- `2026-08-22`：新增 Markdown 标题层级折叠、常驻折叠标记与上一个/下一个标题导航，
+  实现与验收边界见 [`archive/013-heading-folding-navigation/`](archive/013-heading-folding-navigation/)。
 - `2026-08-21`：Markdown 引用块新增行首 `>` 自动补空格、全角 `》` 转换、普通/Shift Enter
   续行、多层空引用逐层退出及引用头一次退格删除；同时修复列表自动续行撤销后光标可能跳到文档开头的问题，见根目录
   [`README.md`](../README.md#编辑快捷键) 的“编辑快捷键”。
@@ -74,6 +82,8 @@
 - [`archive/001-external-editor/extension-plan.md`](archive/001-external-editor/extension-plan.md)：外部编辑器瞬态文件模式的扩展计划与验收标准。
 - [`archive/010-clipboard-history-coordinator/`](archive/010-clipboard-history-coordinator/)：
   剪贴板历史协调器的职责边界、兼容约束与验证记录。
+- [`archive/013-heading-folding-navigation/`](archive/013-heading-folding-navigation/)：
+  Markdown 标题折叠、Lucide 常驻图标、标题导航、隐藏命中自动展开与历史面板布局对齐的实现和验收记录。
 
 历史验收的机器可读证据统一保存在 [`../artifacts/baselines/`](../artifacts/baselines/)。
 中间调优结果在本地 `artifacts/archive/` 中保留，但不进入版本控制。

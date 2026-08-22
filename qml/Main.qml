@@ -3,6 +3,89 @@ import QtQuick
 Window {
     id: root
 
+    function clickHeadingFoldMarkerForTest(position) {
+        for (let index = 0; index < headingFoldRepeater.count; ++index) {
+            const marker = headingFoldRepeater.itemAt(index)
+            if (marker && marker.modelData.position === position) {
+                marker.activate()
+                return true
+            }
+        }
+        return false
+    }
+
+    function buildHeadingNavigationHighlightRectangles() {
+        const target = controller.headingNavigationHighlight
+        if (!target || target.start === undefined || target.end === undefined
+                || target.end <= target.start) {
+            return []
+        }
+
+        const rectangles = []
+        let segmentStart = editor.positionToRectangle(target.start)
+        let segmentY = segmentStart.y
+        for (let position = target.start + 1; position <= target.end; ++position) {
+            const cursorRect = editor.positionToRectangle(position)
+            if (Math.abs(cursorRect.y - segmentY) <= 0.5) {
+                if (position === target.end) {
+                    rectangles.push({
+                        "x": Math.min(segmentStart.x, cursorRect.x),
+                        "y": segmentStart.y,
+                        "width": Math.max(1, Math.abs(cursorRect.x - segmentStart.x)),
+                        "height": Math.max(1, segmentStart.height)
+                    })
+                }
+                continue
+            }
+
+            rectangles.push({
+                "x": segmentStart.x,
+                "y": segmentStart.y,
+                "width": Math.max(1, editor.width - segmentStart.x),
+                "height": Math.max(1, segmentStart.height)
+            })
+            if (position === target.end) {
+                break
+            }
+            segmentStart = cursorRect
+            segmentY = cursorRect.y
+        }
+        return rectangles
+    }
+
+    function refreshHeadingNavigationHighlightGeometry() {
+        if (headingNavigationHighlightAnimationOpacity <= 0) {
+            return
+        }
+        headingNavigationHighlightRectangles =
+            buildHeadingNavigationHighlightRectangles()
+    }
+
+    function restartHeadingNavigationHighlight() {
+        headingNavigationHighlightAnimation.stop()
+        headingNavigationHighlightRectangles =
+            buildHeadingNavigationHighlightRectangles()
+        headingNavigationHighlightAnimationOpacity =
+            headingNavigationHighlightRectangles.length > 0 ? 1 : 0
+        if (headingNavigationHighlightRectangles.length > 0) {
+            headingNavigationHighlightAnimation.start()
+        }
+    }
+
+    function headingFoldMarkerStateForTest(position) {
+        for (let index = 0; index < headingFoldRepeater.count; ++index) {
+            const marker = headingFoldRepeater.itemAt(index)
+            if (marker && marker.modelData.position === position) {
+                return {
+                    "iconName": marker.iconName,
+                    "iconValid": marker.iconValid,
+                    "iconSize": marker.iconSize
+                }
+            }
+        }
+        return {}
+    }
+
     readonly property var uiConfig: controller.uiConfig
 
     width: uiConfig.window.defaultWidth
@@ -20,6 +103,10 @@ Window {
     readonly property int marginSize: uiConfig.layout.margin
     readonly property int resizeMargin: uiConfig.layout.resizeMargin
     readonly property int edgeDragWidth: marginSize - resizeMargin
+    readonly property real headerTitleLeft: marginSize
+    readonly property real headerTitleCenterY:
+        resizeMargin + (dragZoneHeight - resizeMargin) / 2
+    readonly property real editorContentTop: dragZoneHeight
     readonly property bool cornerResizeEnabled: true
     readonly property bool edgeDragEnabled: true
     readonly property bool verticalScrollBarVisible: scrollThumb.visible
@@ -55,6 +142,54 @@ Window {
     readonly property color panelAccentTextColor: themeAccentTextColor
     readonly property int commandPaletteMaximumWidth: uiConfig.panels.commandPalette.maxWidth
     readonly property color markdownTextColor: controller.markdownTextColor
+    readonly property int headingFoldGutterWidth: uiConfig.layout.headingFoldGutterWidth
+    readonly property int headingFoldIconSize: uiConfig.layout.headingFoldIconSize
+    readonly property string headingFoldExpandedIconName: "chevron-down"
+    readonly property string headingFoldCollapsedIconName: "chevron-right"
+    readonly property color headingFoldExpandedColor: themeMutedTextColor
+    readonly property color headingFoldCollapsedColor: themeAccentColor
+    readonly property real headingNavigationHighlightOpacity:
+        uiConfig.animation.headingNavigationHighlightOpacity
+    readonly property int headingNavigationHighlightHoldDurationMs:
+        uiConfig.animation.headingNavigationHighlightHoldDuration
+    readonly property int headingNavigationHighlightFadeDurationMs:
+        controller.animationsEnabled
+            ? uiConfig.animation.headingNavigationHighlightFadeDuration : 0
+    property var headingNavigationHighlightRectangles: []
+    property real headingNavigationHighlightAnimationOpacity: 0
+    readonly property bool headingNavigationHighlightVisible:
+        headingNavigationHighlightRectangles.length > 0
+            && headingNavigationHighlightAnimationOpacity > 0
+    readonly property real headingNavigationHighlightEffectiveOpacity:
+        headingNavigationHighlightAnimationOpacity * headingNavigationHighlightOpacity
+    readonly property int headingNavigationHighlightRectCount:
+        headingNavigationHighlightRectangles.length
+    readonly property bool headingNavigationHighlightDrawnBeforeText:
+        headingNavigationHighlightLayer.z < editor.z
+    readonly property real headingNavigationHighlightMaxWidth: {
+        let maximum = 0
+        for (let index = 0; index < headingNavigationHighlightRectangles.length; ++index) {
+            maximum = Math.max(maximum,
+                               headingNavigationHighlightRectangles[index].width)
+        }
+        return maximum
+    }
+    readonly property int headingFoldMarkerCount: controller.headingFoldMarkers.length
+    readonly property bool headingFoldActive: {
+        for (let index = 0; index < controller.headingFoldMarkers.length; ++index) {
+            if (controller.headingFoldMarkers[index].collapsed) {
+                return true
+            }
+        }
+        return false
+    }
+    readonly property rect headingFoldVisibleEndRectangle:
+        editor.positionToRectangle(controller.headingFoldVisibleEndPosition)
+    readonly property real editorVisibleContentHeight:
+        headingFoldActive
+            ? headingFoldVisibleEndRectangle.y + headingFoldVisibleEndRectangle.height
+              + editor.contentHeight * 0
+            : editor.contentHeight
     readonly property string uiFontFamily: uiConfig.fonts.family
     readonly property string uiMonospaceFontFamily: uiConfig.fonts.monospaceFamily
     readonly property int transitionDuration:
@@ -75,6 +210,30 @@ Window {
         NumberAnimation {
             duration: root.transitionDuration
             easing.type: Easing.OutCubic
+        }
+    }
+
+    SequentialAnimation {
+        id: headingNavigationHighlightAnimation
+
+        PauseAnimation {
+            duration: root.headingNavigationHighlightHoldDurationMs
+        }
+        NumberAnimation {
+            target: root
+            property: "headingNavigationHighlightAnimationOpacity"
+            to: 0
+            duration: root.headingNavigationHighlightFadeDurationMs
+            easing.type: Easing.OutCubic
+        }
+        onFinished: root.headingNavigationHighlightRectangles = []
+    }
+
+    Connections {
+        target: controller
+
+        function onHeadingNavigationHighlightChanged() {
+            root.restartHeadingNavigationHighlight()
         }
     }
     readonly property real historyPanelWidth:
@@ -522,9 +681,10 @@ Window {
         }
 
         Text {
-            anchors.left: parent.left
-            anchors.leftMargin: root.marginSize - root.resizeMargin
-            anchors.verticalCenter: parent.verticalCenter
+            id: headerTitle
+            objectName: "headerTitle"
+            x: root.headerTitleLeft - header.x
+            y: root.headerTitleCenterY - header.y - height / 2
             text: controller.externalFileMode
                   ? (controller.externalCliType.length > 0
                      ? "外部提示词编辑器 · " + controller.externalCliType
@@ -699,7 +859,7 @@ Window {
     Rectangle {
         id: editorSurface
         x: root.marginSize + root.editorHorizontalShift
-        y: root.dragZoneHeight
+        y: root.editorContentTop
         width: root.editorVisibleWidth
         height: root.height - root.dragZoneHeight - root.marginSize
         color: root.themeEditorSurfaceColor
@@ -711,8 +871,9 @@ Window {
 
     Flickable {
         id: editorViewport
+        objectName: "editorViewport"
         x: root.marginSize + root.editorHorizontalShift
-        y: root.dragZoneHeight
+        y: root.editorContentTop
         width: root.editorVisibleWidth
         height: root.height - root.dragZoneHeight - root.marginSize
         clip: true
@@ -726,9 +887,9 @@ Window {
         // editorContentBottomGap 作为最小留白值参与计算（默认远小于 2/3 页）。
         contentHeight: Math.max(
             height,
-            editor.contentHeight + (root.inputScrollHoldBottom
+            root.editorVisibleContentHeight + (root.inputScrollHoldBottom
                 ? Math.max(Math.max(height * 2 / 3, uiConfig.layout.editorContentBottomGap),
-                           editorViewport.contentY + height - editor.contentHeight)
+                           editorViewport.contentY + height - root.editorVisibleContentHeight)
                 : Math.max(height * 2 / 3, uiConfig.layout.editorContentBottomGap)))
         pixelAligned: true
 
@@ -759,17 +920,97 @@ Window {
             onWheel: root.inputScrollHoldBottom = false
         }
 
+        Item {
+            id: headingFoldGutter
+            z: 3
+            x: uiConfig.layout.editorPaddingX
+            y: uiConfig.layout.editorPaddingY
+            width: root.headingFoldGutterWidth
+            height: editor.height
+
+            Repeater {
+                id: headingFoldRepeater
+                model: controller.headingFoldMarkers
+
+                delegate: Item {
+                    required property var modelData
+                    function activate() {
+                        controller.toggleHeadingFoldAt(modelData.position)
+                    }
+                    readonly property string iconName: modelData.collapsed
+                                                        ? root.headingFoldCollapsedIconName
+                                                        : root.headingFoldExpandedIconName
+                    readonly property bool iconValid: foldIcon.valid
+                    readonly property int iconSize: foldIcon.size
+                    readonly property rect headingRectangle:
+                        editor.positionToRectangle(modelData.position)
+                    x: 0
+                    // contentHeight 参与绑定，确保折叠、换行、字号和窗口宽度改变后
+                    // 重新计算标题第一视觉行的位置。
+                    y: Math.round(headingRectangle.y + editor.contentHeight * 0)
+                    width: headingFoldGutter.width
+                    height: Math.max(1, headingRectangle.height)
+
+                    LucideIcon {
+                        id: foldIcon
+                        anchors.centerIn: parent
+                        name: parent.iconName
+                        size: root.headingFoldIconSize
+                        color: modelData.collapsed
+                               ? root.headingFoldCollapsedColor
+                               : root.headingFoldExpandedColor
+                    }
+
+                    MouseArea {
+                        objectName: "headingFoldMarker-" + modelData.position
+                        anchors.fill: parent
+                        acceptedButtons: Qt.LeftButton
+                        cursorShape: Qt.PointingHandCursor
+                        onClicked: parent.activate()
+                    }
+                }
+            }
+        }
+
+        Item {
+            id: headingNavigationHighlightLayer
+            x: editor.x
+            y: editor.y
+            z: 0
+            width: editor.width
+            height: editor.height
+            opacity: root.headingNavigationHighlightAnimationOpacity
+            visible: root.headingNavigationHighlightVisible
+
+            Repeater {
+                model: root.headingNavigationHighlightRectangles
+
+                delegate: Rectangle {
+                    required property var modelData
+                    x: modelData.x
+                    y: modelData.y
+                    width: modelData.width
+                    height: modelData.height
+                    radius: uiConfig.layout.radiusSmall
+                    color: root.themeAccentColor
+                    opacity: root.headingNavigationHighlightOpacity
+                }
+            }
+        }
+
         TextEdit {
             id: editor
             objectName: "scratchText"
+            z: 1
             property int selectionDragPosition: -1
             readonly property rect selectionDragRectangle:
                 selectionDragPosition >= 0
                     ? positionToRectangle(selectionDragPosition)
                     : Qt.rect(0, 0, 0, 0)
-            x: uiConfig.layout.editorPaddingX
+            x: uiConfig.layout.editorPaddingX + root.headingFoldGutterWidth
             y: uiConfig.layout.editorPaddingY
             width: editorViewport.width - uiConfig.layout.editorPaddingX * 2
+                   - root.headingFoldGutterWidth
             height: Math.max(
                 editorViewport.height - uiConfig.layout.editorPaddingY * 2, contentHeight)
             color: root.markdownTextColor
@@ -783,6 +1024,9 @@ Window {
             persistentSelection: true
             activeFocusOnPress: true
             inputMethodHints: Qt.ImhMultiLine
+
+            onWidthChanged: root.refreshHeadingNavigationHighlightGeometry()
+            onContentHeightChanged: root.refreshHeadingNavigationHighlightGeometry()
 
             onCursorRectangleChanged: {
                 // 文档变更期间 QML 会短暂给出过期/无效的光标矩形（如落在

@@ -274,7 +274,16 @@ int main(int argc, char *argv[])
                         initial.value(QStringLiteral("uiConfigFile")).toString())
                  && initial.value(QStringLiteral("commandPaletteMaximumWidth")).toInt() == 620
                  && initial.value(QStringLiteral("historyHoverOpenDelayMs")).toInt() == 100
-                 && initial.value(QStringLiteral("historyHoverCloseDelayMs")).toInt() == 250,
+                 && initial.value(QStringLiteral("historyHoverCloseDelayMs")).toInt() == 250
+                 && qAbs(initial.value(
+                        QStringLiteral("headingNavigationHighlightOpacity")).toDouble() - 0.2)
+                    <= 0.001
+                 && initial.value(
+                        QStringLiteral("headingNavigationHighlightHoldDurationMs")).toInt()
+                    == 400
+                 && initial.value(
+                        QStringLiteral("headingNavigationHighlightFadeDurationMs")).toInt()
+                    == 300,
              initial);
     addCheck(checks, details, QStringLiteral("appearanceDefaults"),
              initial.value(QStringLiteral("theme")).toString() == QStringLiteral("dark")
@@ -296,6 +305,133 @@ int main(int argc, char *argv[])
                   && initial.value(QStringLiteral("selectionDragColor")).toString()
                      == QStringLiteral("#85c7c0"),
              initial);
+
+    const QString headingFoldUiText = QStringLiteral(
+        "# Root\nbody\n## Child\nchild\n# Next\nnext");
+    request(QStringLiteral("testSetText"),
+            {{QStringLiteral("text"), headingFoldUiText}});
+    const int headingFoldBodyCursor =
+        headingFoldUiText.indexOf(QStringLiteral("body")) + 2;
+    request(QStringLiteral("testSetSelection"),
+            {{QStringLiteral("start"), headingFoldBodyCursor},
+             {QStringLiteral("end"), headingFoldBodyCursor}});
+    QThread::msleep(40);
+    const QJsonObject headingFoldExpanded = request(QStringLiteral("status"));
+    const QJsonObject headingFoldClicked = request(
+        QStringLiteral("testClickHeadingFoldMarker"),
+        {{QStringLiteral("position"), 0}});
+    QThread::msleep(40);
+    const QJsonObject headingFoldCollapsed = request(QStringLiteral("status"));
+    const QJsonObject headingFoldCollapsedState = request(
+        QStringLiteral("testHeadingFoldState"));
+    const QJsonObject headingFoldExpandedAgain = request(
+        QStringLiteral("testClickHeadingFoldMarker"),
+        {{QStringLiteral("position"), 0}});
+    QThread::msleep(40);
+    const QJsonObject headingFoldExpandedState = request(
+        QStringLiteral("testHeadingFoldState"));
+    addCheck(checks, details, QStringLiteral("headingFoldGutterPersistentMarkers"),
+             headingFoldExpanded.value(QStringLiteral("headingFoldGutterWidth")).toInt() == 16
+                 && headingFoldExpanded.value(QStringLiteral("headingFoldMarkerCount")).toInt()
+                    == 3
+                 && headingFoldExpanded.value(
+                        QStringLiteral("headingFoldIconSize")).toInt() == 16
+                 && headingFoldExpanded.value(
+                        QStringLiteral("headingFoldExpandedIconName")).toString()
+                    == QStringLiteral("chevron-down")
+                 && headingFoldExpanded.value(
+                        QStringLiteral("headingFoldCollapsedIconName")).toString()
+                    == QStringLiteral("chevron-right")
+                 && headingFoldExpanded.value(
+                        QStringLiteral("headingFoldExpandedColor")).toString()
+                    != headingFoldExpanded.value(QStringLiteral("themeAccentColor")).toString()
+                 && headingFoldExpanded.value(
+                        QStringLiteral("headingFoldCollapsedColor")).toString()
+                    == headingFoldExpanded.value(QStringLiteral("themeAccentColor")).toString(),
+             headingFoldExpanded);
+    addCheck(checks, details, QStringLiteral("headingFoldGutterClickTogglesSection"),
+             headingFoldClicked.value(QStringLiteral("markerFound")).toBool()
+                 && headingFoldClicked.value(QStringLiteral("markerIconName")).toString()
+                    == QStringLiteral("chevron-right")
+                 && headingFoldClicked.value(QStringLiteral("markerIconValid")).toBool()
+                 && headingFoldClicked.value(QStringLiteral("markerIconSize")).toInt() == 16
+                 && headingFoldCollapsedState.value(
+                        QStringLiteral("collapsedHeadingCount")).toInt() == 1
+                 && headingFoldClicked.value(QStringLiteral("cursorPosition")).toInt()
+                    == QStringLiteral("# Root").size()
+                 && headingFoldCollapsed.value(QStringLiteral("headingFoldMarkerCount")).toInt()
+                    == 2
+                 && headingFoldCollapsed.value(
+                        QStringLiteral("editorVisibleContentHeight")).toDouble()
+                    < headingFoldExpanded.value(
+                        QStringLiteral("editorVisibleContentHeight")).toDouble()
+                 && headingFoldExpandedAgain.value(QStringLiteral("markerFound")).toBool()
+                 && headingFoldExpandedAgain.value(QStringLiteral("cursorPosition")).toInt()
+                    == headingFoldBodyCursor
+                 && headingFoldExpandedAgain.value(
+                        QStringLiteral("markerIconName")).toString()
+                    == QStringLiteral("chevron-down")
+                 && headingFoldExpandedAgain.value(
+                        QStringLiteral("markerIconValid")).toBool()
+                 && headingFoldExpandedState.value(
+                        QStringLiteral("collapsedHeadingCount")).toInt() == 0,
+             QJsonObject{{QStringLiteral("expanded"), headingFoldExpanded},
+                         {QStringLiteral("clicked"), headingFoldClicked},
+                         {QStringLiteral("collapsed"), headingFoldCollapsed},
+                         {QStringLiteral("collapsedState"), headingFoldCollapsedState},
+                         {QStringLiteral("expandedAgain"), headingFoldExpandedAgain},
+                         {QStringLiteral("expandedState"), headingFoldExpandedState}});
+
+    const QString navigationHighlightText = QStringLiteral("前言\n  ## ")
+        + QString(120, QLatin1Char('W')) + QStringLiteral("   \nbody");
+    const int navigationHighlightStart =
+        navigationHighlightText.indexOf(QStringLiteral("##"));
+    const int navigationHighlightEnd =
+        navigationHighlightText.indexOf(QStringLiteral("   \n"));
+    request(QStringLiteral("show"));
+    QThread::msleep(180);
+    request(QStringLiteral("testSetText"),
+            {{QStringLiteral("text"), navigationHighlightText}});
+    request(QStringLiteral("testSetSelection"),
+            {{QStringLiteral("start"), 0}, {QStringLiteral("end"), 0}});
+    const QJsonObject navigationHighlighted = execute(QStringLiteral("nextHeading"));
+    QThread::msleep(450);
+    const QJsonObject navigationHighlightFading = request(QStringLiteral("status"));
+    QThread::msleep(350);
+    const QJsonObject navigationHighlightFinished = request(QStringLiteral("status"));
+    const QJsonObject navigationHighlight = navigationHighlighted.value(
+        QStringLiteral("headingNavigationHighlight")).toObject();
+    addCheck(checks, details, QStringLiteral("headingNavigationHighlightVisualFeedback"),
+             navigationHighlight.value(QStringLiteral("start")).toInt()
+                    == navigationHighlightStart
+                 && navigationHighlight.value(QStringLiteral("end")).toInt()
+                    == navigationHighlightEnd
+                 && navigationHighlighted.value(
+                        QStringLiteral("headingNavigationHighlightVisible")).toBool()
+                 && navigationHighlighted.value(
+                        QStringLiteral("headingNavigationHighlightRectCount")).toInt() >= 2
+                 && navigationHighlighted.value(
+                        QStringLiteral("headingNavigationHighlightDrawnBeforeText")).toBool()
+                 && qAbs(navigationHighlighted.value(
+                        QStringLiteral("headingNavigationHighlightEffectiveOpacity")).toDouble()
+                         - 0.2) <= 0.02
+                 && navigationHighlighted.value(
+                        QStringLiteral("headingNavigationHighlightMaxWidth")).toDouble()
+                    < navigationHighlighted.value(QStringLiteral("editorVisibleWidth")).toDouble()
+                 && navigationHighlightFading.value(
+                        QStringLiteral("headingNavigationHighlightEffectiveOpacity")).toDouble()
+                    < 0.2
+                 && navigationHighlightFading.value(
+                        QStringLiteral("headingNavigationHighlightEffectiveOpacity")).toDouble()
+                    > 0.0
+                 && !navigationHighlightFinished.value(
+                        QStringLiteral("headingNavigationHighlightVisible")).toBool(),
+             QJsonObject{{QStringLiteral("started"), navigationHighlighted},
+                         {QStringLiteral("fading"), navigationHighlightFading},
+                         {QStringLiteral("finished"), navigationHighlightFinished}});
+    request(QStringLiteral("hide"));
+    QThread::msleep(180);
+    request(QStringLiteral("testSetText"), {{QStringLiteral("text"), QString()}});
     const QJsonArray initialHints = initial.value(QStringLiteral("statusPanelHints")).toArray();
     const QStringList expectedHints = StatusPanelHints::forMode(false);
     bool hintsMatch = initialHints.size() == expectedHints.size();
@@ -370,6 +506,49 @@ int main(int argc, char *argv[])
                          {QStringLiteral("hidden"), hiddenWindow},
                          {QStringLiteral("parked"), parkedWindow},
                          {QStringLiteral("reopened"), reopenedWindow}});
+
+    const QString headingFoldRenderText = QStringLiteral(
+        "# Root\nMMMMMMMMMMMMMMMMMMMM");
+    request(QStringLiteral("testSetText"),
+            {{QStringLiteral("text"), headingFoldRenderText}});
+    QThread::msleep(40);
+    const QJsonObject headingFoldRenderedExpanded = request(
+        QStringLiteral("testEditorRenderSample"),
+        {{QStringLiteral("position"), 7}, {QStringLiteral("width"), 240}}, 5000);
+    const QJsonObject headingFoldRenderClicked = request(
+        QStringLiteral("testClickHeadingFoldMarker"),
+        {{QStringLiteral("position"), 0}});
+    const QJsonObject headingFoldRenderedCollapsed = request(
+        QStringLiteral("testEditorRenderSample"),
+        {{QStringLiteral("sampleRect"),
+          headingFoldRenderedExpanded.value(QStringLiteral("sampleRect"))}}, 5000);
+    const QJsonObject headingFoldRenderExpandedAgain = request(
+        QStringLiteral("testClickHeadingFoldMarker"),
+        {{QStringLiteral("position"), 0}});
+    const QJsonObject headingFoldRenderedRestored = request(
+        QStringLiteral("testEditorRenderSample"),
+        {{QStringLiteral("sampleRect"),
+          headingFoldRenderedExpanded.value(QStringLiteral("sampleRect"))}}, 5000);
+    addCheck(checks, details, QStringLiteral("headingFoldRepaintsNextFrame"),
+             headingFoldRenderClicked.value(QStringLiteral("markerFound")).toBool()
+                 && headingFoldRenderExpandedAgain.value(QStringLiteral("markerFound")).toBool()
+                 && headingFoldRenderedExpanded.value(
+                        QStringLiteral("nonSurfacePixelCount")).toInt() > 30
+                 && headingFoldRenderedCollapsed.value(
+                        QStringLiteral("nonSurfacePixelCount")).toInt() <= 2
+                 && headingFoldRenderedRestored.value(
+                        QStringLiteral("nonSurfacePixelCount")).toInt() > 30
+                 && !headingFoldRenderedExpanded.value(
+                        QStringLiteral("historyPanelOpen")).toBool()
+                 && !headingFoldRenderedCollapsed.value(
+                        QStringLiteral("historyPanelOpen")).toBool()
+                 && headingFoldRenderedExpanded.value(
+                        QStringLiteral("editorVisibleWidth")).toDouble()
+                    == headingFoldRenderedCollapsed.value(
+                        QStringLiteral("editorVisibleWidth")).toDouble(),
+             QJsonObject{{QStringLiteral("expanded"), headingFoldRenderedExpanded},
+                         {QStringLiteral("collapsed"), headingFoldRenderedCollapsed},
+                         {QStringLiteral("restored"), headingFoldRenderedRestored}});
 
     // 轻量关闭动画（形状收缩）期间，短文本无滚动范围时不得闪现右侧滚动条：
     // 可见性此前依赖 60ms 防抖快照，动画期间视口高度逐帧收缩而快照停滞，
@@ -597,6 +776,24 @@ int main(int argc, char *argv[])
                          {QStringLiteral("applied"), animOffApplied},
                          {QStringLiteral("status"), animOffStatus}});
 
+    const QString animationOffHeadingText = QStringLiteral("plain\n# target\nbody");
+    request(QStringLiteral("testSetText"),
+            {{QStringLiteral("text"), animationOffHeadingText}});
+    request(QStringLiteral("testSetSelection"),
+            {{QStringLiteral("start"), 0}, {QStringLiteral("end"), 0}});
+    const QJsonObject animationOffHighlightStarted = execute(QStringLiteral("nextHeading"));
+    QThread::msleep(420);
+    const QJsonObject animationOffHighlightFinished = request(QStringLiteral("status"));
+    addCheck(checks, details, QStringLiteral("headingNavigationHighlightFadeDisabledIsImmediate"),
+             animationOffHighlightStarted.value(
+                    QStringLiteral("headingNavigationHighlightFadeDurationMs")).toInt() == 0
+                 && animationOffHighlightStarted.value(
+                        QStringLiteral("headingNavigationHighlightVisible")).toBool()
+                 && !animationOffHighlightFinished.value(
+                        QStringLiteral("headingNavigationHighlightVisible")).toBool(),
+             QJsonObject{{QStringLiteral("started"), animationOffHighlightStarted},
+                         {QStringLiteral("finished"), animationOffHighlightFinished}});
+
     const QJsonObject opened = execute(QStringLiteral("settings"));
     addCheck(checks, details, QStringLiteral("lazySettingsPage"),
              !initial.value(QStringLiteral("settingsPageLoaded")).toBool()
@@ -786,6 +983,53 @@ int main(int argc, char *argv[])
     addCheck(checks, details, QStringLiteral("historyPanelCornerShapeOpen"),
              hasHistoryPanelCornerShape(wideHistory),
              historyPanelCornerDetails(wideHistory));
+    const double titleXDiff = qAbs(
+        wideHistory.value(QStringLiteral("historyTitleX")).toDouble()
+        - wideHistory.value(QStringLiteral("headerTitleX")).toDouble());
+    const double titleYDiff = qAbs(
+        wideHistory.value(QStringLiteral("historyTitleY")).toDouble()
+        - wideHistory.value(QStringLiteral("headerTitleY")).toDouble());
+    addCheck(checks, details, QStringLiteral("historyTitleMatchesEditorTitle"),
+             titleXDiff <= 0.5 && titleYDiff <= 0.5,
+             QJsonObject{{QStringLiteral("actual"),
+                          QJsonObject{{QStringLiteral("x"),
+                                       wideHistory.value(QStringLiteral("historyTitleX"))},
+                                      {QStringLiteral("y"),
+                                       wideHistory.value(QStringLiteral("historyTitleY"))}}},
+                         {QStringLiteral("expected"),
+                          QJsonObject{{QStringLiteral("x"),
+                                       wideHistory.value(QStringLiteral("headerTitleX"))},
+                                      {QStringLiteral("y"),
+                                       wideHistory.value(QStringLiteral("headerTitleY"))}}},
+                         {QStringLiteral("diff"),
+                          QJsonObject{{QStringLiteral("x"), titleXDiff},
+                                      {QStringLiteral("y"), titleYDiff}}}});
+    const double searchTopDiff = qAbs(
+        wideHistory.value(QStringLiteral("historySearchFrameY")).toDouble()
+        - wideHistory.value(QStringLiteral("editorViewportY")).toDouble());
+    addCheck(checks, details, QStringLiteral("historySearchMatchesEditorTop"),
+             searchTopDiff <= 0.5,
+             QJsonObject{{QStringLiteral("actual"),
+                          wideHistory.value(QStringLiteral("historySearchFrameY"))},
+                         {QStringLiteral("expected"),
+                          wideHistory.value(QStringLiteral("editorViewportY"))},
+                         {QStringLiteral("diff"), searchTopDiff}});
+    const double listGap =
+        wideHistory.value(QStringLiteral("historyListY")).toDouble()
+        - wideHistory.value(QStringLiteral("historySearchFrameY")).toDouble()
+        - wideHistory.value(QStringLiteral("historySearchFrameHeight")).toDouble();
+    addCheck(checks, details, QStringLiteral("historyListKeepsSearchGap"),
+             qAbs(listGap - 8.0) <= 0.5,
+             QJsonObject{{QStringLiteral("actual"), listGap},
+                         {QStringLiteral("expected"), 8}});
+    const double footerGap =
+        wideHistory.value(QStringLiteral("historyDeleteButtonY")).toDouble()
+        - wideHistory.value(QStringLiteral("historyListY")).toDouble()
+        - wideHistory.value(QStringLiteral("historyListHeight")).toDouble();
+    addCheck(checks, details, QStringLiteral("historyListKeepsFooterGap"),
+             qAbs(footerGap - 10.0) <= 0.5,
+             QJsonObject{{QStringLiteral("actual"), footerGap},
+                         {QStringLiteral("expected"), 10}});
 
     // 动画开启、历史面板打开（推挤模式）时缩放：编辑区必须即时跟随窗口边缘，
     // 不允许 x/width 的 Behavior 逐帧重启动画造成滞后追赶（修复前 30ms 处差值约 20px）。
@@ -948,6 +1192,34 @@ int main(int argc, char *argv[])
                          - 200.0) < 1.0
                  && narrowHistory.value(QStringLiteral("editorVisibleWidth")).toDouble() >= 320.0,
              narrowHistory);
+    const double overlayTitleXDiff = qAbs(
+        narrowHistory.value(QStringLiteral("historyTitleX")).toDouble()
+        - narrowHistory.value(QStringLiteral("headerTitleX")).toDouble());
+    const double overlayTitleYDiff = qAbs(
+        narrowHistory.value(QStringLiteral("historyTitleY")).toDouble()
+        - narrowHistory.value(QStringLiteral("headerTitleY")).toDouble());
+    addCheck(checks, details, QStringLiteral("historyTitleAlignmentPersistsInOverlay"),
+             overlayTitleXDiff <= 0.5 && overlayTitleYDiff <= 0.5,
+             QJsonObject{{QStringLiteral("actual"),
+                          QJsonObject{{QStringLiteral("x"),
+                                       narrowHistory.value(QStringLiteral("historyTitleX"))},
+                                      {QStringLiteral("y"),
+                                       narrowHistory.value(QStringLiteral("historyTitleY"))}}},
+                         {QStringLiteral("expected"),
+                          QJsonObject{{QStringLiteral("x"),
+                                       narrowHistory.value(QStringLiteral("headerTitleX"))},
+                                      {QStringLiteral("y"),
+                                       narrowHistory.value(QStringLiteral("headerTitleY"))}}}});
+    const double overlaySearchTopDiff = qAbs(
+        narrowHistory.value(QStringLiteral("historySearchFrameY")).toDouble()
+        - narrowHistory.value(QStringLiteral("editorViewportY")).toDouble());
+    addCheck(checks, details, QStringLiteral("historySearchAlignmentPersistsInOverlay"),
+             overlaySearchTopDiff <= 0.5,
+             QJsonObject{{QStringLiteral("actual"),
+                          narrowHistory.value(QStringLiteral("historySearchFrameY"))},
+                         {QStringLiteral("expected"),
+                          narrowHistory.value(QStringLiteral("editorViewportY"))},
+                         {QStringLiteral("diff"), overlaySearchTopDiff}});
     historyAction(QStringLiteral("historyClose"));
     historyAction(QStringLiteral("historyHoverTriggerEnter"));
     QThread::msleep(60);

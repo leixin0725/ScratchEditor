@@ -29,6 +29,8 @@ qt_add_executable(ScratchEditor WIN32
     src/externalfilesession.h
     src/editorcommandregistry.cpp
     src/editorcommandregistry.h
+    src/headingfoldmanager.cpp
+    src/headingfoldmanager.h
     src/markdownhighlighter.cpp
     src/markdownhighlighter.h
     src/markdownstyle.cpp
@@ -74,8 +76,11 @@ qt_add_qml_module(ScratchEditor
         qml/ClipboardHistoryPanel.qml
         qml/CommandPalette.qml
         qml/FindPanel.qml
+        qml/LucideIcon.qml
         qml/Main.qml
         qml/SettingsPage.qml
+    DEPENDENCIES
+        QtQuick.Shapes
 )
 
 target_link_libraries(ScratchEditor PRIVATE
