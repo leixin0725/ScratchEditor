@@ -5,6 +5,8 @@
 
 ## 更新记录
 
+- `2026-08-22`：新增 Markdown 标题层级折叠、常驻折叠标记与上一个/下一个标题导航，
+  实现与验收边界见 [`archive/013-heading-folding-navigation/`](archive/013-heading-folding-navigation/)。
 - `2026-08-21`：Markdown 引用块新增行首 `>` 自动补空格、全角 `》` 转换、普通/Shift Enter
   续行、多层空引用逐层退出及引用头一次退格删除；同时修复列表自动续行撤销后光标可能跳到文档开头的问题，见根目录
   [`README.md`](../README.md#编辑快捷键) 的“编辑快捷键”。
@@ -74,6 +76,8 @@
 - [`archive/001-external-editor/extension-plan.md`](archive/001-external-editor/extension-plan.md)：外部编辑器瞬态文件模式的扩展计划与验收标准。
 - [`archive/010-clipboard-history-coordinator/`](archive/010-clipboard-history-coordinator/)：
   剪贴板历史协调器的职责边界、兼容约束与验证记录。
+- [`archive/013-heading-folding-navigation/`](archive/013-heading-folding-navigation/)：
+  Markdown 标题折叠、常驻标记、标题导航与隐藏命中自动展开的实现和验收记录。
 
 历史验收的机器可读证据统一保存在 [`../artifacts/baselines/`](../artifacts/baselines/)。
 中间调优结果在本地 `artifacts/archive/` 中保留，但不进入版本控制。
