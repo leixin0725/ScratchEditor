@@ -428,6 +428,49 @@ int main(int argc, char *argv[])
                          {QStringLiteral("parked"), parkedWindow},
                          {QStringLiteral("reopened"), reopenedWindow}});
 
+    const QString headingFoldRenderText = QStringLiteral(
+        "# Root\nMMMMMMMMMMMMMMMMMMMM");
+    request(QStringLiteral("testSetText"),
+            {{QStringLiteral("text"), headingFoldRenderText}});
+    QThread::msleep(40);
+    const QJsonObject headingFoldRenderedExpanded = request(
+        QStringLiteral("testEditorRenderSample"),
+        {{QStringLiteral("position"), 7}, {QStringLiteral("width"), 240}}, 5000);
+    const QJsonObject headingFoldRenderClicked = request(
+        QStringLiteral("testClickHeadingFoldMarker"),
+        {{QStringLiteral("position"), 0}});
+    const QJsonObject headingFoldRenderedCollapsed = request(
+        QStringLiteral("testEditorRenderSample"),
+        {{QStringLiteral("sampleRect"),
+          headingFoldRenderedExpanded.value(QStringLiteral("sampleRect"))}}, 5000);
+    const QJsonObject headingFoldRenderExpandedAgain = request(
+        QStringLiteral("testClickHeadingFoldMarker"),
+        {{QStringLiteral("position"), 0}});
+    const QJsonObject headingFoldRenderedRestored = request(
+        QStringLiteral("testEditorRenderSample"),
+        {{QStringLiteral("sampleRect"),
+          headingFoldRenderedExpanded.value(QStringLiteral("sampleRect"))}}, 5000);
+    addCheck(checks, details, QStringLiteral("headingFoldRepaintsNextFrame"),
+             headingFoldRenderClicked.value(QStringLiteral("markerFound")).toBool()
+                 && headingFoldRenderExpandedAgain.value(QStringLiteral("markerFound")).toBool()
+                 && headingFoldRenderedExpanded.value(
+                        QStringLiteral("nonSurfacePixelCount")).toInt() > 30
+                 && headingFoldRenderedCollapsed.value(
+                        QStringLiteral("nonSurfacePixelCount")).toInt() <= 2
+                 && headingFoldRenderedRestored.value(
+                        QStringLiteral("nonSurfacePixelCount")).toInt() > 30
+                 && !headingFoldRenderedExpanded.value(
+                        QStringLiteral("historyPanelOpen")).toBool()
+                 && !headingFoldRenderedCollapsed.value(
+                        QStringLiteral("historyPanelOpen")).toBool()
+                 && headingFoldRenderedExpanded.value(
+                        QStringLiteral("editorVisibleWidth")).toDouble()
+                    == headingFoldRenderedCollapsed.value(
+                        QStringLiteral("editorVisibleWidth")).toDouble(),
+             QJsonObject{{QStringLiteral("expanded"), headingFoldRenderedExpanded},
+                         {QStringLiteral("collapsed"), headingFoldRenderedCollapsed},
+                         {QStringLiteral("restored"), headingFoldRenderedRestored}});
+
     // 轻量关闭动画（形状收缩）期间，短文本无滚动范围时不得闪现右侧滚动条：
     // 可见性此前依赖 60ms 防抖快照，动画期间视口高度逐帧收缩而快照停滞，
     // 修复后可见性实时跟随 contentHeight。轮询采样，直到捕获一个几何已收缩

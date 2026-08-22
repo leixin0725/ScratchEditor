@@ -48,6 +48,7 @@ private:
     void rebuild();
     void makeAllBlocksVisible();
     void applyVisibility();
+    bool invalidateEditorRendering();
     void ensureCursorVisible();
     void updateMarkers();
     int currentHeadingIndex() const;
@@ -64,4 +65,5 @@ private:
     int m_visibleEndPosition = 0;
     bool m_rebuildQueued = false;
     bool m_applyingVisibility = false;
+    bool m_renderInvalidationWarningIssued = false;
 };

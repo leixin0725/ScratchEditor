@@ -11,6 +11,7 @@
 #include <QPointer>
 #include <QPointF>
 #include <QRect>
+#include <QRectF>
 #include <QObject>
 #include <QString>
 #include <QStringList>
@@ -237,6 +238,9 @@ private:
                         const QString &requestId, const QJsonObject &request);
     void waitForNextFrame(QLocalSocket *socket, QJsonObject response, qint64 startedNs,
                           const QString &requestId);
+    void captureEditorRenderSample(QLocalSocket *socket, QJsonObject response,
+                                   const QRectF &editorLocalRect, qint64 startedNs,
+                                   const QString &requestId);
     bool commitAndHide(bool deliverAfterHide = false, bool persistState = true);
     bool commitExternalFileAndExit();
     void setExternalFileState(bool healthy, const QString &message);

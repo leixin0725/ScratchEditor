@@ -5,6 +5,7 @@
 
 ## 更新记录
 
+- `2026-08-22`：修复标题折叠状态已变化但编辑区画面未实时刷新的问题；Qt Quick 文本尺寸和场景图节点现随 block 可见性同步失效，`window-ui` 新增不改变历史栏或编辑器宽度的下一帧像素回归检查。
 - `2026-08-22`：新增 Markdown 标题层级折叠、常驻折叠标记与上一个/下一个标题导航，
   实现与验收边界见 [`archive/013-heading-folding-navigation/`](archive/013-heading-folding-navigation/)。
 - `2026-08-21`：Markdown 引用块新增行首 `>` 自动补空格、全角 `》` 转换、普通/Shift Enter

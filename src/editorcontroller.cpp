@@ -1779,6 +1779,41 @@ void EditorController::buildCommandHandlers()
             response.insert(QStringLiteral("markerFound"), invoked && markerResult.toBool());
             sendResponse(r.socket, response, r.startedNs, r.requestId);
         }}},
+        {QStringLiteral("testEditorRenderSample"), {Gate::Test, [this](const DispatchRequest &r) {
+            QRectF sampleRect;
+            const QJsonObject requestedRect =
+                r.request.value(QStringLiteral("sampleRect")).toObject();
+            if (!requestedRect.isEmpty()) {
+                sampleRect = QRectF(requestedRect.value(QStringLiteral("x")).toDouble(),
+                                    requestedRect.value(QStringLiteral("y")).toDouble(),
+                                    requestedRect.value(QStringLiteral("width")).toDouble(),
+                                    requestedRect.value(QStringLiteral("height")).toDouble());
+            } else {
+                QRectF positionRect;
+                const int position = r.request.value(QStringLiteral("position")).toInt();
+                const bool invoked = m_editor && QMetaObject::invokeMethod(
+                    m_editor, "positionToRectangle", Qt::DirectConnection,
+                    Q_RETURN_ARG(QRectF, positionRect), Q_ARG(int, position));
+                if (!invoked || !positionRect.isValid()) {
+                    sendError(r.socket, r.command, QStringLiteral("editor position unavailable"),
+                              r.startedNs, r.requestId);
+                    return;
+                }
+                sampleRect = QRectF(positionRect.x(), positionRect.y(),
+                                    r.request.value(QStringLiteral("width")).toDouble(240.0),
+                                    positionRect.height());
+            }
+
+            if (!sampleRect.isValid()) {
+                sendError(r.socket, r.command, QStringLiteral("invalid sample rectangle"),
+                          r.startedNs, r.requestId);
+                return;
+            }
+            QJsonObject response;
+            response.insert(QStringLiteral("command"), r.command);
+            captureEditorRenderSample(r.socket, response, sampleRect,
+                                      r.startedNs, r.requestId);
+        }}},
         {QStringLiteral("testHighlightSummary"), {Gate::Test, [this](const DispatchRequest &r) {
             int blocks = 0;
             int formattedRanges = 0;
@@ -2030,6 +2065,87 @@ void EditorController::waitForNextFrame(QLocalSocket *socket, QJsonObject respon
                 } else {
                     finish();
                 }
+            }, Qt::SingleShotConnection);
+    m_window->update();
+}
+
+void EditorController::captureEditorRenderSample(QLocalSocket *socket, QJsonObject response,
+                                                 const QRectF &editorLocalRect,
+                                                 qint64 startedNs,
+                                                 const QString &requestId)
+{
+    auto *editorItem = qobject_cast<QQuickItem *>(m_editor.data());
+    if (!m_window || !editorItem) {
+        sendError(socket, response.value(QStringLiteral("command")).toString(),
+                  QStringLiteral("editor unavailable"), startedNs, requestId);
+        return;
+    }
+
+    const QRectF sceneRect(editorItem->mapToScene(editorLocalRect.topLeft()),
+                           editorItem->mapToScene(editorLocalRect.bottomRight()));
+    QPointer<QLocalSocket> guardedSocket(socket);
+    connect(m_window, &QQuickWindow::frameSwapped, this,
+            [this, guardedSocket, response, editorLocalRect, sceneRect,
+             startedNs, requestId]() mutable {
+                QTimer::singleShot(0, this,
+                    [this, guardedSocket, response, editorLocalRect, sceneRect,
+                     startedNs, requestId]() mutable {
+                        if (!m_window) {
+                            sendError(guardedSocket,
+                                      response.value(QStringLiteral("command")).toString(),
+                                      QStringLiteral("window unavailable"),
+                                      startedNs, requestId);
+                            return;
+                        }
+                        const QImage image = m_window->grabWindow();
+                        if (image.isNull() || m_window->width() <= 0 || m_window->height() <= 0) {
+                            sendError(guardedSocket,
+                                      response.value(QStringLiteral("command")).toString(),
+                                      QStringLiteral("window capture failed"),
+                                      startedNs, requestId);
+                            return;
+                        }
+
+                        const qreal scaleX = static_cast<qreal>(image.width()) / m_window->width();
+                        const qreal scaleY = static_cast<qreal>(image.height()) / m_window->height();
+                        const QRect pixelRect = QRectF(sceneRect.x() * scaleX,
+                                                       sceneRect.y() * scaleY,
+                                                       sceneRect.width() * scaleX,
+                                                       sceneRect.height() * scaleY)
+                                                    .toAlignedRect()
+                                                    .intersected(image.rect());
+                        const QColor surfaceColor(
+                            m_window->property("themeEditorSurfaceColor").toString());
+                        int nonSurfacePixelCount = 0;
+                        for (int y = pixelRect.top(); y <= pixelRect.bottom(); ++y) {
+                            for (int x = pixelRect.left(); x <= pixelRect.right(); ++x) {
+                                const QColor pixel = image.pixelColor(x, y);
+                                const int channelDistance = std::max(
+                                    {qAbs(pixel.red() - surfaceColor.red()),
+                                     qAbs(pixel.green() - surfaceColor.green()),
+                                     qAbs(pixel.blue() - surfaceColor.blue())});
+                                if (channelDistance > 8) {
+                                    ++nonSurfacePixelCount;
+                                }
+                            }
+                        }
+
+                        response.insert(QStringLiteral("sampleRect"), QJsonObject{
+                            {QStringLiteral("x"), editorLocalRect.x()},
+                            {QStringLiteral("y"), editorLocalRect.y()},
+                            {QStringLiteral("width"), editorLocalRect.width()},
+                            {QStringLiteral("height"), editorLocalRect.height()}});
+                        response.insert(QStringLiteral("samplePixelCount"),
+                                        pixelRect.width() * pixelRect.height());
+                        response.insert(QStringLiteral("nonSurfacePixelCount"),
+                                        nonSurfacePixelCount);
+                        const QJsonObject status = statusObject();
+                        response.insert(QStringLiteral("editorVisibleWidth"),
+                                        status.value(QStringLiteral("editorVisibleWidth")));
+                        response.insert(QStringLiteral("historyPanelOpen"),
+                                        status.value(QStringLiteral("historyPanelOpen")));
+                        sendResponse(guardedSocket, response, startedNs, requestId);
+                    });
             }, Qt::SingleShotConnection);
     m_window->update();
 }

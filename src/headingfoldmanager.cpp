@@ -1,5 +1,6 @@
 #include "headingfoldmanager.h"
 
+#include <QDebug>
 #include <QMetaObject>
 #include <QRegularExpression>
 #include <QTextBlock>
@@ -72,6 +73,7 @@ void HeadingFoldManager::setEditor(QObject *editor, QTextDocument *document)
     m_markers.clear();
     m_visibleEndPosition = 0;
     m_rebuildQueued = false;
+    m_renderInvalidationWarningIssued = false;
     if (m_document) {
         connect(m_document.data(), &QTextDocument::contentsChanged,
                 this, &HeadingFoldManager::scheduleRebuild);
@@ -90,8 +92,8 @@ void HeadingFoldManager::reset()
         if (HeadingFoldBlockData *data = foldData(block)) {
             data->collapsed = false;
         }
-        block.setVisible(true);
     }
+    makeAllBlocksVisible();
     rebuild();
 }
 
@@ -333,10 +335,17 @@ void HeadingFoldManager::makeAllBlocksVisible()
     if (!m_document) {
         return;
     }
+    bool visibilityChanged = false;
     for (QTextBlock block = m_document->begin(); block.isValid(); block = block.next()) {
-        block.setVisible(true);
+        if (!block.isVisible()) {
+            block.setVisible(true);
+            visibilityChanged = true;
+        }
     }
-    m_document->markContentsDirty(0, m_document->characterCount());
+    if (visibilityChanged) {
+        m_document->markContentsDirty(0, m_document->characterCount());
+        invalidateEditorRendering();
+    }
 }
 
 void HeadingFoldManager::applyVisibility()
@@ -372,6 +381,7 @@ void HeadingFoldManager::applyVisibility()
     }
     if (visibilityChanged) {
         m_document->markContentsDirty(0, m_document->characterCount());
+        invalidateEditorRendering();
     }
     m_applyingVisibility = false;
     ensureCursorVisible();
@@ -382,6 +392,45 @@ void HeadingFoldManager::applyVisibility()
     if (visibleEndChanged && previousMarkers == m_markers) {
         emit markersChanged();
     }
+}
+
+bool HeadingFoldManager::invalidateEditorRendering()
+{
+    if (!m_editor) {
+        return false;
+    }
+
+    // QTextBlock 可见性不会触发 QQuickTextEdit 的 contentsChange 或 geometryChange
+    // 路径。Qt 6.10.2 需要同时刷新文档尺寸和全部文本节点；通过元对象调用可
+    // 将固定版本的私有实现依赖限制在这里，避免引入 QuickPrivate 构建依赖。
+    constexpr const char *slotSignatures[] = {
+        "q_invalidate()", "updateSize()", "updateWholeDocument()"
+    };
+    for (const char *signature : slotSignatures) {
+        if (m_editor->metaObject()->indexOfSlot(signature) >= 0) {
+            continue;
+        }
+        if (!m_renderInvalidationWarningIssued) {
+            qWarning() << "Heading folding could not invalidate the Qt Quick text renderer";
+            m_renderInvalidationWarningIssued = true;
+        }
+        return false;
+    }
+
+    const bool invalidated = QMetaObject::invokeMethod(
+        m_editor, "q_invalidate", Qt::DirectConnection);
+    const bool sizeUpdated = QMetaObject::invokeMethod(
+        m_editor, "updateSize", Qt::DirectConnection);
+    const bool documentUpdated = QMetaObject::invokeMethod(
+        m_editor, "updateWholeDocument", Qt::DirectConnection);
+    if (invalidated && sizeUpdated && documentUpdated) {
+        return true;
+    }
+    if (!m_renderInvalidationWarningIssued) {
+        qWarning() << "Heading folding could not invalidate the Qt Quick text renderer";
+        m_renderInvalidationWarningIssued = true;
+    }
+    return false;
 }
 
 void HeadingFoldManager::ensureCursorVisible()
