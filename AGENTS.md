@@ -70,6 +70,7 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\run-editing-te
     git worktree add -b 007-demo "D:\_Dev\ScratchEditor-worktrees\007-demo" main
     New-Item -ItemType Junction -Path "D:\_Dev\ScratchEditor-worktrees\007-demo\.tools" -Target "D:\_Dev\ScratchEditor\.tools"
     ```
-12. **重大功能收尾批准、合并与部署**：重大功能开发和验证完成后，必须先向用户申请一次集中批准，明确列出归档 tag、非快进合并、安全移除 worktree、删除已合并分支和部署合并版本的整套收尾操作；获批后可连续完成当次已列明的流程，无需逐项重复申请，未获批准不得执行其中任何一步。批准后先在分支最终提交打轻量 tag `archive/NNN-<名>`（如 `git tag archive/007-demo 007-demo`），再在 `main` 上非快进合并，提交信息固定为 `merge: 合并<中文功能名>（NNN-<名>）`（如 `git merge --no-ff -m "merge: 合并示例功能（007-demo）" 007-demo`）；同时把已完结功能的需求文档移入 `docs/archive/` 并更新 `docs/README.md` 索引。集中批准不包含 `git push`，也不构成未来收尾操作的永久授权。
-13. **分支删除与 tag 保留**：仅在规则 12 的当次集中批准范围内，且合并完成、`archive/` tag 已打后，先按规则 10 移除对应 worktree，再用 `git branch -d <分支名>` 删除分支；若 `-d` 拒绝删除，停止并向用户确认，禁止用 `-D` 强删。`archive/` tag 永久保留作为回溯依据。
+**注意：worktree统一存储的位置为`D:\_Dev\ScratchEditor-worktrees`。**
+12.  **重大功能收尾批准、合并与部署**：重大功能开发和验证完成后，必须先向用户申请一次集中批准，明确列出归档 tag、非快进合并、安全移除 worktree、删除已合并分支和部署合并版本的整套收尾操作；获批后可连续完成当次已列明的流程，无需逐项重复申请，未获批准不得执行其中任何一步。批准后先在分支最终提交打轻量 tag `archive/NNN-<名>`（如 `git tag archive/007-demo 007-demo`），再在 `main` 上非快进合并，提交信息固定为 `merge: 合并<中文功能名>（NNN-<名>）`（如 `git merge --no-ff -m "merge: 合并示例功能（007-demo）" 007-demo`）；同时把已完结功能的需求文档移入 `docs/archive/` 并更新 `docs/README.md` 索引。集中批准不包含 `git push`，也不构成未来收尾操作的永久授权。
+13.  **分支删除与 tag 保留**：仅在规则 12 的当次集中批准范围内，且合并完成、`archive/` tag 已打后，先按规则 10 移除对应 worktree，再用 `git branch -d <分支名>` 删除分支；若 `-d` 拒绝删除，停止并向用户确认，禁止用 `-D` 强删。`archive/` tag 永久保留作为回溯依据。
 14. **`.tools` 不被删除（结果导向硬性规则）**：除非有意，任何行为不得导致 `.tools` 被删除（目录或其中内容）。“有意”仅指为满足构建需要对 `.tools` 内文件进行删改（如 `scripts/restore-toolchain.ps1` 替换工具链），以及规则 10 中受控脚本对 worktree `.tools` 联接的解除；绝对禁止任何意外删除，包括对含共享联接的 worktree 执行递归删除、`git clean` 类清理、绕过脚本的 `git worktree remove`，以及其他可能沿 junction 波及共享工具链的操作。删除目标不明、`.tools` 状态异常或脚本拒绝执行时，停止并向用户确认，不得自行清理。
