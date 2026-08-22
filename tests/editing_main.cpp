@@ -936,6 +936,7 @@ int main(int argc, char *argv[])
     const int headingC = headingTree.indexOf(QStringLiteral("### C"));
     const int headingD = headingTree.indexOf(QStringLiteral("# D"));
     const int bodyA = headingTree.indexOf(QStringLiteral("A body"));
+    const int headingAEnd = headingA + QStringLiteral("# A").size();
 
     setTextAndSelection(headingTree, bodyA + 2, bodyA + 2);
     const QJsonObject foldedCurrent = execute(QStringLiteral("foldCurrentHeading"));
@@ -945,7 +946,7 @@ int main(int argc, char *argv[])
     addCheck(checks, details, QStringLiteral("foldCurrentHeadingFromBody"),
              foldedCurrent.value(QStringLiteral("executed")).toBool()
                  && foldedCurrent.value(QStringLiteral("text")).toString() == headingTree
-                 && foldedCurrent.value(QStringLiteral("cursorPosition")).toInt() == headingA
+                 && foldedCurrent.value(QStringLiteral("cursorPosition")).toInt() == headingAEnd
                  && foldedCurrentVisible
                     == QJsonArray{QStringLiteral("前言"), QStringLiteral("# A"),
                                   QStringLiteral("# D"), QStringLiteral("D body")},
@@ -956,6 +957,7 @@ int main(int argc, char *argv[])
     const QJsonObject unfoldedCurrentState = headingFoldState();
     addCheck(checks, details, QStringLiteral("unfoldCurrentHeading"),
              unfoldedCurrent.value(QStringLiteral("executed")).toBool()
+                 && unfoldedCurrent.value(QStringLiteral("cursorPosition")).toInt() == bodyA + 2
                  && unfoldedCurrentState.value(QStringLiteral("visibleBlockTexts")).toArray()
                     == QJsonArray{QStringLiteral("前言"), QStringLiteral("# A"),
                                   QStringLiteral("A body"), QStringLiteral("## B"),
@@ -975,7 +977,7 @@ int main(int argc, char *argv[])
                     == QJsonArray{QStringLiteral("前言"), QStringLiteral("# A"),
                                   QStringLiteral("# D")}
                  && foldedAllState.value(QStringLiteral("collapsedHeadingCount")).toInt() == 4
-                 && foldedAll.value(QStringLiteral("cursorPosition")).toInt() == headingA,
+                 && foldedAll.value(QStringLiteral("cursorPosition")).toInt() == headingAEnd,
              foldedAllState);
     addCheck(checks, details, QStringLiteral("headingFoldGutterContract"),
              foldedAllUi.value(QStringLiteral("headingFoldGutterWidth")).toInt() == 16
@@ -990,11 +992,23 @@ int main(int argc, char *argv[])
                     == foldedAllUi.value(QStringLiteral("themeAccentColor")).toString(),
              foldedAllUi);
 
+    const QJsonObject restoredAll = execute(QStringLiteral("unfoldAllHeadings"));
+    addCheck(checks, details, QStringLiteral("unfoldAllRestoresBodyCursor"),
+             restoredAll.value(QStringLiteral("cursorPosition")).toInt() == bodyA + 2,
+             restoredAll);
+    execute(QStringLiteral("foldAllHeadings"));
+
     const QJsonObject nextHiddenHeading = execute(QStringLiteral("nextHeading"));
     const QJsonObject afterHiddenNavigation = headingFoldState();
+    const QJsonObject firstNavigationHighlight =
+        nextHiddenHeading.value(QStringLiteral("headingNavigationHighlight")).toObject();
     addCheck(checks, details, QStringLiteral("headingNavigationRevealsAncestors"),
              nextHiddenHeading.value(QStringLiteral("executed")).toBool()
                  && nextHiddenHeading.value(QStringLiteral("cursorPosition")).toInt() == headingB
+                 && firstNavigationHighlight.value(QStringLiteral("start")).toInt() == headingB
+                 && firstNavigationHighlight.value(QStringLiteral("end")).toInt()
+                    == headingB + QStringLiteral("## B").size()
+                 && firstNavigationHighlight.value(QStringLiteral("revision")).toInt() > 0
                  && afterHiddenNavigation.value(QStringLiteral("visibleBlockTexts")).toArray()
                     == QJsonArray{QStringLiteral("前言"), QStringLiteral("# A"),
                                   QStringLiteral("A body"), QStringLiteral("## B"),
@@ -1003,11 +1017,16 @@ int main(int argc, char *argv[])
                          {QStringLiteral("state"), afterHiddenNavigation}});
 
     const QJsonObject nextNestedHeading = execute(QStringLiteral("nextHeading"));
+    const QJsonObject secondNavigationHighlight =
+        nextNestedHeading.value(QStringLiteral("headingNavigationHighlight")).toObject();
     const QJsonObject previousNestedHeading = execute(QStringLiteral("previousHeading"));
     const QJsonObject unfoldedAll = execute(QStringLiteral("unfoldAllHeadings"));
     const QJsonObject unfoldedAllState = headingFoldState();
     addCheck(checks, details, QStringLiteral("headingNavigationAndUnfoldAll"),
              nextNestedHeading.value(QStringLiteral("cursorPosition")).toInt() == headingC
+                 && secondNavigationHighlight.value(QStringLiteral("start")).toInt() == headingC
+                 && secondNavigationHighlight.value(QStringLiteral("revision")).toInt()
+                    > firstNavigationHighlight.value(QStringLiteral("revision")).toInt()
                  && previousNestedHeading.value(QStringLiteral("cursorPosition")).toInt()
                     == headingB
                  && unfoldedAll.value(QStringLiteral("executed")).toBool()
@@ -1016,6 +1035,46 @@ int main(int argc, char *argv[])
              QJsonObject{{QStringLiteral("next"), nextNestedHeading},
                          {QStringLiteral("previous"), previousNestedHeading},
                          {QStringLiteral("unfoldAll"), unfoldedAllState}});
+
+    const QString indentedHeadingTree = QStringLiteral(
+        "  ## Child title   \nbody\n# Next\nnext");
+    const int indentedHeadingStart = indentedHeadingTree.indexOf(QStringLiteral("##"));
+    const int indentedHeadingEnd = indentedHeadingTree.indexOf(QStringLiteral("   \n"));
+    const int indentedNext = indentedHeadingTree.indexOf(QStringLiteral("# Next"));
+    setTextAndSelection(indentedHeadingTree, indentedNext, indentedNext);
+    const QJsonObject previousIndented = execute(QStringLiteral("previousHeading"));
+    const QJsonObject indentedHighlight =
+        previousIndented.value(QStringLiteral("headingNavigationHighlight")).toObject();
+    addCheck(checks, details, QStringLiteral("headingNavigationHighlightTrimsWhitespace"),
+             indentedHighlight.value(QStringLiteral("start")).toInt() == indentedHeadingStart
+                 && indentedHighlight.value(QStringLiteral("end")).toInt()
+                    == indentedHeadingEnd,
+             previousIndented);
+
+    const QString utf16FoldText = QStringLiteral("# 标题\n甲😀乙\n# 尾");
+    const int utf16Body = utf16FoldText.indexOf(QStringLiteral("甲"));
+    const int utf16Cursor = utf16Body + QStringLiteral("甲😀").size();
+    const int utf16HeadingEnd = QStringLiteral("# 标题").size();
+    setTextAndSelection(utf16FoldText, utf16Cursor, utf16Cursor);
+    const QJsonObject utf16Folded = execute(QStringLiteral("foldCurrentHeading"));
+    const QJsonObject utf16Unfolded = execute(QStringLiteral("unfoldCurrentHeading"));
+    addCheck(checks, details, QStringLiteral("headingFoldRestoresUtf16Cursor"),
+             utf16Folded.value(QStringLiteral("cursorPosition")).toInt() == utf16HeadingEnd
+                 && utf16Unfolded.value(QStringLiteral("cursorPosition")).toInt()
+                    == utf16Cursor,
+             QJsonObject{{QStringLiteral("folded"), utf16Folded},
+                         {QStringLiteral("unfolded"), utf16Unfolded}});
+
+    setTextAndSelection(headingTree, bodyA + 2, bodyA + 2);
+    execute(QStringLiteral("foldAllHeadings"));
+    const int headingDEnd = headingD + QStringLiteral("# D").size();
+    request(QStringLiteral("testSetSelection"),
+            {{QStringLiteral("start"), headingDEnd},
+             {QStringLiteral("end"), headingDEnd}});
+    const QJsonObject movedBeforeUnfold = execute(QStringLiteral("unfoldAllHeadings"));
+    addCheck(checks, details, QStringLiteral("headingFoldDoesNotRestoreAfterCursorMove"),
+             movedBeforeUnfold.value(QStringLiteral("cursorPosition")).toInt() == headingDEnd,
+             movedBeforeUnfold);
 
     const QString fencedHeadings = QStringLiteral(
         "# Real\nbody\n```\n# fake\n```\n## Child\nchild body");

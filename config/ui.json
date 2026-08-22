@@ -67,6 +67,9 @@
   "animation": {
     "transitionDuration": 120,
     "windowShapeScale": 0.98,
+    "headingNavigationHighlightOpacity": 0.2,
+    "headingNavigationHighlightHoldDuration": 400,
+    "headingNavigationHighlightFadeDuration": 300,
     "historyHoverOpenDelay": 100,
     "historyHoverCloseDelay": 250,
     "scrollRefreshInterval": 60,

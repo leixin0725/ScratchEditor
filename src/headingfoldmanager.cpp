@@ -17,14 +17,28 @@ public:
     bool collapsed = false;
 };
 
-int headingLevel(const QString &text, bool insideFence)
+struct HeadingSyntax {
+    int level = 0;
+    int highlightStart = -1;
+    int highlightEnd = -1;
+};
+
+HeadingSyntax headingSyntax(const QString &text, bool insideFence)
 {
     if (insideFence) {
-        return 0;
+        return {};
     }
     static const QRegularExpression heading(QStringLiteral(R"(^\s{0,3}(#{1,6})\s+.*$)"));
     const QRegularExpressionMatch match = heading.match(text);
-    return match.hasMatch() ? match.capturedLength(1) : 0;
+    if (!match.hasMatch()) {
+        return {};
+    }
+    int end = text.size();
+    while (end > match.capturedStart(1) && text.at(end - 1).isSpace()) {
+        --end;
+    }
+    return {static_cast<int>(match.capturedLength(1)),
+            static_cast<int>(match.capturedStart(1)), end};
 }
 
 bool isFenceLine(const QString &text)
@@ -63,6 +77,9 @@ HeadingFoldManager::HeadingFoldManager(QObject *parent)
 
 void HeadingFoldManager::setEditor(QObject *editor, QTextDocument *document)
 {
+    if (m_editor) {
+        QObject::disconnect(m_editor.data(), nullptr, this, nullptr);
+    }
     if (m_document) {
         QObject::disconnect(m_document.data(), nullptr, this, nullptr);
         makeAllBlocksVisible();
@@ -71,12 +88,20 @@ void HeadingFoldManager::setEditor(QObject *editor, QTextDocument *document)
     m_document = document;
     m_headings.clear();
     m_markers.clear();
+    clearPendingCursorRestore();
+    clearNavigationHighlight();
     m_visibleEndPosition = 0;
     m_rebuildQueued = false;
     m_renderInvalidationWarningIssued = false;
     if (m_document) {
         connect(m_document.data(), &QTextDocument::contentsChanged,
                 this, &HeadingFoldManager::scheduleRebuild);
+        if (m_editor) {
+            QObject::connect(m_editor.data(), SIGNAL(cursorPositionChanged()),
+                             this, SLOT(handleEditorCursorPositionChanged()));
+            QObject::connect(m_editor.data(), SIGNAL(textChanged()),
+                             this, SLOT(handleEditorTextChanged()));
+        }
         rebuild();
     } else {
         emit markersChanged();
@@ -85,6 +110,8 @@ void HeadingFoldManager::setEditor(QObject *editor, QTextDocument *document)
 
 void HeadingFoldManager::reset()
 {
+    clearPendingCursorRestore();
+    clearNavigationHighlight();
     if (!m_document) {
         return;
     }
@@ -105,6 +132,11 @@ QVariantList HeadingFoldManager::markers() const
 int HeadingFoldManager::visibleEndPosition() const
 {
     return m_visibleEndPosition;
+}
+
+QVariantMap HeadingFoldManager::navigationHighlight() const
+{
+    return m_navigationHighlight;
 }
 
 QVariantMap HeadingFoldManager::diagnostics() const
@@ -136,6 +168,12 @@ QVariantMap HeadingFoldManager::diagnostics() const
         {QStringLiteral("visibleBlockTexts"), visibleTexts},
         {QStringLiteral("visibleBlockPositions"), visiblePositions},
         {QStringLiteral("markers"), m_markers},
+        {QStringLiteral("pendingCursorRestore"), m_hasPendingCursorRestore},
+        {QStringLiteral("restoreCursorPosition"),
+         m_hasPendingCursorRestore ? m_restoreCursor.position() : -1},
+        {QStringLiteral("restorePlaceholderPosition"),
+         m_hasPendingCursorRestore ? m_restorePlaceholderCursor.position() : -1},
+        {QStringLiteral("navigationHighlight"), m_navigationHighlight},
     };
 }
 
@@ -173,7 +211,7 @@ bool HeadingFoldManager::foldCurrent()
     }
     const Heading &heading = m_headings.at(index);
     if (selectionIntersects(heading.block.next().position(), heading.endPosition)) {
-        moveCursorTo(heading.position);
+        moveCursorToHeadingEndForFold(heading);
     }
     setCollapsed(index, true);
     return true;
@@ -216,8 +254,10 @@ bool HeadingFoldManager::navigate(bool backwards)
         }
     }
     if (target >= 0) {
+        clearPendingCursorRestore();
         revealHeading(target);
         moveCursorTo(m_headings.at(target).position);
+        showNavigationHighlight(m_headings.at(target));
     }
     return true;
 }
@@ -232,13 +272,14 @@ bool HeadingFoldManager::toggleAt(int headingPosition)
     const Heading &heading = m_headings.at(index);
     if (!heading.collapsed
         && selectionIntersects(heading.block.next().position(), heading.endPosition)) {
-        moveCursorTo(heading.position);
+        moveCursorToHeadingEndForFold(heading);
     }
     return setCollapsed(index, !heading.collapsed);
 }
 
 bool HeadingFoldManager::revealPosition(int position)
 {
+    clearPendingCursorRestore();
     rebuild();
     if (!m_document || m_document->findBlock(position).isVisible()) {
         return false;
@@ -291,10 +332,13 @@ void HeadingFoldManager::rebuild()
     for (QTextBlock block = m_document->begin(); block.isValid(); block = block.next()) {
         const QString text = block.text();
         const bool fenceLine = isFenceLine(text);
-        const int level = headingLevel(text, insideFence || fenceLine);
-        if (level > 0) {
+        const HeadingSyntax syntax = headingSyntax(text, insideFence || fenceLine);
+        if (syntax.level > 0) {
             HeadingFoldBlockData *data = ensureFoldData(block);
-            headings.append({block, block.position(), level, m_document->characterCount() - 1,
+            headings.append({block, block.position(), syntax.level,
+                             m_document->characterCount() - 1,
+                             block.position() + syntax.highlightStart,
+                             block.position() + syntax.highlightEnd,
                              false, data->collapsed});
         } else if (HeadingFoldBlockData *data = foldData(block)) {
             Q_UNUSED(data);
@@ -439,13 +483,39 @@ void HeadingFoldManager::ensureCursorVisible()
         return;
     }
     const int cursorPosition = m_editor->property("cursorPosition").toInt();
+    if (m_hasPendingCursorRestore) {
+        const bool stillAtPlaceholder = cursorPosition == m_restorePlaceholderCursor.position()
+            && m_editor->property("selectionStart").toInt()
+                == m_editor->property("selectionEnd").toInt();
+        if (!stillAtPlaceholder) {
+            clearPendingCursorRestore();
+        } else {
+            const QTextBlock restoreBlock = m_document->findBlock(m_restoreCursor.position());
+            if (restoreBlock.isValid() && restoreBlock.isVisible()) {
+                const int restorePosition = m_restoreCursor.position();
+                clearPendingCursorRestore();
+                moveCursorTo(restorePosition);
+                return;
+            }
+        }
+    }
+
     const QTextBlock cursorBlock = m_document->findBlock(cursorPosition);
     if (!cursorBlock.isValid() || cursorBlock.isVisible()) {
         return;
     }
+    const bool collapsedCaret = m_editor->property("selectionStart").toInt()
+        == m_editor->property("selectionEnd").toInt();
+    if (collapsedCaret && !m_hasPendingCursorRestore) {
+        rememberCursorForRestore(cursorPosition);
+    }
     for (auto iterator = m_headings.crbegin(); iterator != m_headings.crend(); ++iterator) {
         if (iterator->position <= cursorPosition && iterator->block.isVisible()) {
-            moveCursorTo(iterator->position);
+            const int placeholderPosition = headingTextEnd(*iterator);
+            moveCursorTo(placeholderPosition);
+            if (m_hasPendingCursorRestore) {
+                updateRestorePlaceholder(placeholderPosition);
+            }
             return;
         }
     }
@@ -549,14 +619,98 @@ bool HeadingFoldManager::revealHeading(int index)
     return changed;
 }
 
+void HeadingFoldManager::moveCursorToHeadingEndForFold(const Heading &heading)
+{
+    if (!m_editor) {
+        return;
+    }
+    const int cursorPosition = m_editor->property("cursorPosition").toInt();
+    const bool collapsedCaret = m_editor->property("selectionStart").toInt()
+        == m_editor->property("selectionEnd").toInt();
+    if (collapsedCaret && !m_hasPendingCursorRestore) {
+        rememberCursorForRestore(cursorPosition);
+    }
+    const int placeholderPosition = headingTextEnd(heading);
+    moveCursorTo(placeholderPosition);
+    if (collapsedCaret && m_hasPendingCursorRestore) {
+        updateRestorePlaceholder(placeholderPosition);
+    }
+}
+
+void HeadingFoldManager::rememberCursorForRestore(int position)
+{
+    if (!m_document || position < 0 || position >= m_document->characterCount()) {
+        return;
+    }
+    m_restoreCursor = QTextCursor(m_document.data());
+    m_restoreCursor.setPosition(position);
+    m_restorePlaceholderCursor = QTextCursor();
+    m_hasPendingCursorRestore = true;
+}
+
+void HeadingFoldManager::updateRestorePlaceholder(int position)
+{
+    if (!m_document || !m_hasPendingCursorRestore) {
+        return;
+    }
+    m_restorePlaceholderCursor = QTextCursor(m_document.data());
+    m_restorePlaceholderCursor.setPosition(position);
+}
+
+void HeadingFoldManager::clearPendingCursorRestore()
+{
+    m_restoreCursor = QTextCursor();
+    m_restorePlaceholderCursor = QTextCursor();
+    m_hasPendingCursorRestore = false;
+}
+
+int HeadingFoldManager::headingTextEnd(const Heading &heading) const
+{
+    return heading.position + heading.block.text().size();
+}
+
+void HeadingFoldManager::showNavigationHighlight(const Heading &heading)
+{
+    ++m_navigationHighlightRevision;
+    m_navigationHighlight = {
+        {QStringLiteral("start"), heading.highlightStart},
+        {QStringLiteral("end"), heading.highlightEnd},
+        {QStringLiteral("revision"), m_navigationHighlightRevision},
+    };
+    emit navigationHighlightChanged();
+}
+
+void HeadingFoldManager::clearNavigationHighlight()
+{
+    if (m_navigationHighlight.isEmpty()) {
+        return;
+    }
+    m_navigationHighlight.clear();
+    emit navigationHighlightChanged();
+}
+
+void HeadingFoldManager::handleEditorCursorPositionChanged()
+{
+    if (!m_internalCursorMove) {
+        clearPendingCursorRestore();
+    }
+}
+
+void HeadingFoldManager::handleEditorTextChanged()
+{
+    clearPendingCursorRestore();
+}
+
 void HeadingFoldManager::moveCursorTo(int position)
 {
     if (!m_editor) {
         return;
     }
+    m_internalCursorMove = true;
     m_editor->setProperty("cursorPosition", position);
     QMetaObject::invokeMethod(m_editor, "deselect");
     QMetaObject::invokeMethod(m_editor, "forceActiveFocus");
+    m_internalCursorMove = false;
 }
 
 bool HeadingFoldManager::selectionIntersects(int start, int end) const

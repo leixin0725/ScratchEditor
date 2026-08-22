@@ -17,6 +17,7 @@
 #include <QStringList>
 #include <QTimer>
 #include <QVariantList>
+#include <QVariantMap>
 #include <QVector>
 
 #include <functional>
@@ -69,6 +70,8 @@ class EditorController final : public QObject, public QAbstractNativeEventFilter
                    NOTIFY headingFoldMarkersChanged)
     Q_PROPERTY(int headingFoldVisibleEndPosition READ headingFoldVisibleEndPosition
                    NOTIFY headingFoldMarkersChanged)
+    Q_PROPERTY(QVariantMap headingNavigationHighlight READ headingNavigationHighlight
+                   NOTIFY headingNavigationHighlightChanged)
     Q_PROPERTY(bool markdownHighlighting READ markdownHighlighting NOTIFY markdownHighlightingChanged)
     Q_PROPERTY(QString theme READ theme NOTIFY appearanceChanged)
     Q_PROPERTY(QString editorFontFamily READ editorFontFamily NOTIFY appearanceChanged)
@@ -123,6 +126,7 @@ public:
     QVariantList commands() const;
     QVariantList headingFoldMarkers() const;
     int headingFoldVisibleEndPosition() const;
+    QVariantMap headingNavigationHighlight() const;
     bool markdownHighlighting() const;
     QString theme() const;
     QString editorFontFamily() const;
@@ -188,6 +192,7 @@ signals:
     void clipboardHistoryLeftEdgeExited();
     void commandsChanged();
     void headingFoldMarkersChanged();
+    void headingNavigationHighlightChanged();
     void markdownHighlightingChanged();
     void markdownStyleChanged();
     void appearanceChanged();

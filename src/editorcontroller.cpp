@@ -279,6 +279,8 @@ EditorController::EditorController(bool testMode, QElapsedTimer *startupTimer,
             this, &EditorController::commandsChanged);
     connect(m_commands.get(), &EditorCommandRegistry::headingFoldMarkersChanged,
             this, &EditorController::headingFoldMarkersChanged);
+    connect(m_commands.get(), &EditorCommandRegistry::headingNavigationHighlightChanged,
+            this, &EditorController::headingNavigationHighlightChanged);
     connect(m_commands.get(), &EditorCommandRegistry::uiCommandRequested,
             this, &EditorController::uiCommandRequested);
     m_commands->setClipboardAccess(
@@ -651,6 +653,11 @@ QVariantList EditorController::headingFoldMarkers() const
 int EditorController::headingFoldVisibleEndPosition() const
 {
     return m_commands ? m_commands->headingFoldVisibleEndPosition() : 0;
+}
+
+QVariantMap EditorController::headingNavigationHighlight() const
+{
+    return m_commands ? m_commands->headingNavigationHighlight() : QVariantMap{};
 }
 
 bool EditorController::markdownHighlighting() const
@@ -3207,6 +3214,8 @@ QJsonObject EditorController::statusObject() const
     status.insert(QStringLiteral("uiConfigLoaded"),
                   m_uiConfig && m_uiConfig->loadedFromFile());
     status.insert(QStringLiteral("commandCount"), commands().size());
+    status.insert(QStringLiteral("headingNavigationHighlight"),
+                  QJsonObject::fromVariantMap(headingNavigationHighlight()));
     status.insert(QStringLiteral("historyAvailable"), clipboardHistoryAvailable());
     status.insert(QStringLiteral("historyHealthy"), clipboardHistoryHealthy());
     status.insert(QStringLiteral("historyError"), clipboardHistoryError());
@@ -3343,6 +3352,26 @@ QJsonObject EditorController::statusObject() const
                       m_window->property("headingFoldCollapsedColor").toString());
         status.insert(QStringLiteral("headingFoldMarkerCount"),
                       m_window->property("headingFoldMarkerCount").toInt());
+        status.insert(QStringLiteral("headingNavigationHighlightOpacity"),
+                      m_window->property("headingNavigationHighlightOpacity").toDouble());
+        status.insert(QStringLiteral("headingNavigationHighlightHoldDurationMs"),
+                      m_window->property(
+                          "headingNavigationHighlightHoldDurationMs").toInt());
+        status.insert(QStringLiteral("headingNavigationHighlightFadeDurationMs"),
+                      m_window->property(
+                          "headingNavigationHighlightFadeDurationMs").toInt());
+        status.insert(QStringLiteral("headingNavigationHighlightVisible"),
+                      m_window->property("headingNavigationHighlightVisible").toBool());
+        status.insert(QStringLiteral("headingNavigationHighlightEffectiveOpacity"),
+                      m_window->property(
+                          "headingNavigationHighlightEffectiveOpacity").toDouble());
+        status.insert(QStringLiteral("headingNavigationHighlightRectCount"),
+                      m_window->property("headingNavigationHighlightRectCount").toInt());
+        status.insert(QStringLiteral("headingNavigationHighlightDrawnBeforeText"),
+                      m_window->property(
+                          "headingNavigationHighlightDrawnBeforeText").toBool());
+        status.insert(QStringLiteral("headingNavigationHighlightMaxWidth"),
+                      m_window->property("headingNavigationHighlightMaxWidth").toDouble());
         status.insert(QStringLiteral("editorVisibleContentHeight"),
                       m_window->property("editorVisibleContentHeight").toDouble());
         status.insert(QStringLiteral("historyQueryFocused"),

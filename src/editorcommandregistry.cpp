@@ -1244,6 +1244,8 @@ EditorCommandRegistry::EditorCommandRegistry(AppSettings *settings,
     m_headingFolds = std::make_unique<HeadingFoldManager>(this);
     connect(m_headingFolds.get(), &HeadingFoldManager::markersChanged,
             this, &EditorCommandRegistry::headingFoldMarkersChanged);
+    connect(m_headingFolds.get(), &HeadingFoldManager::navigationHighlightChanged,
+            this, &EditorCommandRegistry::headingNavigationHighlightChanged);
     m_definitions = {
         {QStringLiteral("toggleBold"), QStringLiteral("切换加粗"),
          QStringLiteral("Markdown"), QStringLiteral("Ctrl+B"), {}, false},
@@ -1428,6 +1430,11 @@ QVariantList EditorCommandRegistry::headingFoldMarkers() const
 int EditorCommandRegistry::headingFoldVisibleEndPosition() const
 {
     return m_headingFolds ? m_headingFolds->visibleEndPosition() : 0;
+}
+
+QVariantMap EditorCommandRegistry::headingNavigationHighlight() const
+{
+    return m_headingFolds ? m_headingFolds->navigationHighlight() : QVariantMap{};
 }
 
 QVariantMap EditorCommandRegistry::headingFoldDiagnostics() const

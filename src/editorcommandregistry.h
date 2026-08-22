@@ -41,6 +41,7 @@ public:
     QString shortcut(const QString &commandId) const;
     QVariantList headingFoldMarkers() const;
     int headingFoldVisibleEndPosition() const;
+    QVariantMap headingNavigationHighlight() const;
     QVariantMap headingFoldDiagnostics() const;
 
     bool setShortcut(const QString &commandId, const QString &sequence, QString *errorMessage);
@@ -61,6 +62,7 @@ public:
 signals:
     void commandsChanged();
     void headingFoldMarkersChanged();
+    void headingNavigationHighlightChanged();
     void uiCommandRequested(const QString &commandId);
 
 private:

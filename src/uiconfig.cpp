@@ -234,6 +234,9 @@ UiConfig UiConfig::defaults()
     put({"fonts", "editorSizeMax"}, 24);
     put({"animation", "transitionDuration"}, 120);
     put({"animation", "windowShapeScale"}, 0.98);
+    put({"animation", "headingNavigationHighlightOpacity"}, 0.2);
+    put({"animation", "headingNavigationHighlightHoldDuration"}, 400);
+    put({"animation", "headingNavigationHighlightFadeDuration"}, 300);
     put({"animation", "historyHoverOpenDelay"}, 100);
     put({"animation", "historyHoverCloseDelay"}, 250);
     put({"animation", "scrollRefreshInterval"}, 60);
@@ -464,6 +467,9 @@ QVariantMap UiConfig::sanitize(const QVariantMap &input)
     fixInt({"fonts", "statusPanelDefaultSize"}, 6, 72);
     fixInt({"animation", "transitionDuration"}, 0, 10000);
     fixDouble({"animation", "windowShapeScale"}, 0.5, 1.0);
+    fixDouble({"animation", "headingNavigationHighlightOpacity"}, 0.0, 1.0);
+    fixInt({"animation", "headingNavigationHighlightHoldDuration"}, 0, 10000);
+    fixInt({"animation", "headingNavigationHighlightFadeDuration"}, 0, 10000);
     fixInt({"animation", "historyHoverOpenDelay"}, 0, 10000);
     fixInt({"animation", "historyHoverCloseDelay"}, 0, 10000);
     fixInt({"animation", "scrollRefreshInterval"}, 1, 10000);

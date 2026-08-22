@@ -14,6 +14,64 @@ Window {
         return false
     }
 
+    function buildHeadingNavigationHighlightRectangles() {
+        const target = controller.headingNavigationHighlight
+        if (!target || target.start === undefined || target.end === undefined
+                || target.end <= target.start) {
+            return []
+        }
+
+        const rectangles = []
+        let segmentStart = editor.positionToRectangle(target.start)
+        let segmentY = segmentStart.y
+        for (let position = target.start + 1; position <= target.end; ++position) {
+            const cursorRect = editor.positionToRectangle(position)
+            if (Math.abs(cursorRect.y - segmentY) <= 0.5) {
+                if (position === target.end) {
+                    rectangles.push({
+                        "x": Math.min(segmentStart.x, cursorRect.x),
+                        "y": segmentStart.y,
+                        "width": Math.max(1, Math.abs(cursorRect.x - segmentStart.x)),
+                        "height": Math.max(1, segmentStart.height)
+                    })
+                }
+                continue
+            }
+
+            rectangles.push({
+                "x": segmentStart.x,
+                "y": segmentStart.y,
+                "width": Math.max(1, editor.width - segmentStart.x),
+                "height": Math.max(1, segmentStart.height)
+            })
+            if (position === target.end) {
+                break
+            }
+            segmentStart = cursorRect
+            segmentY = cursorRect.y
+        }
+        return rectangles
+    }
+
+    function refreshHeadingNavigationHighlightGeometry() {
+        if (headingNavigationHighlightAnimationOpacity <= 0) {
+            return
+        }
+        headingNavigationHighlightRectangles =
+            buildHeadingNavigationHighlightRectangles()
+    }
+
+    function restartHeadingNavigationHighlight() {
+        headingNavigationHighlightAnimation.stop()
+        headingNavigationHighlightRectangles =
+            buildHeadingNavigationHighlightRectangles()
+        headingNavigationHighlightAnimationOpacity =
+            headingNavigationHighlightRectangles.length > 0 ? 1 : 0
+        if (headingNavigationHighlightRectangles.length > 0) {
+            headingNavigationHighlightAnimation.start()
+        }
+    }
+
     readonly property var uiConfig: controller.uiConfig
 
     width: uiConfig.window.defaultWidth
@@ -71,6 +129,32 @@ Window {
     readonly property string headingFoldCollapsedGlyph: ">"
     readonly property color headingFoldExpandedColor: themeMutedTextColor
     readonly property color headingFoldCollapsedColor: themeAccentColor
+    readonly property real headingNavigationHighlightOpacity:
+        uiConfig.animation.headingNavigationHighlightOpacity
+    readonly property int headingNavigationHighlightHoldDurationMs:
+        uiConfig.animation.headingNavigationHighlightHoldDuration
+    readonly property int headingNavigationHighlightFadeDurationMs:
+        controller.animationsEnabled
+            ? uiConfig.animation.headingNavigationHighlightFadeDuration : 0
+    property var headingNavigationHighlightRectangles: []
+    property real headingNavigationHighlightAnimationOpacity: 0
+    readonly property bool headingNavigationHighlightVisible:
+        headingNavigationHighlightRectangles.length > 0
+            && headingNavigationHighlightAnimationOpacity > 0
+    readonly property real headingNavigationHighlightEffectiveOpacity:
+        headingNavigationHighlightAnimationOpacity * headingNavigationHighlightOpacity
+    readonly property int headingNavigationHighlightRectCount:
+        headingNavigationHighlightRectangles.length
+    readonly property bool headingNavigationHighlightDrawnBeforeText:
+        headingNavigationHighlightLayer.z < editor.z
+    readonly property real headingNavigationHighlightMaxWidth: {
+        let maximum = 0
+        for (let index = 0; index < headingNavigationHighlightRectangles.length; ++index) {
+            maximum = Math.max(maximum,
+                               headingNavigationHighlightRectangles[index].width)
+        }
+        return maximum
+    }
     readonly property int headingFoldMarkerCount: controller.headingFoldMarkers.length
     readonly property bool headingFoldActive: {
         for (let index = 0; index < controller.headingFoldMarkers.length; ++index) {
@@ -107,6 +191,30 @@ Window {
         NumberAnimation {
             duration: root.transitionDuration
             easing.type: Easing.OutCubic
+        }
+    }
+
+    SequentialAnimation {
+        id: headingNavigationHighlightAnimation
+
+        PauseAnimation {
+            duration: root.headingNavigationHighlightHoldDurationMs
+        }
+        NumberAnimation {
+            target: root
+            property: "headingNavigationHighlightAnimationOpacity"
+            to: 0
+            duration: root.headingNavigationHighlightFadeDurationMs
+            easing.type: Easing.OutCubic
+        }
+        onFinished: root.headingNavigationHighlightRectangles = []
+    }
+
+    Connections {
+        target: controller
+
+        function onHeadingNavigationHighlightChanged() {
+            root.restartHeadingNavigationHighlight()
         }
     }
     readonly property real historyPanelWidth:
@@ -841,9 +949,36 @@ Window {
             }
         }
 
+        Item {
+            id: headingNavigationHighlightLayer
+            x: editor.x
+            y: editor.y
+            z: 0
+            width: editor.width
+            height: editor.height
+            opacity: root.headingNavigationHighlightAnimationOpacity
+            visible: root.headingNavigationHighlightVisible
+
+            Repeater {
+                model: root.headingNavigationHighlightRectangles
+
+                delegate: Rectangle {
+                    required property var modelData
+                    x: modelData.x
+                    y: modelData.y
+                    width: modelData.width
+                    height: modelData.height
+                    radius: uiConfig.layout.radiusSmall
+                    color: root.themeAccentColor
+                    opacity: root.headingNavigationHighlightOpacity
+                }
+            }
+        }
+
         TextEdit {
             id: editor
             objectName: "scratchText"
+            z: 1
             property int selectionDragPosition: -1
             readonly property rect selectionDragRectangle:
                 selectionDragPosition >= 0
@@ -866,6 +1001,9 @@ Window {
             persistentSelection: true
             activeFocusOnPress: true
             inputMethodHints: Qt.ImhMultiLine
+
+            onWidthChanged: root.refreshHeadingNavigationHighlightGeometry()
+            onContentHeightChanged: root.refreshHeadingNavigationHighlightGeometry()
 
             onCursorRectangleChanged: {
                 // 文档变更期间 QML 会短暂给出过期/无效的光标矩形（如落在
