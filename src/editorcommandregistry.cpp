@@ -28,6 +28,10 @@
 #include <utility>
 
 namespace {
+// 文档/布局瞬态落定等待：真实输入与标题折叠展开都会产生延迟到下一帧 polish
+// 才落定的几何，立即读取会得到过期值；输入自动滚动与标题跳转滚动共用此约定。
+constexpr int layoutSettleDelayMs = 40;
+
 QString normalizeSelectedText(QString text)
 {
     return text.replace(QChar::ParagraphSeparator, QLatin1Char('\n'));
@@ -1350,14 +1354,28 @@ EditorCommandRegistry::EditorCommandRegistry(AppSettings *settings,
         {QStringLiteral("unfoldCurrentHeading"),
          [this] { return m_headingFolds->unfoldCurrent(); }},
         {QStringLiteral("previousHeading"),
-         [this] { return m_headingFolds->navigate(true); }},
+         [this] { return navigateToHeading(true); }},
         {QStringLiteral("nextHeading"),
-         [this] { return m_headingFolds->navigate(false); }},
+         [this] { return navigateToHeading(false); }},
     };
 
     m_selectionDragScrollTimer.setInterval(30);
     connect(&m_selectionDragScrollTimer, &QTimer::timeout, this, [this] {
         updateSelectionDrag(m_selectionDragScenePosition, true);
+    });
+
+    m_headingScrollTimer.setSingleShot(true);
+    connect(&m_headingScrollTimer, &QTimer::timeout, this, [this] {
+        const int position = m_pendingHeadingScrollPosition;
+        m_pendingHeadingScrollPosition = -1;
+        if (position < 0) {
+            return;
+        }
+        // 延迟期间用户若已移动光标或文档已被替换，放弃本次对齐，避免打扰用户。
+        if (!m_editor || m_editor->property("cursorPosition").toInt() != position) {
+            return;
+        }
+        scrollViewportToHeading(position);
     });
 }
 
@@ -1959,8 +1977,8 @@ void EditorCommandRegistry::queueInputAutoScrollCheck()
     m_inputAutoScrollCheckQueued = true;
     // 延迟到文档/布局落定后再判定：真实输入（IME/回车）会在事件处理期间
     // 产生瞬态光标矩形与重复 contentsChanged，立即检查会读到过期几何
-    // （误判触底/触顶）。40ms 足够这些瞬态收尾。
-    QTimer::singleShot(40, this, [this] {
+    // （误判触底/触顶）。该延迟足够这些瞬态收尾。
+    QTimer::singleShot(layoutSettleDelayMs, this, [this] {
         m_inputAutoScrollCheckQueued = false;
         checkInputAutoScroll();
     });
@@ -2537,6 +2555,59 @@ void EditorCommandRegistry::animateViewportScrollTo(QQuickItem *viewport, qreal 
     if (!QMetaObject::invokeMethod(m_window, "animateScrollTo")) {
         viewport->setProperty("contentY", targetY);
     }
+}
+
+bool EditorCommandRegistry::navigateToHeading(bool backwards)
+{
+    if (!m_headingFolds) {
+        return false;
+    }
+    // 跳转期间抑制 QML 侧的光标瞬时贴边跟随，让整段跳转由稍后同一动画入口
+    // 的平滑滚动完成，避免“先瞬移贴边、再动画”的两段式观感。
+    const bool suppress = m_window != nullptr;
+    if (suppress) {
+        m_window->setProperty("suppressHeadingCursorFollow", true);
+    }
+    const int target = m_headingFolds->navigate(backwards);
+    if (suppress) {
+        m_window->setProperty("suppressHeadingCursorFollow", false);
+    }
+    if (target >= 0) {
+        scheduleHeadingScroll(target);
+    }
+    // 与既有语义一致：命令本身总是视为已执行（边界无跳转时返回 true）。
+    return true;
+}
+
+void EditorCommandRegistry::scheduleHeadingScroll(int position)
+{
+    m_pendingHeadingScrollPosition = position;
+    // 目标标题可能刚从折叠祖先中展开，文档布局要等下一帧 polish 才落定
+    // （与输入自动滚动同一约定）；延迟后重新计算目标并动画/瞬时落位。
+    m_headingScrollTimer.start(layoutSettleDelayMs);
+}
+
+void EditorCommandRegistry::scrollViewportToHeading(int position)
+{
+    QQuickItem *viewport = editorViewport();
+    QQuickItem *item = editorItem();
+    if (!viewport || !item || !m_editor) {
+        return;
+    }
+    QRectF headingRect;
+    const bool rectLocated = QMetaObject::invokeMethod(
+        m_editor, "positionToRectangle", Qt::DirectConnection,
+        Q_RETURN_ARG(QRectF, headingRect), Q_ARG(int, position));
+    if (!rectLocated || !headingRect.isValid()) {
+        return;
+    }
+    const qreal viewportHeight = viewport->height();
+    const qreal maximumY = qMax<qreal>(
+        0.0, viewport->property("contentHeight").toReal() - viewportHeight);
+    // 与输入触底自动滚动同一约定：标题首行锚定到视口上 1/3。
+    const qreal targetY = qBound<qreal>(
+        0.0, item->y() + headingRect.y() - viewportHeight / 3.0, maximumY);
+    animateViewportScrollTo(viewport, targetY);
 }
 
 void EditorCommandRegistry::beginSelectionDrag(int selectionStart, int selectionEnd,

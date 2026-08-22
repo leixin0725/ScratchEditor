@@ -227,11 +227,11 @@ bool HeadingFoldManager::unfoldCurrent()
     return true;
 }
 
-bool HeadingFoldManager::navigate(bool backwards)
+int HeadingFoldManager::navigate(bool backwards)
 {
     rebuild();
     if (!m_editor || m_headings.isEmpty()) {
-        return true;
+        return -1;
     }
 
     const int cursorPosition = m_editor->property("cursorPosition").toInt();
@@ -258,8 +258,9 @@ bool HeadingFoldManager::navigate(bool backwards)
         revealHeading(target);
         moveCursorTo(m_headings.at(target).position);
         showNavigationHighlight(m_headings.at(target));
+        return m_headings.at(target).position;
     }
-    return true;
+    return -1;
 }
 
 bool HeadingFoldManager::toggleAt(int headingPosition)

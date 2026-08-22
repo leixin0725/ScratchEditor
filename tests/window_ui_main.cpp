@@ -747,6 +747,53 @@ int main(int argc, char *argv[])
                          {QStringLiteral("mid"), animAutoMid},
                          {QStringLiteral("settled"), animAutoSettled}});
 
+    // 标题跳转滚动共用同一轻量动画入口：延迟 40ms 后启动约 160ms 平滑滚动，
+    // 落定后标题首行锚定到视口上 1/3。
+    QString headingAnimText;
+    headingAnimText.reserve(8192);
+    headingAnimText += QStringLiteral("# A\n");
+    for (int i = 0; i < 60; ++i) {
+        headingAnimText += QStringLiteral("line-%1 abcdefghij klmnopqrstuvwxyz\n")
+                               .arg(i, 2, 10, QLatin1Char('0'));
+    }
+    headingAnimText += QStringLiteral("# B\n");
+    for (int i = 0; i < 60; ++i) {
+        headingAnimText += QStringLiteral("line-%1 abcdefghij klmnopqrstuvwxyz\n")
+                               .arg(i, 2, 10, QLatin1Char('0'));
+    }
+    headingAnimText += QStringLiteral("# C\n");
+    request(QStringLiteral("testSetText"), {{QStringLiteral("text"), headingAnimText}});
+    request(QStringLiteral("testSetSelection"),
+            {{QStringLiteral("start"), 0}, {QStringLiteral("end"), 0}});
+    request(QStringLiteral("testSetScrollY"), {{QStringLiteral("contentY"), 0}});
+    QThread::msleep(60);
+    execute(QStringLiteral("nextHeading"));
+    // 动画在 40ms 布局落定延迟后启动；此时采样应处于滚动中间态（非瞬移）。
+    QThread::msleep(50);
+    const QJsonObject headingAnimMid = request(QStringLiteral("status"));
+    const double headingAnimMaxY =
+        headingAnimMid.value(QStringLiteral("scrollContentHeight")).toDouble()
+        - headingAnimMid.value(QStringLiteral("scrollViewportHeight")).toDouble();
+    QThread::msleep(300);
+    const QJsonObject headingAnimSettled = request(QStringLiteral("status"));
+    const double headingAnimAnchorY =
+        headingAnimSettled.value(QStringLiteral("editorContentOffsetY")).toDouble()
+        + headingAnimSettled.value(QStringLiteral("cursorRectY")).toDouble()
+        - headingAnimSettled.value(QStringLiteral("scrollViewportHeight")).toDouble() / 3.0;
+    addCheck(checks, details, QStringLiteral("headingNavigationScrollAnimatesAndSettles"),
+             headingAnimMid.value(QStringLiteral("animationsEnabled")).toBool()
+                 && headingAnimMid.value(QStringLiteral("scrollContentY")).toDouble() > 0.5
+                 && headingAnimMid.value(QStringLiteral("scrollContentY")).toDouble()
+                    < headingAnimMaxY - 0.5
+                 && headingAnimSettled.value(QStringLiteral("scrollContentY")).toDouble()
+                    > headingAnimMid.value(QStringLiteral("scrollContentY")).toDouble() + 5.0
+                 && std::abs(headingAnimSettled.value(QStringLiteral("scrollContentY")).toDouble()
+                             - headingAnimAnchorY) < 2.0,
+             QJsonObject{{QStringLiteral("maxY"), headingAnimMaxY},
+                         {QStringLiteral("anchorY"), headingAnimAnchorY},
+                         {QStringLiteral("mid"), headingAnimMid},
+                         {QStringLiteral("settled"), headingAnimSettled}});
+
     const QJsonObject animOffApplied = request(
         QStringLiteral("testApplyAppearance"),
         {{QStringLiteral("theme"), QStringLiteral("light")},

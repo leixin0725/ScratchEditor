@@ -1172,6 +1172,104 @@ int main(int argc, char *argv[])
     addCheck(checks, details, QStringLiteral("headingFeatureDefaultShortcuts"),
              headingFeatureShortcutDefaults, headingFeatureShortcutDetails);
 
+    // --- 标题跳转的视口 1/3 定位滚动（editing 套件动画已关闭，落位瞬时） ---
+    // 滚动在 40ms 布局落定延迟后执行，采样前需等待其完成。
+    QString headingScrollText;
+    headingScrollText.reserve(8192);
+    headingScrollText += QStringLiteral("# A\n");
+    for (int i = 0; i < 60; ++i) {
+        headingScrollText += QStringLiteral("A 正文 line-%1\n").arg(i);
+    }
+    headingScrollText += QStringLiteral("# B\n");
+    for (int i = 0; i < 60; ++i) {
+        headingScrollText += QStringLiteral("B 正文 line-%1\n").arg(i);
+    }
+    headingScrollText += QStringLiteral("# C\n");
+    const int headingScrollB = headingScrollText.indexOf(QStringLiteral("# B"));
+    const int headingScrollC = headingScrollText.indexOf(QStringLiteral("# C"));
+    setTextAndSelection(headingScrollText, 0, 0);
+    setScrollY(0);
+    QThread::msleep(50);
+    const QJsonObject headingJumped = execute(QStringLiteral("nextHeading"));
+    QThread::msleep(120);
+    const QJsonObject headingScrolled = editorStatus();
+    const double headingAnchorY =
+        headingScrolled.value(QStringLiteral("editorContentOffsetY")).toDouble()
+        + headingScrolled.value(QStringLiteral("cursorRectY")).toDouble()
+        - headingScrolled.value(QStringLiteral("scrollViewportHeight")).toDouble() / 3.0;
+    const double headingScrollMaxY =
+        headingScrolled.value(QStringLiteral("scrollContentHeight")).toDouble()
+        - headingScrolled.value(QStringLiteral("scrollViewportHeight")).toDouble();
+    addCheck(checks, details, QStringLiteral("headingNavigationScrollAnchorsToUpperThird"),
+             headingJumped.value(QStringLiteral("executed")).toBool()
+                 && headingScrolled.value(QStringLiteral("cursorPosition")).toInt()
+                    == headingScrollB
+                 && std::abs(headingScrolled.value(QStringLiteral("scrollContentY")).toDouble()
+                             - headingAnchorY) < 3.0
+                 && headingScrolled.value(QStringLiteral("scrollContentY")).toDouble() > 0.0
+                 && headingScrolled.value(QStringLiteral("scrollContentY")).toDouble()
+                    < headingScrollMaxY,
+             QJsonObject{{QStringLiteral("targetB"), headingScrollB},
+                         {QStringLiteral("anchorY"), headingAnchorY},
+                         {QStringLiteral("maxY"), headingScrollMaxY},
+                         {QStringLiteral("command"), headingJumped},
+                         {QStringLiteral("status"), headingScrolled}});
+
+    // 回跳首个标题：目标在文档顶部，滚动钳到 0。
+    execute(QStringLiteral("previousHeading"));
+    QThread::msleep(120);
+    const QJsonObject headingClampedTop = editorStatus();
+    addCheck(checks, details, QStringLiteral("headingNavigationScrollClampsToTop"),
+             headingClampedTop.value(QStringLiteral("cursorPosition")).toInt() == 0
+                 && std::abs(headingClampedTop.value(QStringLiteral("scrollContentY")).toDouble())
+                        < 1.5,
+             headingClampedTop);
+
+    // 折叠状态下跳转：目标从折叠祖先中展开后，滚动在布局落定后把标题锚到 1/3。
+    QString nestedScrollText;
+    nestedScrollText.reserve(8192);
+    nestedScrollText += QStringLiteral("# A\n");
+    for (int i = 0; i < 40; ++i) {
+        nestedScrollText += QStringLiteral("A 正文 line-%1\n").arg(i);
+    }
+    nestedScrollText += QStringLiteral("## B\n");
+    for (int i = 0; i < 40; ++i) {
+        nestedScrollText += QStringLiteral("B 正文 line-%1\n").arg(i);
+    }
+    nestedScrollText += QStringLiteral("### C\n");
+    const int nestedScrollB = nestedScrollText.indexOf(QStringLiteral("## B"));
+    setTextAndSelection(nestedScrollText, 0, 0);
+    execute(QStringLiteral("foldAllHeadings"));
+    execute(QStringLiteral("nextHeading"));
+    QThread::msleep(120);
+    const QJsonObject headingRevealScrolled = editorStatus();
+    const double revealAnchorY =
+        headingRevealScrolled.value(QStringLiteral("editorContentOffsetY")).toDouble()
+        + headingRevealScrolled.value(QStringLiteral("cursorRectY")).toDouble()
+        - headingRevealScrolled.value(QStringLiteral("scrollViewportHeight")).toDouble() / 3.0;
+    addCheck(checks, details, QStringLiteral("headingNavigationScrollAfterReveal"),
+             headingRevealScrolled.value(QStringLiteral("cursorPosition")).toInt()
+                    == nestedScrollB
+                 && std::abs(headingRevealScrolled.value(QStringLiteral("scrollContentY")).toDouble()
+                             - revealAnchorY) < 3.0
+                 && headingRevealScrolled.value(QStringLiteral("scrollContentY")).toDouble() > 0.0,
+             QJsonObject{{QStringLiteral("targetB"), nestedScrollB},
+                         {QStringLiteral("anchorY"), revealAnchorY},
+                         {QStringLiteral("status"), headingRevealScrolled}});
+
+    // 已处于边界无跳转时不滚动，视口保持原位置。
+    setTextAndSelection(headingScrollText, headingScrollC, headingScrollC);
+    setScrollY(0);
+    QThread::msleep(50);
+    execute(QStringLiteral("nextHeading"));
+    QThread::msleep(120);
+    const QJsonObject headingBoundary = editorStatus();
+    addCheck(checks, details, QStringLiteral("headingNavigationNoJumpKeepsViewport"),
+             headingBoundary.value(QStringLiteral("cursorPosition")).toInt() == headingScrollC
+                 && std::abs(headingBoundary.value(QStringLiteral("scrollContentY")).toDouble())
+                        < 1.5,
+             headingBoundary);
+
     setTextAndSelection(QStringLiteral("one\ntwo"), 0, 7);
     execute(QStringLiteral("toggleList"));
     const bool listOn = editorText() == QStringLiteral("- one\n- two");

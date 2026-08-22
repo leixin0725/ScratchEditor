@@ -29,7 +29,9 @@ public:
     bool unfoldAll();
     bool foldCurrent();
     bool unfoldCurrent();
-    bool navigate(bool backwards);
+    // 跳到上一个/下一个标题：成功返回目标标题的块起始位置；无可跳转目标
+    // （文档无标题或已处于边界）返回 -1。
+    int navigate(bool backwards);
     bool toggleAt(int headingPosition);
     bool revealPosition(int position);
 

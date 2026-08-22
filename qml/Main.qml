@@ -268,6 +268,9 @@ Window {
     property bool statusPanelOpen: false
     property bool statusCopyFeedback: false
     property bool inputScrollHoldBottom: false
+    // 标题跳转（Ctrl+Up/Down）期间由 C++ 置位：抑制跳转瞬间的光标瞬时贴边
+    // 跟随，让整段跳转由统一的轻量滚动动画完成（跳转后标题锚定到视口上 1/3）。
+    property bool suppressHeadingCursorFollow: false
 
     function scrollToBottom() {
         editorViewport.contentY = Math.max(0, editorViewport.contentHeight - editorViewport.height)
@@ -1029,6 +1032,11 @@ Window {
             onContentHeightChanged: root.refreshHeadingNavigationHighlightGeometry()
 
             onCursorRectangleChanged: {
+                // 标题跳转期间抑制瞬时贴边跟随，跳转的对齐滚动稍后由统一的
+                // 轻量动画入口执行。
+                if (root.suppressHeadingCursorFollow) {
+                    return
+                }
                 // 文档变更期间 QML 会短暂给出过期/无效的光标矩形（如落在
                 // 文档开头附近），若直接跟随会把视图拉回顶部。用 positionAt
                 // 反查该矩形对应的位置并与当前光标位置比对，不一致则跳过。
