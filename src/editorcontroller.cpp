@@ -1,5 +1,6 @@
 #include "editorcontroller.h"
 #include "appsettings.h"
+#include "cjktextprocessor.h"
 #include "clipboardhistorycommandgate.h"
 #include "clipboardhistorycoordinator.h"
 #include "editorcommandregistry.h"
@@ -2758,16 +2759,30 @@ void EditorController::updateStatusPanelSummary()
         return;
     }
     int total = 0;
+    QTextDocument *document = nullptr;
     if (auto *quickDocument = qvariant_cast<QQuickTextDocument *>(
             m_editor->property("textDocument"))) {
-        total = qMax(0, quickDocument->textDocument()->characterCount() - 1);
+        document = quickDocument->textDocument();
+        total = qMax(0, document->characterCount() - 1);
     }
     const int selectionStart = m_editor->property("selectionStart").toInt();
     const int selectionEnd = m_editor->property("selectionEnd").toInt();
+    int totalHan = 0;
+    int selectionHan = 0;
+    if (document) {
+        const QString text = document->toPlainText();
+        totalHan = CjkText::countHanCharacters(text);
+        if (selectionStart >= 0 && selectionEnd > selectionStart) {
+            selectionHan =
+                CjkText::countHanCharacters(text, selectionStart, selectionEnd);
+        }
+    }
     const QString summary =
         selectionStart >= 0 && selectionEnd > selectionStart
-            ? QStringLiteral("%1 / %2 字").arg(selectionEnd - selectionStart).arg(total)
-            : QStringLiteral("共 %1 字").arg(total);
+            ? QStringLiteral("%1 / %2 字 · %3 / %4 汉字")
+                  .arg(selectionEnd - selectionStart).arg(total)
+                  .arg(selectionHan).arg(totalHan)
+            : QStringLiteral("共 %1 字 · %2 汉字").arg(total).arg(totalHan);
     if (m_statusPanelSummary != summary) {
         m_statusPanelSummary = summary;
         emit statusPanelSummaryChanged();

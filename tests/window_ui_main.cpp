@@ -889,12 +889,22 @@ int main(int argc, char *argv[])
         {{QStringLiteral("start"), 0}, {QStringLiteral("end"), 2}});
     addCheck(checks, details, QStringLiteral("statusPanelSummaryPlain"),
              summaryPlain.value(QStringLiteral("statusPanelSummary")).toString()
-                 == QStringLiteral("共 8 字"),
+                 == QStringLiteral("共 8 字 · 2 汉字"),
              summaryPlain);
     addCheck(checks, details, QStringLiteral("statusPanelSummarySelected"),
              summarySelected.value(QStringLiteral("statusPanelSummary")).toString()
-                 == QStringLiteral("2 / 8 字"),
+                 == QStringLiteral("2 / 8 字 · 2 / 2 汉字"),
              summarySelected);
+
+    request(QStringLiteral("testSetSelection"),
+            {{QStringLiteral("start"), 0}, {QStringLiteral("end"), 0}});
+    request(QStringLiteral("testSetText"),
+            {{QStringLiteral("text"), QStringLiteral("こんにちは、한글你好")}});
+    const QJsonObject summaryKana = request(QStringLiteral("status"));
+    addCheck(checks, details, QStringLiteral("statusPanelSummaryHanExcludesKanaHangul"),
+             summaryKana.value(QStringLiteral("statusPanelSummary")).toString()
+                 == QStringLiteral("共 10 字 · 2 汉字"),
+             summaryKana);
 
     const QJsonObject shortcut = request(
         QStringLiteral("testSetShortcut"),

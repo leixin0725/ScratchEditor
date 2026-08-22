@@ -315,7 +315,7 @@ private:
     QString m_firstFrameColor;
     QString m_statusMessage = QStringLiteral("Esc 关闭并复制 · Ctrl+S 关闭并输入 · Ctrl+W 关闭不保存");
     bool m_statusHealthy = true;
-    QString m_statusPanelSummary = QStringLiteral("共 0 字");
+    QString m_statusPanelSummary = QStringLiteral("共 0 字 · 0 汉字");
     bool m_clipboardHealthy = true;
     quintptr m_startupForegroundWindow = 0;
     quintptr m_previousForegroundWindow = 0;
