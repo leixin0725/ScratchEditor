@@ -54,7 +54,8 @@ class EditorController final : public QObject, public QAbstractNativeEventFilter
                    NOTIFY statusPanelSettingsChanged)
     Q_PROPERTY(int statusPanelMaxWidth READ statusPanelMaxWidth
                    NOTIFY statusPanelSettingsChanged)
-    Q_PROPERTY(QStringList statusPanelHints READ statusPanelHints CONSTANT)
+    Q_PROPERTY(QStringList statusPanelHints READ statusPanelHints
+                   NOTIFY statusPanelHintsChanged)
     Q_PROPERTY(QString statusPanelSummary READ statusPanelSummary
                    NOTIFY statusPanelSummaryChanged)
     Q_PROPERTY(bool clipboardHealthy READ clipboardHealthy NOTIFY clipboardStateChanged)
@@ -184,6 +185,7 @@ signals:
     void visibleChanged();
     void statusMessageChanged();
     void statusPanelSettingsChanged();
+    void statusPanelHintsChanged();
     void statusPanelSummaryChanged();
     void clipboardStateChanged();
     void clipboardHistoryStateChanged();

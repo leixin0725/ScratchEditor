@@ -145,11 +145,14 @@ int main(int argc, char *argv[])
 
     int failures = 0;
     const QStringList externalHints = StatusPanelHints::forMode(true);
-    failures += !check(externalHints.size() == 2
+    failures += !check(externalHints.size() == 4
                            && externalHints.at(0)
                                   == QStringLiteral("Ctrl+S / Esc · 保存并返回 CLI")
-                           && externalHints.at(1) == QStringLiteral("Ctrl+W · 不保存退出"),
-                       QStringLiteral("外部模式状态面板快捷键提示应为 2 行且内容正确"));
+                           && externalHints.at(1) == QStringLiteral("Ctrl+W · 不保存退出")
+                           && externalHints.at(2)
+                                  == QStringLiteral("Ctrl+Shift+P · 打开命令面板")
+                           && externalHints.at(3) == QStringLiteral("Ctrl+, · 打开设置"),
+                       QStringLiteral("外部模式状态面板快捷键提示应为 4 行且内容正确"));
     QProcessEnvironment residentEnvironment = QProcessEnvironment::systemEnvironment();
     residentEnvironment.insert(
         QStringLiteral("SCRATCHEDITOR_SERVER_NAME"),

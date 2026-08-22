@@ -910,6 +910,27 @@ int main(int argc, char *argv[])
         QStringLiteral("testSetShortcut"),
         {{QStringLiteral("commandId"), QStringLiteral("toggleBold")},
          {QStringLiteral("sequence"), QStringLiteral("Ctrl+Alt+B")}});
+    const QJsonObject paletteShortcut = request(
+        QStringLiteral("testSetShortcut"),
+        {{QStringLiteral("commandId"), QStringLiteral("commandPalette")},
+         {QStringLiteral("sequence"), QStringLiteral("Ctrl+Alt+P")}});
+    const QJsonObject hintsAfterChange = request(QStringLiteral("status"));
+    const QJsonArray changedHints =
+        hintsAfterChange.value(QStringLiteral("statusPanelHints")).toArray();
+    bool changedHintsMatch = changedHints.size() == expectedHints.size();
+    int paletteHintCount = 0;
+    for (int index = 0; index < changedHints.size() && changedHintsMatch; ++index) {
+        const QString hint = changedHints.at(index).toString();
+        changedHintsMatch = !hint.contains(QStringLiteral("Ctrl+Shift+P"));
+        if (hint == QStringLiteral("Ctrl+Alt+P · 打开命令面板")) {
+            ++paletteHintCount;
+        }
+    }
+    changedHintsMatch = changedHintsMatch && paletteHintCount == 1;
+    addCheck(checks, details, QStringLiteral("statusPanelHintsFollowShortcutChange"),
+             paletteShortcut.value(QStringLiteral("configured")).toBool()
+                 && changedHintsMatch,
+             hintsAfterChange);
     const QJsonObject config = request(QStringLiteral("testConfigKeys"));
     const QJsonArray keys = config.value(QStringLiteral("keys")).toArray();
     QFile settingsFile(configFile);

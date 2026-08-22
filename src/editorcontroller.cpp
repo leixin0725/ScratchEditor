@@ -278,6 +278,8 @@ EditorController::EditorController(bool testMode, QElapsedTimer *startupTimer,
         m_settings.get(), clipboardHistoryAvailable(), this);
     connect(m_commands.get(), &EditorCommandRegistry::commandsChanged,
             this, &EditorController::commandsChanged);
+    connect(m_commands.get(), &EditorCommandRegistry::commandsChanged,
+            this, &EditorController::statusPanelHintsChanged);
     connect(m_commands.get(), &EditorCommandRegistry::headingFoldMarkersChanged,
             this, &EditorController::headingFoldMarkersChanged);
     connect(m_commands.get(), &EditorCommandRegistry::headingNavigationHighlightChanged,
@@ -547,7 +549,10 @@ int EditorController::statusPanelMaxWidth() const
 
 QStringList EditorController::statusPanelHints() const
 {
-    return StatusPanelHints::forMode(externalFileMode());
+    return StatusPanelHints::forMode(
+        externalFileMode(),
+        m_commands ? m_commands->shortcut(QStringLiteral("commandPalette")) : QString(),
+        m_commands ? m_commands->shortcut(QStringLiteral("settings")) : QString());
 }
 
 QString EditorController::statusPanelSummary() const
