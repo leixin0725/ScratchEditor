@@ -76,10 +76,18 @@ Window {
         for (let index = 0; index < headingFoldRepeater.count; ++index) {
             const marker = headingFoldRepeater.itemAt(index)
             if (marker && marker.modelData.position === position) {
+                const currentHeadingRectangle = editor.positionToRectangle(position)
+                const gutterSceneX = editorViewport.x + headingFoldGutter.x
+                const gutterSceneY = editorViewport.y - editorViewport.contentY
+                    + headingFoldGutter.y
                 return {
                     "iconName": marker.iconName,
                     "iconValid": marker.iconValid,
-                    "iconSize": marker.iconSize
+                    "iconSize": marker.iconSize,
+                    "x": gutterSceneX + marker.x,
+                    "y": gutterSceneY + marker.y,
+                    "expectedX": gutterSceneX,
+                    "expectedY": gutterSceneY + currentHeadingRectangle.y
                 }
             }
         }
@@ -945,12 +953,15 @@ Window {
                                                         : root.headingFoldExpandedIconName
                     readonly property bool iconValid: foldIcon.valid
                     readonly property int iconSize: foldIcon.size
+                    readonly property real editorLayoutRevision:
+                        editor.width + editor.contentHeight
                     readonly property rect headingRectangle:
-                        editor.positionToRectangle(modelData.position)
+                        editor.positionToRectangle(
+                            modelData.position + editorLayoutRevision * 0)
                     x: 0
-                    // contentHeight 参与绑定，确保折叠、换行、字号和窗口宽度改变后
-                    // 重新计算标题第一视觉行的位置。
-                    y: Math.round(headingRectangle.y + editor.contentHeight * 0)
+                    // 宽度与内容高度共同参与 headingRectangle 绑定，确保历史栏开合、
+                    // 窗口缩放、折叠、换行和字号变化后重新计算标题第一视觉行。
+                    y: Math.round(headingRectangle.y)
                     width: headingFoldGutter.width
                     height: Math.max(1, headingRectangle.height)
 

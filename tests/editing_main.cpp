@@ -928,6 +928,29 @@ int main(int argc, char *argv[])
                          {QStringLiteral("changedContent"), changedNonEmptyHeadingLevel},
                          {QStringLiteral("selection"), removedSelectedHeadings}});
 
+    const QString emptyFirstLineText = QStringLiteral("\nbody");
+    setTextAndSelection(emptyFirstLineText, 0, 0);
+    const QJsonObject emptyFirstLineDirectHeading = execute(QStringLiteral("setHeading3"));
+    const QJsonObject emptyFirstLineDirectHeadingUndo = request(QStringLiteral("testUndo"));
+    setTextAndSelection(emptyFirstLineText, 0, 0);
+    const QJsonObject emptyFirstLineCycledHeading = execute(QStringLiteral("cycleHeading"));
+    addCheck(checks, details, QStringLiteral("headingCommandsKeepFollowingLineAfterEmptyFirstLine"),
+             emptyFirstLineDirectHeading.value(QStringLiteral("text")).toString()
+                     == QStringLiteral("### \nbody")
+                 && emptyFirstLineDirectHeading.value(
+                        QStringLiteral("cursorPosition")).toInt() == 4
+                 && emptyFirstLineDirectHeadingUndo.value(QStringLiteral("text")).toString()
+                     == emptyFirstLineText
+                 && emptyFirstLineDirectHeadingUndo.value(
+                        QStringLiteral("cursorPosition")).toInt() == 0
+                 && emptyFirstLineCycledHeading.value(QStringLiteral("text")).toString()
+                     == QStringLiteral("# \nbody")
+                 && emptyFirstLineCycledHeading.value(
+                        QStringLiteral("cursorPosition")).toInt() == 2,
+             QJsonObject{{QStringLiteral("direct"), emptyFirstLineDirectHeading},
+                         {QStringLiteral("undo"), emptyFirstLineDirectHeadingUndo},
+                         {QStringLiteral("cycle"), emptyFirstLineCycledHeading}});
+
     // --- 标题折叠与标题导航 ---
     const QString headingTree = QStringLiteral(
         "前言\n# A\nA body\n## B\nB body\n### C\nC body\n# D\nD body");
@@ -1350,6 +1373,18 @@ int main(int argc, char *argv[])
                  && deletedLastLine.value(QStringLiteral("text")).toString()
                     == QStringLiteral("a\nb"),
              deletedMiddleLine);
+
+    setTextAndSelection(QStringLiteral("\nbody"), 0, 0);
+    const QJsonObject deletedEmptyFirstLine = execute(QStringLiteral("deleteLine"));
+    const QJsonObject deletedEmptyFirstLineUndo = request(QStringLiteral("testUndo"));
+    addCheck(checks, details, QStringLiteral("deleteEmptyFirstLineKeepsFollowingText"),
+             deletedEmptyFirstLine.value(QStringLiteral("text")).toString()
+                     == QStringLiteral("body")
+                 && deletedEmptyFirstLine.value(QStringLiteral("cursorPosition")).toInt() == 0
+                 && deletedEmptyFirstLineUndo.value(QStringLiteral("text")).toString()
+                     == QStringLiteral("\nbody"),
+             QJsonObject{{QStringLiteral("deleted"), deletedEmptyFirstLine},
+                         {QStringLiteral("undo"), deletedEmptyFirstLineUndo}});
 
     // --- 整行复制 / 剪切 / 智能粘贴 ---
     setClipboard(QString());

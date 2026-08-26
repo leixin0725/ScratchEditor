@@ -1020,6 +1020,16 @@ int main(int argc, char *argv[])
              {QStringLiteral("width"), 920}, {QStringLiteral("height"), 640}});
     request(QStringLiteral("show"));
     QThread::msleep(180);
+    const QString historyHeadingText = QStringLiteral("# ")
+        + QString(200, QLatin1Char('W'))
+        + QStringLiteral("\nroot body\n## Child\nchild body");
+    const int historyChildHeadingPosition = historyHeadingText.indexOf(QStringLiteral("## Child"));
+    request(QStringLiteral("testSetText"),
+            {{QStringLiteral("text"), historyHeadingText}});
+    QThread::msleep(40);
+    const QJsonObject historyHeadingClosedMarker = request(
+        QStringLiteral("testHeadingFoldMarkerState"),
+        {{QStringLiteral("position"), historyChildHeadingPosition}});
     const QJsonObject historyInitial = request(QStringLiteral("status"));
     addCheck(checks, details, QStringLiteral("historyPanelDefaults"),
              historyInitial.value(QStringLiteral("historyAvailable")).toBool()
@@ -1048,6 +1058,9 @@ int main(int argc, char *argv[])
     const QJsonObject historyCommand = execute(QStringLiteral("clipboardHistory"));
     QThread::msleep(150);
     const QJsonObject wideHistory = request(QStringLiteral("status"));
+    const QJsonObject historyHeadingOpenMarker = request(
+        QStringLiteral("testHeadingFoldMarkerState"),
+        {{QStringLiteral("position"), historyChildHeadingPosition}});
     addCheck(checks, details, QStringLiteral("historyCommandOpensFocusedPushPanel"),
              historyCommand.value(QStringLiteral("executed")).toBool()
                  && wideHistory.value(QStringLiteral("historyPanelOpen")).toBool()
@@ -1061,6 +1074,27 @@ int main(int argc, char *argv[])
     addCheck(checks, details, QStringLiteral("historyPanelCornerShapeOpen"),
              hasHistoryPanelCornerShape(wideHistory),
              historyPanelCornerDetails(wideHistory));
+    const QJsonObject historyHeadingClosedGeometry = historyHeadingClosedMarker.value(
+        QStringLiteral("marker")).toObject();
+    const QJsonObject historyHeadingOpenGeometry = historyHeadingOpenMarker.value(
+        QStringLiteral("marker")).toObject();
+    addCheck(checks, details, QStringLiteral("headingFoldMarkersFollowHistoryPanelOpen"),
+             historyHeadingClosedMarker.value(QStringLiteral("markerFound")).toBool()
+                 && historyHeadingOpenMarker.value(QStringLiteral("markerFound")).toBool()
+                 && qAbs(historyHeadingClosedGeometry.value(
+                            QStringLiteral("y")).toDouble()
+                         - historyHeadingClosedGeometry.value(
+                            QStringLiteral("expectedY")).toDouble()) <= 1.0
+                 && qAbs(historyHeadingOpenGeometry.value(
+                            QStringLiteral("y")).toDouble()
+                         - historyHeadingOpenGeometry.value(
+                            QStringLiteral("expectedY")).toDouble()) <= 1.0
+                 && historyHeadingOpenGeometry.value(QStringLiteral("y")).toDouble()
+                     > historyHeadingClosedGeometry.value(QStringLiteral("y")).toDouble()
+                 && historyHeadingOpenGeometry.value(QStringLiteral("x")).toDouble()
+                     > historyHeadingClosedGeometry.value(QStringLiteral("x")).toDouble(),
+             QJsonObject{{QStringLiteral("closed"), historyHeadingClosedMarker},
+                         {QStringLiteral("open"), historyHeadingOpenMarker}});
     const double titleXDiff = qAbs(
         wideHistory.value(QStringLiteral("historyTitleX")).toDouble()
         - wideHistory.value(QStringLiteral("headerTitleX")).toDouble());
@@ -1116,6 +1150,9 @@ int main(int argc, char *argv[])
              {QStringLiteral("width"), 960}, {QStringLiteral("height"), 660}});
     QThread::msleep(30);
     const QJsonObject resizedOpenHistory = request(QStringLiteral("status"));
+    const QJsonObject historyHeadingResizedMarker = request(
+        QStringLiteral("testHeadingFoldMarkerState"),
+        {{QStringLiteral("position"), historyChildHeadingPosition}});
     const double openWidthDiff = qAbs(resizedOpenHistory.value(
         QStringLiteral("editorViewportWidth")).toDouble()
         - resizedOpenHistory.value(QStringLiteral("editorVisibleWidth")).toDouble());
@@ -1133,6 +1170,19 @@ int main(int argc, char *argv[])
     addCheck(checks, details, QStringLiteral("historyPanelCornerShapeAfterResize"),
              hasHistoryPanelCornerShape(resizedOpenHistory),
              historyPanelCornerDetails(resizedOpenHistory));
+    const QJsonObject historyHeadingResizedGeometry = historyHeadingResizedMarker.value(
+        QStringLiteral("marker")).toObject();
+    addCheck(checks, details, QStringLiteral("headingFoldMarkersFollowResizeWithHistoryOpen"),
+             historyHeadingResizedMarker.value(QStringLiteral("markerFound")).toBool()
+                 && qAbs(historyHeadingResizedGeometry.value(
+                            QStringLiteral("x")).toDouble()
+                         - historyHeadingResizedGeometry.value(
+                            QStringLiteral("expectedX")).toDouble()) <= 1.0
+                 && qAbs(historyHeadingResizedGeometry.value(
+                            QStringLiteral("y")).toDouble()
+                         - historyHeadingResizedGeometry.value(
+                            QStringLiteral("expectedY")).toDouble()) <= 1.0,
+             historyHeadingResizedMarker);
     request(QStringLiteral("testSetGeometry"),
             {{QStringLiteral("x"), 100}, {QStringLiteral("y"), 100},
              {QStringLiteral("width"), 920}, {QStringLiteral("height"), 640}});
@@ -1141,9 +1191,25 @@ int main(int argc, char *argv[])
     execute(QStringLiteral("clipboardHistory"));
     QThread::msleep(150);
     const QJsonObject toggledClosedHistory = request(QStringLiteral("status"));
+    const QJsonObject historyHeadingReclosedMarker = request(
+        QStringLiteral("testHeadingFoldMarkerState"),
+        {{QStringLiteral("position"), historyChildHeadingPosition}});
     addCheck(checks, details, QStringLiteral("historyCommandTogglesClosed"),
              !toggledClosedHistory.value(QStringLiteral("historyPanelOpen")).toBool(),
              toggledClosedHistory);
+    const QJsonObject historyHeadingReclosedGeometry = historyHeadingReclosedMarker.value(
+        QStringLiteral("marker")).toObject();
+    addCheck(checks, details, QStringLiteral("headingFoldMarkersFollowHistoryPanelClose"),
+             historyHeadingReclosedMarker.value(QStringLiteral("markerFound")).toBool()
+                 && qAbs(historyHeadingReclosedGeometry.value(
+                            QStringLiteral("x")).toDouble()
+                         - historyHeadingReclosedGeometry.value(
+                            QStringLiteral("expectedX")).toDouble()) <= 1.0
+                 && qAbs(historyHeadingReclosedGeometry.value(
+                            QStringLiteral("y")).toDouble()
+                         - historyHeadingReclosedGeometry.value(
+                            QStringLiteral("expectedY")).toDouble()) <= 1.0,
+             historyHeadingReclosedMarker);
     // 动画开启、历史面板闭合时缩放：宽度同样必须即时跟随（修复前 30ms 处差值约 30px）。
     request(QStringLiteral("testSetGeometry"),
             {{QStringLiteral("x"), 100}, {QStringLiteral("y"), 100},

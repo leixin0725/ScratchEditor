@@ -1781,6 +1781,21 @@ void EditorController::buildCommandHandlers()
             response.insert(QStringLiteral("command"), r.command);
             sendResponse(r.socket, response, r.startedNs, r.requestId);
         }}},
+        {QStringLiteral("testHeadingFoldMarkerState"), {Gate::Test,
+         [this](const DispatchRequest &r) {
+             const int position = r.request.value(QStringLiteral("position")).toInt();
+             QVariant markerState;
+             const bool invoked = m_window && QMetaObject::invokeMethod(
+                 m_window, "headingFoldMarkerStateForTest", Qt::DirectConnection,
+                 Q_RETURN_ARG(QVariant, markerState), Q_ARG(QVariant, QVariant(position)));
+             QJsonObject response = statusObject();
+             response.insert(QStringLiteral("command"), r.command);
+             response.insert(QStringLiteral("markerFound"),
+                             invoked && !markerState.toMap().isEmpty());
+             response.insert(QStringLiteral("marker"),
+                             QJsonObject::fromVariantMap(markerState.toMap()));
+             sendResponse(r.socket, response, r.startedNs, r.requestId);
+         }}},
         {QStringLiteral("testClickHeadingFoldMarker"), {Gate::Test, [this](const DispatchRequest &r) {
             const int position = r.request.value(QStringLiteral("position")).toInt();
             QVariant markerResult;
