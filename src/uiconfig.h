@@ -29,6 +29,8 @@ public:
     QString defaultTheme() const;
     bool defaultAnimationsEnabled() const;
 
+    QString editorDefaultFontFamily() const;
+    QString editorDefaultFallbackFontFamily() const;
     int editorDefaultFontSize() const;
     int editorFontSizeMin() const;
     int editorFontSizeMax() const;

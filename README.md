@@ -154,7 +154,8 @@ Windows 登录用户上下文仍有能力解密，因此不要把它当作抵御
 
 ## 外观、设置与配置
 
-按 `Ctrl+,` 打开设置页，可调整深浅主题、编辑字体、字号、动画开关、状态面板显示方式，
+按 `Ctrl+,` 打开设置页，可调整深浅主题、编辑区 ASCII 主字体、中文 fallback 字体、字号、
+动画开关、状态面板显示方式，
 以及各编辑命令的快捷键。窗口尺寸会自动记忆；临时剪贴板编辑器与 CLI 外部编辑器分别保存
 自己的窗口几何。
 
@@ -165,9 +166,13 @@ Windows 登录用户上下文仍有能力解密，因此不要把它当作抵御
 %LOCALAPPDATA%\ScratchEditor\ScratchEditor\ui.json
 ```
 
-`markdown-style.json` 控制 Markdown 配色、界面强调色、代码背景和等宽字体，保存后会自动
+`markdown-style.json` 控制 Markdown 配色、界面强调色和代码背景，保存后会自动
 热更新；`ui.json` 控制窗口、布局、面板和动画等设计参数，修改后需要重启应用。后续构建不会
 覆盖已经存在的用户副本。字段和合法取值见 [`config/README.md`](config/README.md)。
+
+编辑区默认按 `Consolas → NSimSun` 的有序字体链渲染：ASCII 优先使用 Consolas，Consolas
+缺失的汉字和全角标点回退到 NSimSun；Consolas 已提供的弯引号等字形不会强制切换字体。
+正文、行内代码和围栏代码共用设置页中的同一字体链。
 
 ## 常见问题
 
@@ -302,6 +307,8 @@ UTF-16 code unit 精确去重；再次复制完全相同的文本会保留稳定
   光标位于行中时，引号类符号（`` ` ``、`"`、`'`、`“”`、`‘’` 等）只输入单个开符号，
   输入闭符号完成包裹后再收尾：包裹内容含中文时 ASCII 引号转为全角；全角引号包裹
   会在与相邻中文/字母数字之间补自动空格（如 `中文 “内容” 结束`），纯 ASCII 引号包裹保持原样；
+  当前行已有同类未闭合引号时，在行尾输入引号会优先补单个闭符号，不触发新的一对自动补全；
+  检测不跨行，并忽略反斜杠转义的引号；
   行尾的 CJK 引号自动补全同样补空格（如 `中文` 后输入 `"` 得到 `中文 “”`）；
   先输闭符号、再补开符号完成包裹时，边界自动空格行为与先开后闭一致。
 - 行首（列 0）连续输入三个反引号自动补全围栏代码块：光标后本行仍有文字时，闭合围栏单独成行、
@@ -523,10 +530,11 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\switch-ahk-edi
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\run-editor-switch-tests.ps1
 ```
 
-用户可写配置存放在 Qt `AppConfigLocation` 下的 `settings.ini`（schema 版本 2）。
+用户可写配置存放在 Qt `AppConfigLocation` 下的 `settings.ini`（schema 版本 3）。
 首次创建集中配置时会迁移旧 Native Settings 中的窗口几何和快捷键；从 schema 1 升级时
 自动把 `editor/fontFamily`、`editor/fontPointSize`、`ui/animationsEnabled`
-迁移到 `appearance/` 段落。测试通过独立环境变量 `SCRATCHEDITOR_SETTINGS_FILE`
+迁移到 `appearance/` 段落；schema 3 新增 `appearance/fallbackFontFamily`，旧配置未设置时
+使用 `ui.json` 中的默认 fallback 字体。测试通过独立环境变量 `SCRATCHEDITOR_SETTINGS_FILE`
 使用临时 INI，不会触碰用户正式配置。
 
 ## CLI 外部编辑器

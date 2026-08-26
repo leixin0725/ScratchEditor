@@ -19,6 +19,7 @@ constexpr auto geometryKey = "window/geometry";
 constexpr auto externalGeometryKey = "window/externalGeometry";
 constexpr auto themeKey = "appearance/theme";
 constexpr auto fontFamilyKey = "appearance/fontFamily";
+constexpr auto fallbackFontFamilyKey = "appearance/fallbackFontFamily";
 constexpr auto fontPointSizeKey = "appearance/fontPointSize";
 constexpr auto animationsEnabledKey = "appearance/animationsEnabled";
 constexpr auto statusPanelFontSizeKey = "statusPanel/fontSize";
@@ -132,12 +133,20 @@ AppSettings::Appearance AppSettings::appearance() const
 {
     const QString fallbackTheme =
         m_uiConfig ? m_uiConfig->defaultTheme() : QString::fromLatin1(defaultTheme);
+    const QString fallbackPrimaryFamily = m_uiConfig
+        ? m_uiConfig->editorDefaultFontFamily() : QStringLiteral("Consolas");
+    const QString fallbackSecondaryFamily = m_uiConfig
+        ? m_uiConfig->editorDefaultFallbackFontFamily() : QStringLiteral("NSimSun");
     const int fallbackFontSize =
         m_uiConfig ? m_uiConfig->editorDefaultFontSize() : 13;
     const bool fallbackAnimations =
         m_uiConfig ? m_uiConfig->defaultAnimationsEnabled() : true;
-    Appearance result{fallbackTheme, defaultFontFamily(), fallbackFontSize,
-                      fallbackAnimations};
+    const QString primaryFamily = validFontFamily(fallbackPrimaryFamily)
+        ? fallbackPrimaryFamily : defaultFontFamily();
+    const QString secondaryFamily = validFontFamily(fallbackSecondaryFamily)
+        ? fallbackSecondaryFamily : defaultFontFamily();
+    Appearance result{fallbackTheme, primaryFamily, secondaryFamily,
+                      fallbackFontSize, fallbackAnimations};
     if (!m_settings) {
         return result;
     }
@@ -152,6 +161,12 @@ AppSettings::Appearance AppSettings::appearance() const
     if (validFontFamily(storedFamily)) {
         result.fontFamily = storedFamily;
     }
+    const QString storedFallbackFamily =
+        m_settings->value(QLatin1StringView(fallbackFontFamilyKey),
+                          result.fallbackFontFamily).toString().trimmed();
+    if (validFontFamily(storedFallbackFamily)) {
+        result.fallbackFontFamily = storedFallbackFamily;
+    }
     const int sizeMin = m_uiConfig ? m_uiConfig->editorFontSizeMin() : 9;
     const int sizeMax = m_uiConfig ? m_uiConfig->editorFontSizeMax() : 24;
     const int storedSize = m_settings->value(QLatin1StringView(fontPointSizeKey),
@@ -165,11 +180,12 @@ AppSettings::Appearance AppSettings::appearance() const
 }
 
 bool AppSettings::setAppearance(const QString &theme, const QString &fontFamily,
-                                int fontPointSize, bool animationsEnabled,
-                                QString *errorMessage)
+                                const QString &fallbackFontFamily, int fontPointSize,
+                                bool animationsEnabled, QString *errorMessage)
 {
     const QString normalizedTheme = theme.trimmed().toLower();
     const QString normalizedFamily = fontFamily.trimmed();
+    const QString normalizedFallbackFamily = fallbackFontFamily.trimmed();
     if (!validTheme(normalizedTheme)) {
         if (errorMessage) {
             *errorMessage = QStringLiteral("主题必须是 dark 或 light");
@@ -179,6 +195,13 @@ bool AppSettings::setAppearance(const QString &theme, const QString &fontFamily,
     if (!validFontFamily(normalizedFamily)) {
         if (errorMessage) {
             *errorMessage = QStringLiteral("系统中不存在字体：%1").arg(normalizedFamily);
+        }
+        return false;
+    }
+    if (!validFontFamily(normalizedFallbackFamily)) {
+        if (errorMessage) {
+            *errorMessage = QStringLiteral("系统中不存在 fallback 字体：%1")
+                                .arg(normalizedFallbackFamily);
         }
         return false;
     }
@@ -197,6 +220,8 @@ bool AppSettings::setAppearance(const QString &theme, const QString &fontFamily,
 
     m_settings->setValue(QLatin1StringView(themeKey), normalizedTheme);
     m_settings->setValue(QLatin1StringView(fontFamilyKey), normalizedFamily);
+    m_settings->setValue(QLatin1StringView(fallbackFontFamilyKey),
+                         normalizedFallbackFamily);
     m_settings->setValue(QLatin1StringView(fontPointSizeKey), fontPointSize);
     m_settings->setValue(QLatin1StringView(animationsEnabledKey), animationsEnabled);
     writeSchemaVersion();

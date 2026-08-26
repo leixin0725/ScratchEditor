@@ -27,6 +27,7 @@ Item {
             opacity: 0
             property string draftTheme: uiConfig.preferences.theme
             property string draftFontFamily: ""
+            property string draftFallbackFontFamily: ""
             property int draftFontPointSize: uiConfig.fonts.editorDefaultSize
             property bool draftAnimationsEnabled: uiConfig.preferences.animationsEnabled
             property int draftStatusPanelFontSize: uiConfig.panels.statusPanel.defaultFontSize
@@ -45,6 +46,7 @@ Item {
             function activate() {
                 draftTheme = root.appController.theme
                 draftFontFamily = root.appController.editorFontFamily
+                draftFallbackFontFamily = root.appController.editorFallbackFontFamily
                 draftFontPointSize = root.appController.editorFontPointSize
                 draftAnimationsEnabled = root.appController.animationsEnabled
                 draftStatusPanelFontSize = root.appController.statusPanelFontSize
@@ -52,6 +54,7 @@ Item {
                 draftStatusPanelHideDelayMs = root.appController.statusPanelHideDelayMs
                 draftStatusPanelMaxWidth = root.appController.statusPanelMaxWidth
                 fontFamilyInput.text = draftFontFamily
+                fallbackFontFamilyInput.text = draftFallbackFontFamily
                 fontSizeInput.text = draftFontPointSize.toString()
                 statusPanelFontSizeInput.text = draftStatusPanelFontSize.toString()
                 statusPanelShowDelayInput.text = draftStatusPanelShowDelayMs.toString()
@@ -69,11 +72,13 @@ Item {
                 const panelHideDelayMs = Number(statusPanelHideDelayInput.text)
                 const panelMaxWidth = Number(statusPanelMaxWidthInput.text)
                 if (root.appController.applyAppearance(draftTheme, fontFamilyInput.text,
-                                               requestedSize, draftAnimationsEnabled)
+                                               fallbackFontFamilyInput.text, requestedSize,
+                                               draftAnimationsEnabled)
                     && root.appController.applyStatusPanelSettings(panelFontSize, panelShowDelayMs,
                                                            panelHideDelayMs, panelMaxWidth)) {
                     saveStatus = "设置已保存"
                     draftFontFamily = root.appController.editorFontFamily
+                    draftFallbackFontFamily = root.appController.editorFallbackFontFamily
                     draftFontPointSize = root.appController.editorFontPointSize
                     draftStatusPanelFontSize = root.appController.statusPanelFontSize
                     draftStatusPanelShowDelayMs = root.appController.statusPanelShowDelayMs
@@ -222,7 +227,7 @@ Item {
                             y: uiConfig.panels.settingsPage.rowHeight * 1
                                + uiConfig.panels.settingsPage.labelYOffset
                             width: uiConfig.panels.settingsPage.labelWidth
-                            text: "编辑字体"
+                            text: "ASCII 字体"
                             color: host.themeTextColor
                             font.family: host.uiFontFamily
                             font.pointSize: uiConfig.fonts.normal
@@ -258,6 +263,42 @@ Item {
                             y: uiConfig.panels.settingsPage.rowHeight * 2
                                + uiConfig.panels.settingsPage.labelYOffset
                             width: uiConfig.panels.settingsPage.labelWidth
+                            text: "中文 fallback 字体"
+                            color: host.themeTextColor
+                            font.family: host.uiFontFamily
+                            font.pointSize: uiConfig.fonts.normal
+                        }
+
+                        Rectangle {
+                            x: uiConfig.panels.settingsPage.columnX
+                            y: uiConfig.panels.settingsPage.rowHeight * 2
+                            width: parent.width - uiConfig.panels.settingsPage.columnX
+                            height: uiConfig.layout.controlHeightNormal
+                            radius: uiConfig.layout.radiusNormal
+                            color: host.themeFieldColor
+                            border.color: fallbackFontFamilyInput.activeFocus
+                                          ? host.panelAccentColor : host.themeBorderColor
+                            TextInput {
+                                id: fallbackFontFamilyInput
+                                anchors.fill: parent
+                                anchors.leftMargin: uiConfig.layout.spacingLarge
+                                anchors.rightMargin: uiConfig.layout.spacingLarge
+                                verticalAlignment: TextInput.AlignVCenter
+                                color: host.themeTextColor
+                                selectionColor: host.panelAccentColor
+                                selectedTextColor: host.panelAccentTextColor
+                                font.family: host.uiFontFamily
+                                font.pointSize: uiConfig.fonts.normal
+                                selectByMouse: true
+                                clip: true
+                            }
+                        }
+
+                        Text {
+                            x: 0
+                            y: uiConfig.panels.settingsPage.rowHeight * 3
+                               + uiConfig.panels.settingsPage.labelYOffset
+                            width: uiConfig.panels.settingsPage.labelWidth
                             text: "字号（" + uiConfig.fonts.editorSizeMin
                                   + "–" + uiConfig.fonts.editorSizeMax + "）"
                             color: host.themeTextColor
@@ -267,7 +308,7 @@ Item {
 
                         Rectangle {
                             x: uiConfig.panels.settingsPage.columnX
-                            y: uiConfig.panels.settingsPage.rowHeight * 2
+                            y: uiConfig.panels.settingsPage.rowHeight * 3
                             width: uiConfig.panels.settingsPage.controlWidth
                             height: uiConfig.layout.controlHeightNormal
                             radius: uiConfig.layout.radiusNormal
@@ -293,7 +334,7 @@ Item {
 
                         Text {
                             x: 0
-                            y: uiConfig.panels.settingsPage.rowHeight * 3
+                            y: uiConfig.panels.settingsPage.rowHeight * 4
                                + uiConfig.panels.settingsPage.labelYOffset
                             width: uiConfig.panels.settingsPage.labelWidth
                             text: "轻量动画"
@@ -304,7 +345,7 @@ Item {
 
                         Rectangle {
                             x: uiConfig.panels.settingsPage.columnX
-                            y: uiConfig.panels.settingsPage.rowHeight * 3
+                            y: uiConfig.panels.settingsPage.rowHeight * 4
                             width: uiConfig.panels.settingsPage.controlWidth
                             height: uiConfig.layout.controlHeightNormal
                             radius: uiConfig.layout.radiusPill
@@ -329,7 +370,7 @@ Item {
 
                         Text {
                             x: 0
-                            y: uiConfig.panels.settingsPage.rowHeight * 4
+                            y: uiConfig.panels.settingsPage.rowHeight * 5
                                + uiConfig.panels.settingsPage.labelYOffset
                             width: uiConfig.panels.settingsPage.labelWidth
                             text: "面板字号（" + uiConfig.panels.statusPanel.fontSizeMin
@@ -341,7 +382,7 @@ Item {
 
                         Rectangle {
                             x: uiConfig.panels.settingsPage.columnX
-                            y: uiConfig.panels.settingsPage.rowHeight * 4
+                            y: uiConfig.panels.settingsPage.rowHeight * 5
                             width: uiConfig.panels.settingsPage.controlWidthWide
                             height: uiConfig.layout.controlHeightNormal
                             radius: uiConfig.layout.radiusNormal
@@ -367,7 +408,7 @@ Item {
 
                         Text {
                             x: 0
-                            y: uiConfig.panels.settingsPage.rowHeight * 5
+                            y: uiConfig.panels.settingsPage.rowHeight * 6
                                + uiConfig.panels.settingsPage.labelYOffset
                             width: uiConfig.panels.settingsPage.labelWidth
                             text: "显示延迟（毫秒）"
@@ -378,7 +419,7 @@ Item {
 
                         Rectangle {
                             x: uiConfig.panels.settingsPage.columnX
-                            y: uiConfig.panels.settingsPage.rowHeight * 5
+                            y: uiConfig.panels.settingsPage.rowHeight * 6
                             width: uiConfig.panels.settingsPage.controlWidthWide
                             height: uiConfig.layout.controlHeightNormal
                             radius: uiConfig.layout.radiusNormal
@@ -404,7 +445,7 @@ Item {
 
                         Text {
                             x: 0
-                            y: uiConfig.panels.settingsPage.rowHeight * 6
+                            y: uiConfig.panels.settingsPage.rowHeight * 7
                                + uiConfig.panels.settingsPage.labelYOffset
                             width: uiConfig.panels.settingsPage.labelWidth
                             text: "收起延迟（毫秒）"
@@ -415,7 +456,7 @@ Item {
 
                         Rectangle {
                             x: uiConfig.panels.settingsPage.columnX
-                            y: uiConfig.panels.settingsPage.rowHeight * 6
+                            y: uiConfig.panels.settingsPage.rowHeight * 7
                             width: uiConfig.panels.settingsPage.controlWidthWide
                             height: uiConfig.layout.controlHeightNormal
                             radius: uiConfig.layout.radiusNormal
@@ -441,7 +482,7 @@ Item {
 
                         Text {
                             x: 0
-                            y: uiConfig.panels.settingsPage.rowHeight * 7
+                            y: uiConfig.panels.settingsPage.rowHeight * 8
                                + uiConfig.panels.settingsPage.labelYOffset
                             width: uiConfig.panels.settingsPage.labelWidth
                             text: "最大宽度（像素）"
@@ -452,7 +493,7 @@ Item {
 
                         Rectangle {
                             x: uiConfig.panels.settingsPage.columnX
-                            y: uiConfig.panels.settingsPage.rowHeight * 7
+                            y: uiConfig.panels.settingsPage.rowHeight * 8
                             width: uiConfig.panels.settingsPage.controlWidthWide
                             height: uiConfig.layout.controlHeightNormal
                             radius: uiConfig.layout.radiusNormal

@@ -15,6 +15,7 @@ public:
     struct Appearance {
         QString theme;
         QString fontFamily;
+        QString fallbackFontFamily;
         int fontPointSize = 13;
         bool animationsEnabled = true;
     };
@@ -46,7 +47,8 @@ public:
     void resetShortcuts();
 
     Appearance appearance() const;
-    bool setAppearance(const QString &theme, const QString &fontFamily, int fontPointSize,
+    bool setAppearance(const QString &theme, const QString &fontFamily,
+                       const QString &fallbackFontFamily, int fontPointSize,
                        bool animationsEnabled, QString *errorMessage = nullptr);
     void resetAppearance();
     StatusPanel statusPanel() const;
@@ -57,7 +59,7 @@ public:
     void resetAll();
 
 private:
-    static constexpr int CurrentSchemaVersion = 2;
+    static constexpr int CurrentSchemaVersion = 3;
     static QString settingsPath(bool testMode);
     static QString defaultFontFamily();
     static bool validTheme(const QString &theme);

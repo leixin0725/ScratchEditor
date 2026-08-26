@@ -14,7 +14,6 @@ public:
     struct TokenStyle {
         QColor foreground;
         QColor background;
-        QStringList fontFamilies;
         bool bold = false;
         bool italic = false;
         bool strikeThrough = false;

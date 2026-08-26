@@ -352,6 +352,8 @@ int main(int argc, char *argv[])
         {{QStringLiteral("theme"), initial.value(QStringLiteral("theme")).toString()},
          {QStringLiteral("fontFamily"),
           initial.value(QStringLiteral("editorFontFamily")).toString()},
+         {QStringLiteral("fallbackFontFamily"),
+          initial.value(QStringLiteral("editorFallbackFontFamily")).toString()},
          {QStringLiteral("fontPointSize"),
           initial.value(QStringLiteral("editorFontPointSize")).toInt()},
          {QStringLiteral("animationsEnabled"), false}});

@@ -262,7 +262,7 @@ int main(int argc, char *argv[])
              initial.value(QStringLiteral("ok")).toBool()
                  && initial.value(QStringLiteral("testMode")).toBool()
                  && initial.value(QStringLiteral("settingsStatus")).toInt() == 0
-                 && initial.value(QStringLiteral("settingsSchemaVersion")).toInt() == 2
+                 && initial.value(QStringLiteral("settingsSchemaVersion")).toInt() == 3
                  && configFile.endsWith(QStringLiteral(".ini"), Qt::CaseInsensitive)
                  && QFileInfo::exists(configFile),
              initial);
@@ -288,7 +288,11 @@ int main(int argc, char *argv[])
     addCheck(checks, details, QStringLiteral("appearanceDefaults"),
              initial.value(QStringLiteral("theme")).toString() == QStringLiteral("dark")
                  && initial.value(QStringLiteral("editorFontFamily")).toString()
-                    == QStringLiteral("Microsoft YaHei UI")
+                    == QStringLiteral("Consolas")
+                 && initial.value(QStringLiteral("editorFallbackFontFamily")).toString()
+                    == QStringLiteral("NSimSun")
+                 && initial.value(QStringLiteral("editorFontFamilies")).toArray()
+                    == QJsonArray{QStringLiteral("Consolas"), QStringLiteral("NSimSun")}
                  && initial.value(QStringLiteral("editorFontPointSize")).toInt() == 13
                  && initial.value(QStringLiteral("animationsEnabled")).toBool()
                  && initial.value(QStringLiteral("statusPanelFontSize")).toInt() == 10
@@ -798,6 +802,7 @@ int main(int argc, char *argv[])
         QStringLiteral("testApplyAppearance"),
         {{QStringLiteral("theme"), QStringLiteral("light")},
          {QStringLiteral("fontFamily"), QStringLiteral("Microsoft YaHei UI")},
+         {QStringLiteral("fallbackFontFamily"), QStringLiteral("NSimSun")},
          {QStringLiteral("fontPointSize"), 15},
          {QStringLiteral("animationsEnabled"), false}});
     QThread::msleep(60);
@@ -857,12 +862,17 @@ int main(int argc, char *argv[])
     const QJsonObject light = request(
         QStringLiteral("testApplyAppearance"),
         {{QStringLiteral("theme"), QStringLiteral("light")},
-         {QStringLiteral("fontFamily"), QStringLiteral("Microsoft YaHei UI")},
+         {QStringLiteral("fontFamily"), QStringLiteral("Consolas")},
+         {QStringLiteral("fallbackFontFamily"), QStringLiteral("NSimSun")},
          {QStringLiteral("fontPointSize"), 15},
          {QStringLiteral("animationsEnabled"), false}});
     addCheck(checks, details, QStringLiteral("appearanceApplies"),
              light.value(QStringLiteral("applied")).toBool()
                  && light.value(QStringLiteral("theme")).toString() == QStringLiteral("light")
+                 && light.value(QStringLiteral("editorFontFamily")).toString()
+                    == QStringLiteral("Consolas")
+                 && light.value(QStringLiteral("editorFallbackFontFamily")).toString()
+                    == QStringLiteral("NSimSun")
                  && light.value(QStringLiteral("editorFontPointSize")).toInt() == 15
                  && !light.value(QStringLiteral("animationsEnabled")).toBool()
                  && light.value(QStringLiteral("transitionDuration")).toInt() == 0
@@ -877,23 +887,35 @@ int main(int argc, char *argv[])
         QStringLiteral("testApplyAppearance"),
         {{QStringLiteral("theme"), QStringLiteral("system")},
          {QStringLiteral("fontFamily"), QStringLiteral("Microsoft YaHei UI")},
+         {QStringLiteral("fallbackFontFamily"), QStringLiteral("NSimSun")},
          {QStringLiteral("fontPointSize"), 15},
          {QStringLiteral("animationsEnabled"), true}});
     const QJsonObject invalidFont = request(
         QStringLiteral("testApplyAppearance"),
         {{QStringLiteral("theme"), QStringLiteral("dark")},
          {QStringLiteral("fontFamily"), QStringLiteral("ScratchEditor Missing Font")},
+         {QStringLiteral("fallbackFontFamily"), QStringLiteral("NSimSun")},
+         {QStringLiteral("fontPointSize"), 15},
+         {QStringLiteral("animationsEnabled"), true}});
+    const QJsonObject invalidFallbackFont = request(
+        QStringLiteral("testApplyAppearance"),
+        {{QStringLiteral("theme"), QStringLiteral("dark")},
+         {QStringLiteral("fontFamily"), QStringLiteral("Consolas")},
+         {QStringLiteral("fallbackFontFamily"),
+          QStringLiteral("ScratchEditor Missing Font")},
          {QStringLiteral("fontPointSize"), 15},
          {QStringLiteral("animationsEnabled"), true}});
     const QJsonObject invalidSize = request(
         QStringLiteral("testApplyAppearance"),
         {{QStringLiteral("theme"), QStringLiteral("dark")},
          {QStringLiteral("fontFamily"), QStringLiteral("Microsoft YaHei UI")},
+         {QStringLiteral("fallbackFontFamily"), QStringLiteral("NSimSun")},
          {QStringLiteral("fontPointSize"), 25},
          {QStringLiteral("animationsEnabled"), true}});
     addCheck(checks, details, QStringLiteral("appearanceValidation"),
              !invalidTheme.value(QStringLiteral("applied")).toBool()
                  && !invalidFont.value(QStringLiteral("applied")).toBool()
+                 && !invalidFallbackFont.value(QStringLiteral("applied")).toBool()
                  && !invalidSize.value(QStringLiteral("applied")).toBool()
                  && !invalidSize.value(QStringLiteral("settingsError")).toString().isEmpty()
                  && invalidSize.value(QStringLiteral("theme")).toString() == QStringLiteral("light"),
@@ -989,6 +1011,7 @@ int main(int argc, char *argv[])
                  && hasKey(keys, QStringLiteral("meta/schemaVersion"))
                  && hasKey(keys, QStringLiteral("appearance/theme"))
                  && hasKey(keys, QStringLiteral("appearance/fontFamily"))
+                 && hasKey(keys, QStringLiteral("appearance/fallbackFontFamily"))
                  && hasKey(keys, QStringLiteral("appearance/fontPointSize"))
                  && hasKey(keys, QStringLiteral("appearance/animationsEnabled"))
                  && hasKey(keys, QStringLiteral("statusPanel/fontSize"))

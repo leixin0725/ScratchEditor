@@ -10,20 +10,17 @@
   "inlineCode": {
     "color": "#ffffff",
     "backgroundColor": "#303030",
-    "fontStyle": "normal",
-    "fontFamilies": ["Cascadia Mono", "Microsoft YaHei UI"]
+    "fontStyle": "normal"
   },
   "codeBlock": {
     "color": "#C2C0B6",
     "backgroundColor": "#303030",
-    "fontStyle": "normal",
-    "fontFamilies": ["Cascadia Mono", "Microsoft YaHei UI"]
+    "fontStyle": "normal"
   },
   "codeFence": {
     "color": "#C2C0B6",
     "backgroundColor": "#303030",
-    "fontStyle": "normal",
-    "fontFamilies": ["Cascadia Mono", "Microsoft YaHei UI"]
+    "fontStyle": "normal"
   },
   "listMarker": {
     "color": "#ffffff",

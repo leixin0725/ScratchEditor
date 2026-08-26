@@ -47,7 +47,8 @@
   },
 
   // ===== 字体角色（pt）=====
-  // editorDefaultSize 是 settings.ini 中编辑字号设置的默认值来源；
+  // editorDefaultFamily/editorDefaultFallbackFamily 与 editorDefaultSize
+  // 是 settings.ini 中编辑字体设置的默认值来源；
   // 状态面板字号默认值见 panels.statusPanel.defaultFontSize。
   "fonts": {
     "family": "Microsoft YaHei UI",
@@ -58,6 +59,8 @@
     "normal": 10,
     "small": 9,
     "caption": 8,
+    "editorDefaultFamily": "Consolas",
+    "editorDefaultFallbackFamily": "NSimSun",
     "editorDefaultSize": 13,
     "editorSizeMin": 9,
     "editorSizeMax": 24
@@ -191,7 +194,7 @@
       "closeMarginX": 18,
       "closeHitInset": -8,
       "contentY": 52,
-      "contentHeight": 425,
+      "contentHeight": 473,
       "contentBottomInset": 112,
       "rowHeight": 48,
       "labelYOffset": 9,

@@ -15,13 +15,11 @@
 namespace {
 
 MarkdownStyle::TokenStyle token(const QString &foreground, const QString &fontStyle,
-                                const QString &background = {},
-                                const QStringList &fontFamilies = {}, bool underline = false)
+                                const QString &background = {}, bool underline = false)
 {
     MarkdownStyle::TokenStyle result;
     result.foreground = QColor(foreground);
     result.background = QColor(background);
-    result.fontFamilies = fontFamilies;
     const QString normalized = fontStyle.toLower();
     result.bold = normalized.contains(QStringLiteral("bold"));
     result.italic = normalized.contains(QStringLiteral("italic"));
@@ -44,17 +42,6 @@ void applyToken(const QJsonObject &root, const QString &key,
     const QColor background(object.value(QStringLiteral("backgroundColor")).toString());
     if (background.isValid()) {
         target->background = background;
-    }
-    if (object.value(QStringLiteral("fontFamilies")).isArray()) {
-        QStringList families;
-        for (const QJsonValue &value : object.value(QStringLiteral("fontFamilies")).toArray()) {
-            if (!value.toString().isEmpty()) {
-                families.append(value.toString());
-            }
-        }
-        if (!families.isEmpty()) {
-            target->fontFamilies = families;
-        }
     }
     if (object.contains(QStringLiteral("fontStyle"))) {
         const QString fontStyle = object.value(QStringLiteral("fontStyle")).toString().toLower();
@@ -116,15 +103,13 @@ QString styleFilePath(bool isolatedTestMode)
 MarkdownStyle MarkdownStyle::defaults()
 {
     MarkdownStyle style;
-    const QStringList codeFonts{QStringLiteral("Cascadia Mono"),
-                                QStringLiteral("Microsoft YaHei UI")};
     style.accentColor = QColor(QStringLiteral("#85c7c0"));
     style.accentTextColor = QColor(QStringLiteral("#183331"));
     style.baseText = token(QStringLiteral("#C2C0B6"), QStringLiteral("normal"));
     style.inlineCode = token(QStringLiteral("#ffffff"), QStringLiteral("normal"),
-                             QStringLiteral("#303030"), codeFonts);
+                             QStringLiteral("#303030"));
     style.codeBlock = token(QStringLiteral("#C2C0B6"), QStringLiteral("normal"),
-                            QStringLiteral("#303030"), codeFonts);
+                            QStringLiteral("#303030"));
     style.codeFence = style.codeBlock;
     style.listMarker = token(QStringLiteral("#ffffff"), QStringLiteral("normal"));
     style.quote = token(QStringLiteral("#999999"), QStringLiteral("italic"));
@@ -141,7 +126,7 @@ MarkdownStyle MarkdownStyle::defaults()
     style.strikethrough = token(QStringLiteral("#999999"),
                                 QStringLiteral("strikethrough"));
     style.link = token(style.accentColor.name(QColor::HexRgb), QStringLiteral("normal"),
-                       {}, {}, true);
+                       {}, true);
     style.linkBrackets = token(QStringLiteral("#999999"), QStringLiteral("normal"));
     style.completedTask = token(QStringLiteral("#999999"),
                                 QStringLiteral("strikethrough"));
@@ -210,9 +195,6 @@ QTextCharFormat MarkdownStyle::textFormat(const TokenStyle &tokenStyle) const
     }
     if (tokenStyle.background.isValid()) {
         format.setBackground(tokenStyle.background);
-    }
-    if (!tokenStyle.fontFamilies.isEmpty()) {
-        format.setFontFamilies(tokenStyle.fontFamilies);
     }
     format.setFontWeight(tokenStyle.bold ? QFont::Bold : QFont::Normal);
     format.setFontItalic(tokenStyle.italic);

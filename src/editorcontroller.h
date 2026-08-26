@@ -4,6 +4,7 @@
 #include <QByteArray>
 #include <QElapsedTimer>
 #include <QFileSystemWatcher>
+#include <QFont>
 #include <QHash>
 #include <QJsonObject>
 #include <QLocalServer>
@@ -76,6 +77,9 @@ class EditorController final : public QObject, public QAbstractNativeEventFilter
     Q_PROPERTY(bool markdownHighlighting READ markdownHighlighting NOTIFY markdownHighlightingChanged)
     Q_PROPERTY(QString theme READ theme NOTIFY appearanceChanged)
     Q_PROPERTY(QString editorFontFamily READ editorFontFamily NOTIFY appearanceChanged)
+    Q_PROPERTY(QString editorFallbackFontFamily READ editorFallbackFontFamily
+                   NOTIFY appearanceChanged)
+    Q_PROPERTY(QFont editorFont READ editorFont NOTIFY appearanceChanged)
     Q_PROPERTY(int editorFontPointSize READ editorFontPointSize NOTIFY appearanceChanged)
     Q_PROPERTY(bool animationsEnabled READ animationsEnabled NOTIFY appearanceChanged)
     Q_PROPERTY(QString settingsFile READ settingsFile CONSTANT)
@@ -131,6 +135,8 @@ public:
     bool markdownHighlighting() const;
     QString theme() const;
     QString editorFontFamily() const;
+    QString editorFallbackFontFamily() const;
+    QFont editorFont() const;
     int editorFontPointSize() const;
     bool animationsEnabled() const;
     QString settingsFile() const;
@@ -161,6 +167,7 @@ public:
     Q_INVOKABLE int replaceAll(const QString &query, const QString &replacement,
                                bool caseSensitive = false);
     Q_INVOKABLE bool applyAppearance(const QString &theme, const QString &fontFamily,
+                                     const QString &fallbackFontFamily,
                                      int fontPointSize, bool animationsEnabled);
     Q_INVOKABLE void resetAppearance();
     Q_INVOKABLE bool applyStatusPanelSettings(int fontSize, int showDelayMs,
@@ -326,7 +333,8 @@ private:
     QString m_savedTestText;
     bool m_hasSavedTestText = false;
     QString m_theme = QStringLiteral("dark");
-    QString m_editorFontFamily = QStringLiteral("Microsoft YaHei UI");
+    QString m_editorFontFamily = QStringLiteral("Consolas");
+    QString m_editorFallbackFontFamily = QStringLiteral("NSimSun");
     int m_editorFontPointSize = 13;
     bool m_animationsEnabled = true;
     QParallelAnimationGroup *m_windowTransitionGroup = nullptr;

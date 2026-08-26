@@ -1030,8 +1030,7 @@ Window {
             color: root.markdownTextColor
             selectionColor: root.themeSelectionColor
             selectedTextColor: root.themeSelectedTextColor
-            font.family: controller.editorFontFamily
-            font.pointSize: controller.editorFontPointSize
+            font: controller.editorFont
             textFormat: TextEdit.PlainText
             wrapMode: TextEdit.Wrap
             selectByMouse: true

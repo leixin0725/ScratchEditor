@@ -229,6 +229,8 @@ UiConfig UiConfig::defaults()
     put({"fonts", "normal"}, 10);
     put({"fonts", "small"}, 9);
     put({"fonts", "caption"}, 8);
+    put({"fonts", "editorDefaultFamily"}, QStringLiteral("Consolas"));
+    put({"fonts", "editorDefaultFallbackFamily"}, QStringLiteral("NSimSun"));
     put({"fonts", "editorDefaultSize"}, 13);
     put({"fonts", "editorSizeMin"}, 9);
     put({"fonts", "editorSizeMax"}, 24);
@@ -341,7 +343,7 @@ UiConfig UiConfig::defaults()
     put({"panels", "settingsPage", "closeMarginX"}, 18);
     put({"panels", "settingsPage", "closeHitInset"}, -8);
     put({"panels", "settingsPage", "contentY"}, 52);
-    put({"panels", "settingsPage", "contentHeight"}, 425);
+    put({"panels", "settingsPage", "contentHeight"}, 473);
     put({"panels", "settingsPage", "contentBottomInset"}, 112);
     put({"panels", "settingsPage", "rowHeight"}, 48);
     put({"panels", "settingsPage", "labelYOffset"}, 9);
@@ -451,6 +453,8 @@ QVariantMap UiConfig::sanitize(const QVariantMap &input)
     fixInt({"layout", "scrollbarOffset"}, 0, 100);
     fixString({"fonts", "family"});
     fixString({"fonts", "monospaceFamily"});
+    fixString({"fonts", "editorDefaultFamily"});
+    fixString({"fonts", "editorDefaultFallbackFamily"});
     fixInt({"fonts", "title"}, 6, 72);
     fixInt({"fonts", "heading"}, 6, 72);
     fixInt({"fonts", "dialogTitle"}, 6, 72);
@@ -738,6 +742,17 @@ QString UiConfig::defaultTheme() const
 bool UiConfig::defaultAnimationsEnabled() const
 {
     return boolAt(m_map, {"preferences", "animationsEnabled"}, true);
+}
+
+QString UiConfig::editorDefaultFontFamily() const
+{
+    return stringAt(m_map, {"fonts", "editorDefaultFamily"}, QStringLiteral("Consolas"));
+}
+
+QString UiConfig::editorDefaultFallbackFontFamily() const
+{
+    return stringAt(m_map, {"fonts", "editorDefaultFallbackFamily"},
+                    QStringLiteral("NSimSun"));
 }
 
 int UiConfig::editorDefaultFontSize() const
