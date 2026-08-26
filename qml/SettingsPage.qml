@@ -29,6 +29,19 @@ Item {
             property string draftFontFamily: ""
             property string draftFallbackFontFamily: ""
             property int draftFontPointSize: uiConfig.fonts.editorDefaultSize
+            property int draftFontWeight: uiConfig.fonts.editorDefaultWeight
+            property bool fontWeightMenuOpen: false
+            property var fontWeightOptions: [
+                { "label": "细体", "value": 100 },
+                { "label": "特细", "value": 200 },
+                { "label": "轻体", "value": 300 },
+                { "label": "常规", "value": 400 },
+                { "label": "中等", "value": 500 },
+                { "label": "半粗", "value": 600 },
+                { "label": "粗体", "value": 700 },
+                { "label": "特粗", "value": 800 },
+                { "label": "黑体", "value": 900 }
+            ]
             property bool draftAnimationsEnabled: uiConfig.preferences.animationsEnabled
             property int draftStatusPanelFontSize: uiConfig.panels.statusPanel.defaultFontSize
             property int draftStatusPanelShowDelayMs:
@@ -39,6 +52,15 @@ Item {
                 uiConfig.panels.statusPanel.defaultMaxWidth
             property string saveStatus: ""
 
+            function fontWeightLabel(weight) {
+                for (let index = 0; index < fontWeightOptions.length; ++index) {
+                    const option = fontWeightOptions[index]
+                    if (option.value === weight)
+                        return option.label + "（" + option.value + "）"
+                }
+                return weight.toString()
+            }
+
             Behavior on opacity {
                 NumberAnimation { duration: host.transitionDuration; easing.type: Easing.OutCubic }
             }
@@ -48,6 +70,8 @@ Item {
                 draftFontFamily = root.appController.editorFontFamily
                 draftFallbackFontFamily = root.appController.editorFallbackFontFamily
                 draftFontPointSize = root.appController.editorFontPointSize
+                draftFontWeight = root.appController.editorFontWeight
+                fontWeightMenuOpen = false
                 draftAnimationsEnabled = root.appController.animationsEnabled
                 draftStatusPanelFontSize = root.appController.statusPanelFontSize
                 draftStatusPanelShowDelayMs = root.appController.statusPanelShowDelayMs
@@ -73,6 +97,7 @@ Item {
                 const panelMaxWidth = Number(statusPanelMaxWidthInput.text)
                 if (root.appController.applyAppearance(draftTheme, fontFamilyInput.text,
                                                fallbackFontFamilyInput.text, requestedSize,
+                                               draftFontWeight,
                                                draftAnimationsEnabled)
                     && root.appController.applyStatusPanelSettings(panelFontSize, panelShowDelayMs,
                                                            panelHideDelayMs, panelMaxWidth)) {
@@ -80,6 +105,7 @@ Item {
                     draftFontFamily = root.appController.editorFontFamily
                     draftFallbackFontFamily = root.appController.editorFallbackFontFamily
                     draftFontPointSize = root.appController.editorFontPointSize
+                    draftFontWeight = root.appController.editorFontWeight
                     draftStatusPanelFontSize = root.appController.statusPanelFontSize
                     draftStatusPanelShowDelayMs = root.appController.statusPanelShowDelayMs
                     draftStatusPanelHideDelayMs = root.appController.statusPanelHideDelayMs
@@ -89,7 +115,14 @@ Item {
                 }
             }
 
-            Keys.onEscapePressed: host.closeSettings()
+            Keys.onEscapePressed: function(event) {
+                if (fontWeightMenuOpen) {
+                    fontWeightMenuOpen = false
+                    event.accepted = true
+                    return
+                }
+                host.closeSettings()
+            }
 
             Rectangle {
                 anchors.fill: parent
@@ -120,7 +153,10 @@ Item {
                 MouseArea {
                     anchors.fill: parent
                     acceptedButtons: Qt.LeftButton
-                    onClicked: function(mouse) { mouse.accepted = true }
+                    onClicked: function(mouse) {
+                        settingsRoot.fontWeightMenuOpen = false
+                        mouse.accepted = true
+                    }
                 }
 
                 Text {
@@ -158,6 +194,7 @@ Item {
                     contentHeight: uiConfig.panels.settingsPage.contentHeight
                     clip: true
                     boundsBehavior: Flickable.StopAtBounds
+                    onMovementStarted: settingsRoot.fontWeightMenuOpen = false
 
                     Item {
                         width: settingsContent.width
@@ -337,6 +374,54 @@ Item {
                             y: uiConfig.panels.settingsPage.rowHeight * 4
                                + uiConfig.panels.settingsPage.labelYOffset
                             width: uiConfig.panels.settingsPage.labelWidth
+                            text: "字体粗细"
+                            color: host.themeTextColor
+                            font.family: host.uiFontFamily
+                            font.pointSize: uiConfig.fonts.normal
+                        }
+
+                        Rectangle {
+                            id: fontWeightSelector
+                            x: uiConfig.panels.settingsPage.columnX
+                            y: uiConfig.panels.settingsPage.rowHeight * 4
+                            width: uiConfig.panels.settingsPage.labelWidth
+                            height: uiConfig.layout.controlHeightNormal
+                            radius: uiConfig.layout.radiusNormal
+                            color: host.themeFieldColor
+                            border.color: settingsRoot.fontWeightMenuOpen
+                                          ? host.panelAccentColor : host.themeBorderColor
+                            Text {
+                                anchors.left: parent.left
+                                anchors.leftMargin: uiConfig.layout.spacingLarge
+                                anchors.verticalCenter: parent.verticalCenter
+                                text: settingsRoot.fontWeightLabel(
+                                          settingsRoot.draftFontWeight)
+                                color: host.themeTextColor
+                                font.family: host.uiFontFamily
+                                font.pointSize: uiConfig.fonts.normal
+                            }
+                            Text {
+                                anchors.right: parent.right
+                                anchors.rightMargin: uiConfig.layout.spacingMedium
+                                anchors.verticalCenter: parent.verticalCenter
+                                text: "▾"
+                                color: host.themeMutedTextColor
+                                font.family: host.uiFontFamily
+                                font.pointSize: uiConfig.fonts.small
+                            }
+                            MouseArea {
+                                anchors.fill: parent
+                                cursorShape: Qt.PointingHandCursor
+                                onClicked: settingsRoot.fontWeightMenuOpen =
+                                           !settingsRoot.fontWeightMenuOpen
+                            }
+                        }
+
+                        Text {
+                            x: 0
+                            y: uiConfig.panels.settingsPage.rowHeight * 5
+                               + uiConfig.panels.settingsPage.labelYOffset
+                            width: uiConfig.panels.settingsPage.labelWidth
                             text: "轻量动画"
                             color: host.themeTextColor
                             font.family: host.uiFontFamily
@@ -345,7 +430,7 @@ Item {
 
                         Rectangle {
                             x: uiConfig.panels.settingsPage.columnX
-                            y: uiConfig.panels.settingsPage.rowHeight * 4
+                            y: uiConfig.panels.settingsPage.rowHeight * 5
                             width: uiConfig.panels.settingsPage.controlWidth
                             height: uiConfig.layout.controlHeightNormal
                             radius: uiConfig.layout.radiusPill
@@ -370,7 +455,7 @@ Item {
 
                         Text {
                             x: 0
-                            y: uiConfig.panels.settingsPage.rowHeight * 5
+                            y: uiConfig.panels.settingsPage.rowHeight * 6
                                + uiConfig.panels.settingsPage.labelYOffset
                             width: uiConfig.panels.settingsPage.labelWidth
                             text: "面板字号（" + uiConfig.panels.statusPanel.fontSizeMin
@@ -382,7 +467,7 @@ Item {
 
                         Rectangle {
                             x: uiConfig.panels.settingsPage.columnX
-                            y: uiConfig.panels.settingsPage.rowHeight * 5
+                            y: uiConfig.panels.settingsPage.rowHeight * 6
                             width: uiConfig.panels.settingsPage.controlWidthWide
                             height: uiConfig.layout.controlHeightNormal
                             radius: uiConfig.layout.radiusNormal
@@ -408,7 +493,7 @@ Item {
 
                         Text {
                             x: 0
-                            y: uiConfig.panels.settingsPage.rowHeight * 6
+                            y: uiConfig.panels.settingsPage.rowHeight * 7
                                + uiConfig.panels.settingsPage.labelYOffset
                             width: uiConfig.panels.settingsPage.labelWidth
                             text: "显示延迟（毫秒）"
@@ -419,7 +504,7 @@ Item {
 
                         Rectangle {
                             x: uiConfig.panels.settingsPage.columnX
-                            y: uiConfig.panels.settingsPage.rowHeight * 6
+                            y: uiConfig.panels.settingsPage.rowHeight * 7
                             width: uiConfig.panels.settingsPage.controlWidthWide
                             height: uiConfig.layout.controlHeightNormal
                             radius: uiConfig.layout.radiusNormal
@@ -445,7 +530,7 @@ Item {
 
                         Text {
                             x: 0
-                            y: uiConfig.panels.settingsPage.rowHeight * 7
+                            y: uiConfig.panels.settingsPage.rowHeight * 8
                                + uiConfig.panels.settingsPage.labelYOffset
                             width: uiConfig.panels.settingsPage.labelWidth
                             text: "收起延迟（毫秒）"
@@ -456,7 +541,7 @@ Item {
 
                         Rectangle {
                             x: uiConfig.panels.settingsPage.columnX
-                            y: uiConfig.panels.settingsPage.rowHeight * 7
+                            y: uiConfig.panels.settingsPage.rowHeight * 8
                             width: uiConfig.panels.settingsPage.controlWidthWide
                             height: uiConfig.layout.controlHeightNormal
                             radius: uiConfig.layout.radiusNormal
@@ -482,7 +567,7 @@ Item {
 
                         Text {
                             x: 0
-                            y: uiConfig.panels.settingsPage.rowHeight * 8
+                            y: uiConfig.panels.settingsPage.rowHeight * 9
                                + uiConfig.panels.settingsPage.labelYOffset
                             width: uiConfig.panels.settingsPage.labelWidth
                             text: "最大宽度（像素）"
@@ -493,7 +578,7 @@ Item {
 
                         Rectangle {
                             x: uiConfig.panels.settingsPage.columnX
-                            y: uiConfig.panels.settingsPage.rowHeight * 8
+                            y: uiConfig.panels.settingsPage.rowHeight * 9
                             width: uiConfig.panels.settingsPage.controlWidthWide
                             height: uiConfig.layout.controlHeightNormal
                             radius: uiConfig.layout.radiusNormal
@@ -537,6 +622,60 @@ Item {
                             font.family: host.uiMonospaceFontFamily
                             font.pointSize: uiConfig.fonts.caption
                             elide: Text.ElideMiddle
+                        }
+                    }
+                }
+
+                Rectangle {
+                    id: fontWeightMenu
+                    readonly property real optionHeight:
+                        uiConfig.panels.settingsPage.rowHeight / 2
+                    readonly property real selectorY: settingsContent.y
+                        + uiConfig.panels.settingsPage.rowHeight * 4
+                        - settingsContent.contentY
+                    x: settingsContent.x + uiConfig.panels.settingsPage.columnX
+                    y: selectorY + uiConfig.layout.controlHeightNormal + height
+                       <= settingsPanel.height - uiConfig.layout.spacingSmall
+                       ? selectorY + uiConfig.layout.controlHeightNormal
+                       : Math.max(uiConfig.layout.spacingSmall, selectorY - height)
+                    z: 20
+                    width: uiConfig.panels.settingsPage.labelWidth
+                    height: settingsRoot.fontWeightOptions.length * optionHeight
+                            + border.width * 2
+                    visible: settingsRoot.fontWeightMenuOpen
+                    radius: uiConfig.layout.radiusNormal
+                    color: host.themeFieldColor
+                    border.color: host.themeBorderColor
+                    border.width: uiConfig.layout.borderWidth
+                    clip: true
+
+                    ListView {
+                        anchors.fill: parent
+                        anchors.margins: fontWeightMenu.border.width
+                        interactive: false
+                        model: settingsRoot.fontWeightOptions
+                        delegate: Rectangle {
+                            required property var modelData
+                            width: ListView.view.width
+                            height: fontWeightMenu.optionHeight
+                            color: modelData.value === settingsRoot.draftFontWeight
+                                   ? host.panelAccentColor : host.themeFieldColor
+                            Text {
+                                anchors.centerIn: parent
+                                text: modelData.label + "（" + modelData.value + "）"
+                                color: modelData.value === settingsRoot.draftFontWeight
+                                       ? host.panelAccentTextColor : host.themeTextColor
+                                font.family: host.uiFontFamily
+                                font.pointSize: uiConfig.fonts.small
+                            }
+                            MouseArea {
+                                anchors.fill: parent
+                                cursorShape: Qt.PointingHandCursor
+                                onClicked: {
+                                    settingsRoot.draftFontWeight = modelData.value
+                                    settingsRoot.fontWeightMenuOpen = false
+                                }
+                            }
                         }
                     }
                 }

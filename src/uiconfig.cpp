@@ -232,6 +232,7 @@ UiConfig UiConfig::defaults()
     put({"fonts", "editorDefaultFamily"}, QStringLiteral("Consolas"));
     put({"fonts", "editorDefaultFallbackFamily"}, QStringLiteral("NSimSun"));
     put({"fonts", "editorDefaultSize"}, 13);
+    put({"fonts", "editorDefaultWeight"}, 400);
     put({"fonts", "editorSizeMin"}, 9);
     put({"fonts", "editorSizeMax"}, 24);
     put({"animation", "transitionDuration"}, 120);
@@ -343,7 +344,7 @@ UiConfig UiConfig::defaults()
     put({"panels", "settingsPage", "closeMarginX"}, 18);
     put({"panels", "settingsPage", "closeHitInset"}, -8);
     put({"panels", "settingsPage", "contentY"}, 52);
-    put({"panels", "settingsPage", "contentHeight"}, 473);
+    put({"panels", "settingsPage", "contentHeight"}, 521);
     put({"panels", "settingsPage", "contentBottomInset"}, 112);
     put({"panels", "settingsPage", "rowHeight"}, 48);
     put({"panels", "settingsPage", "labelYOffset"}, 9);
@@ -463,6 +464,7 @@ QVariantMap UiConfig::sanitize(const QVariantMap &input)
     fixInt({"fonts", "caption"}, 6, 72);
     fixInt({"fonts", "editorSizeMin"}, 6, 40);
     fixInt({"fonts", "editorSizeMax"}, 8, 72);
+    fixInt({"fonts", "editorDefaultWeight"}, 100, 900);
     fixInt({"fonts", "statusPanelDefaultSize"}, 6, 72);
     fixInt({"animation", "transitionDuration"}, 0, 10000);
     fixDouble({"animation", "windowShapeScale"}, 0.5, 1.0);
@@ -632,6 +634,10 @@ QVariantMap UiConfig::sanitize(const QVariantMap &input)
     const int editorMax = intAt(result, {"fonts", "editorSizeMax"}, 24, 8, 72);
     insertAt(result, {"fonts", "editorDefaultSize"},
              intAt(result, {"fonts", "editorDefaultSize"}, 13, editorMin, editorMax));
+    const int editorWeight = intAt(result, {"fonts", "editorDefaultWeight"},
+                                   400, 100, 900);
+    insertAt(result, {"fonts", "editorDefaultWeight"},
+             editorWeight % 100 == 0 ? editorWeight : 400);
     const int panelFontMin = intAt(result, {"panels", "statusPanel", "fontSizeMin"}, 9, 6, 40);
     const int panelFontMax = intAt(result, {"panels", "statusPanel", "fontSizeMax"}, 24, 8, 72);
     insertAt(result, {"panels", "statusPanel", "defaultFontSize"},
@@ -758,6 +764,12 @@ QString UiConfig::editorDefaultFallbackFontFamily() const
 int UiConfig::editorDefaultFontSize() const
 {
     return intAt(m_map, {"fonts", "editorDefaultSize"}, 13, 6, 72);
+}
+
+int UiConfig::editorDefaultFontWeight() const
+{
+    const int weight = intAt(m_map, {"fonts", "editorDefaultWeight"}, 400, 100, 900);
+    return weight % 100 == 0 ? weight : 400;
 }
 
 int UiConfig::editorFontSizeMin() const

@@ -17,6 +17,7 @@ public:
         QString fontFamily;
         QString fallbackFontFamily;
         int fontPointSize = 13;
+        int fontWeight = 400;
         bool animationsEnabled = true;
     };
 
@@ -49,7 +50,8 @@ public:
     Appearance appearance() const;
     bool setAppearance(const QString &theme, const QString &fontFamily,
                        const QString &fallbackFontFamily, int fontPointSize,
-                       bool animationsEnabled, QString *errorMessage = nullptr);
+                       int fontWeight, bool animationsEnabled,
+                       QString *errorMessage = nullptr);
     void resetAppearance();
     StatusPanel statusPanel() const;
     bool setStatusPanel(int fontSize, int showDelayMs, int hideDelayMs, int maxWidth,
@@ -59,14 +61,16 @@ public:
     void resetAll();
 
 private:
-    static constexpr int CurrentSchemaVersion = 3;
+    static constexpr int CurrentSchemaVersion = 4;
     static QString settingsPath(bool testMode);
     static QString defaultFontFamily();
     static bool validTheme(const QString &theme);
     static bool validFontFamily(const QString &fontFamily);
+    static bool validFontWeight(int fontWeight);
     void initialize(bool allowLegacyMigration);
     void migrateLegacySettings();
     void migrateSchemaV1Keys();
+    void migrateSchemaV3Keys();
     void writeSchemaVersion();
     void sync();
 

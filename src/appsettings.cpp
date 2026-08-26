@@ -21,6 +21,7 @@ constexpr auto themeKey = "appearance/theme";
 constexpr auto fontFamilyKey = "appearance/fontFamily";
 constexpr auto fallbackFontFamilyKey = "appearance/fallbackFontFamily";
 constexpr auto fontPointSizeKey = "appearance/fontPointSize";
+constexpr auto fontWeightKey = "appearance/fontWeight";
 constexpr auto animationsEnabledKey = "appearance/animationsEnabled";
 constexpr auto statusPanelFontSizeKey = "statusPanel/fontSize";
 constexpr auto statusPanelShowDelayMsKey = "statusPanel/showDelayMs";
@@ -139,6 +140,8 @@ AppSettings::Appearance AppSettings::appearance() const
         ? m_uiConfig->editorDefaultFallbackFontFamily() : QStringLiteral("NSimSun");
     const int fallbackFontSize =
         m_uiConfig ? m_uiConfig->editorDefaultFontSize() : 13;
+    const int fallbackFontWeight =
+        m_uiConfig ? m_uiConfig->editorDefaultFontWeight() : 400;
     const bool fallbackAnimations =
         m_uiConfig ? m_uiConfig->defaultAnimationsEnabled() : true;
     const QString primaryFamily = validFontFamily(fallbackPrimaryFamily)
@@ -146,7 +149,7 @@ AppSettings::Appearance AppSettings::appearance() const
     const QString secondaryFamily = validFontFamily(fallbackSecondaryFamily)
         ? fallbackSecondaryFamily : defaultFontFamily();
     Appearance result{fallbackTheme, primaryFamily, secondaryFamily,
-                      fallbackFontSize, fallbackAnimations};
+                      fallbackFontSize, fallbackFontWeight, fallbackAnimations};
     if (!m_settings) {
         return result;
     }
@@ -174,6 +177,11 @@ AppSettings::Appearance AppSettings::appearance() const
     if (storedSize >= sizeMin && storedSize <= sizeMax) {
         result.fontPointSize = storedSize;
     }
+    const int storedWeight = m_settings->value(QLatin1StringView(fontWeightKey),
+                                               fallbackFontWeight).toInt();
+    if (validFontWeight(storedWeight)) {
+        result.fontWeight = storedWeight;
+    }
     result.animationsEnabled = m_settings->value(QLatin1StringView(animationsEnabledKey),
                                                  fallbackAnimations).toBool();
     return result;
@@ -181,7 +189,8 @@ AppSettings::Appearance AppSettings::appearance() const
 
 bool AppSettings::setAppearance(const QString &theme, const QString &fontFamily,
                                 const QString &fallbackFontFamily, int fontPointSize,
-                                bool animationsEnabled, QString *errorMessage)
+                                int fontWeight, bool animationsEnabled,
+                                QString *errorMessage)
 {
     const QString normalizedTheme = theme.trimmed().toLower();
     const QString normalizedFamily = fontFamily.trimmed();
@@ -214,6 +223,12 @@ bool AppSettings::setAppearance(const QString &theme, const QString &fontFamily,
         }
         return false;
     }
+    if (!validFontWeight(fontWeight)) {
+        if (errorMessage) {
+            *errorMessage = QStringLiteral("字体粗细必须是 100 到 900 之间的整百数值");
+        }
+        return false;
+    }
     if (!m_settings) {
         return false;
     }
@@ -223,6 +238,7 @@ bool AppSettings::setAppearance(const QString &theme, const QString &fontFamily,
     m_settings->setValue(QLatin1StringView(fallbackFontFamilyKey),
                          normalizedFallbackFamily);
     m_settings->setValue(QLatin1StringView(fontPointSizeKey), fontPointSize);
+    m_settings->setValue(QLatin1StringView(fontWeightKey), fontWeight);
     m_settings->setValue(QLatin1StringView(animationsEnabledKey), animationsEnabled);
     writeSchemaVersion();
     sync();
@@ -420,12 +436,18 @@ bool AppSettings::validFontFamily(const QString &fontFamily)
     });
 }
 
+bool AppSettings::validFontWeight(int fontWeight)
+{
+    return fontWeight >= 100 && fontWeight <= 900 && fontWeight % 100 == 0;
+}
+
 void AppSettings::initialize(bool allowLegacyMigration)
 {
     if (allowLegacyMigration) {
         migrateLegacySettings();
     }
     migrateSchemaV1Keys();
+    migrateSchemaV3Keys();
     writeSchemaVersion();
     sync();
 }
@@ -458,6 +480,20 @@ void AppSettings::migrateSchemaV1Keys()
     moveKey("editor/fontFamily", "appearance/fontFamily");
     moveKey("editor/fontPointSize", "appearance/fontPointSize");
     moveKey("ui/animationsEnabled", "appearance/animationsEnabled");
+}
+
+void AppSettings::migrateSchemaV3Keys()
+{
+    if (!m_settings || m_settings->value(QLatin1StringView(schemaVersionKey), 0).toInt() >= 4) {
+        return;
+    }
+    const int fallbackFontWeight =
+        m_uiConfig ? m_uiConfig->editorDefaultFontWeight() : 400;
+    const int storedFontWeight = m_settings->value(QLatin1StringView(fontWeightKey),
+                                                   fallbackFontWeight).toInt();
+    m_settings->setValue(QLatin1StringView(fontWeightKey),
+                         validFontWeight(storedFontWeight) ? storedFontWeight
+                                                          : fallbackFontWeight);
 }
 
 void AppSettings::writeSchemaVersion()

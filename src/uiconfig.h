@@ -32,6 +32,7 @@ public:
     QString editorDefaultFontFamily() const;
     QString editorDefaultFallbackFontFamily() const;
     int editorDefaultFontSize() const;
+    int editorDefaultFontWeight() const;
     int editorFontSizeMin() const;
     int editorFontSizeMax() const;
 

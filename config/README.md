@@ -32,7 +32,8 @@
 - `layout`：边距、拖拽区、圆角、控件高度、间距、滚动条、编辑区内边距，
   以及标题折叠图标的 `headingFoldGutterWidth` / `headingFoldIconSize`。
 - `fonts`：界面字体、等宽字体与字号角色；`editorDefaultFamily`、
-  `editorDefaultFallbackFamily`、`editorDefaultSize` 是 `settings.ini` 编辑区字体设置的默认值来源。
+  `editorDefaultFallbackFamily`、`editorDefaultSize`、`editorDefaultWeight` 是 `settings.ini`
+  编辑区字体设置的默认值来源。
 - `animation`：过渡动画时长、窗口开合缩放比例、标题导航高亮的透明度/停留/淡出时长、
   历史面板悬停延迟、滚动指标刷新节流与性能探针参数。
 - `panels`：状态文字、状态面板、查找面板、历史面板、确认对话框、
@@ -53,13 +54,13 @@
 ## settings.ini
 
 由 `QSettings` 写入的 INI 文件，写入时会重排整个文件，因此无法保留注释；
-段落与键名均按功能命名。当前 schema 版本为 3，启动时自动把旧版
+段落与键名均按功能命名。当前 schema 版本为 4，启动时自动把旧版
 `editor/fontFamily`、`editor/fontPointSize`、`ui/animationsEnabled`
-迁移到 `appearance/` 段落。主要段落：
+迁移到 `appearance/` 段落；schema 4 会为旧配置补入默认 `fontWeight=400`。主要段落：
 
 - `[window]`：`geometry`（常驻窗口几何）、`externalGeometry`（外部编辑器尺寸记忆）。
 - `[appearance]`：`theme`、`fontFamily`（ASCII/主字体）、`fallbackFontFamily`、
-  `fontPointSize`、`animationsEnabled`。
+  `fontPointSize`、`fontWeight`（100–900 的九个标准整百档位）、`animationsEnabled`。
 - `[statusPanel]`：`fontSize`、`showDelayMs`、`hideDelayMs`、`maxWidth`。
 - `[clipboardHistory]`：`cardHeight`（文件级配置，不进入设置页）。
 - `[shortcuts]`：`<命令ID>` 自定义快捷键。

@@ -47,7 +47,7 @@
   },
 
   // ===== 字体角色（pt）=====
-  // editorDefaultFamily/editorDefaultFallbackFamily 与 editorDefaultSize
+  // editorDefaultFamily/editorDefaultFallbackFamily、editorDefaultSize 与 editorDefaultWeight
   // 是 settings.ini 中编辑字体设置的默认值来源；
   // 状态面板字号默认值见 panels.statusPanel.defaultFontSize。
   "fonts": {
@@ -62,6 +62,7 @@
     "editorDefaultFamily": "Consolas",
     "editorDefaultFallbackFamily": "NSimSun",
     "editorDefaultSize": 13,
+    "editorDefaultWeight": 400,
     "editorSizeMin": 9,
     "editorSizeMax": 24
   },
@@ -194,7 +195,7 @@
       "closeMarginX": 18,
       "closeHitInset": -8,
       "contentY": 52,
-      "contentHeight": 473,
+      "contentHeight": 521,
       "contentBottomInset": 112,
       "rowHeight": 48,
       "labelYOffset": 9,

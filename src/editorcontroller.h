@@ -81,6 +81,7 @@ class EditorController final : public QObject, public QAbstractNativeEventFilter
                    NOTIFY appearanceChanged)
     Q_PROPERTY(QFont editorFont READ editorFont NOTIFY appearanceChanged)
     Q_PROPERTY(int editorFontPointSize READ editorFontPointSize NOTIFY appearanceChanged)
+    Q_PROPERTY(int editorFontWeight READ editorFontWeight NOTIFY appearanceChanged)
     Q_PROPERTY(bool animationsEnabled READ animationsEnabled NOTIFY appearanceChanged)
     Q_PROPERTY(QString settingsFile READ settingsFile CONSTANT)
     Q_PROPERTY(QString settingsError READ settingsError NOTIFY settingsErrorChanged)
@@ -138,6 +139,7 @@ public:
     QString editorFallbackFontFamily() const;
     QFont editorFont() const;
     int editorFontPointSize() const;
+    int editorFontWeight() const;
     bool animationsEnabled() const;
     QString settingsFile() const;
     QString settingsError() const;
@@ -168,7 +170,8 @@ public:
                                bool caseSensitive = false);
     Q_INVOKABLE bool applyAppearance(const QString &theme, const QString &fontFamily,
                                      const QString &fallbackFontFamily,
-                                     int fontPointSize, bool animationsEnabled);
+                                     int fontPointSize, int fontWeight,
+                                     bool animationsEnabled);
     Q_INVOKABLE void resetAppearance();
     Q_INVOKABLE bool applyStatusPanelSettings(int fontSize, int showDelayMs,
                                               int hideDelayMs, int maxWidth);
@@ -336,6 +339,7 @@ private:
     QString m_editorFontFamily = QStringLiteral("Consolas");
     QString m_editorFallbackFontFamily = QStringLiteral("NSimSun");
     int m_editorFontPointSize = 13;
+    int m_editorFontWeight = 400;
     bool m_animationsEnabled = true;
     QParallelAnimationGroup *m_windowTransitionGroup = nullptr;
     QVariantAnimation *m_windowOpacityAnimation = nullptr;

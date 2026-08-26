@@ -688,13 +688,20 @@ QString EditorController::editorFallbackFontFamily() const
 
 QFont EditorController::editorFont() const
 {
-    return QFont(QStringList{m_editorFontFamily, m_editorFallbackFontFamily},
-                 m_editorFontPointSize);
+    QFont font(QStringList{m_editorFontFamily, m_editorFallbackFontFamily},
+               m_editorFontPointSize);
+    font.setWeight(static_cast<QFont::Weight>(m_editorFontWeight));
+    return font;
 }
 
 int EditorController::editorFontPointSize() const
 {
     return m_editorFontPointSize;
+}
+
+int EditorController::editorFontWeight() const
+{
+    return m_editorFontWeight;
 }
 
 bool EditorController::animationsEnabled() const
@@ -899,14 +906,15 @@ int EditorController::replaceAll(const QString &query, const QString &replacemen
 
 bool EditorController::applyAppearance(const QString &theme, const QString &fontFamily,
                                        const QString &fallbackFontFamily,
-                                       int fontPointSize, bool animationsEnabled)
+                                       int fontPointSize, int fontWeight,
+                                       bool animationsEnabled)
 {
     if (!m_settings) {
         return false;
     }
     QString error;
     if (!m_settings->setAppearance(theme, fontFamily, fallbackFontFamily,
-                                   fontPointSize, animationsEnabled, &error)) {
+                                   fontPointSize, fontWeight, animationsEnabled, &error)) {
         if (m_settingsError != error) {
             m_settingsError = error;
             emit settingsErrorChanged();
@@ -944,11 +952,13 @@ void EditorController::reloadAppearance()
         || m_editorFontFamily != appearance.fontFamily
         || m_editorFallbackFontFamily != appearance.fallbackFontFamily
         || m_editorFontPointSize != appearance.fontPointSize
+        || m_editorFontWeight != appearance.fontWeight
         || m_animationsEnabled != appearance.animationsEnabled;
     m_theme = appearance.theme;
     m_editorFontFamily = appearance.fontFamily;
     m_editorFallbackFontFamily = appearance.fallbackFontFamily;
     m_editorFontPointSize = appearance.fontPointSize;
+    m_editorFontWeight = appearance.fontWeight;
     m_animationsEnabled = appearance.animationsEnabled;
     if (m_window) {
         applyNativeWindowStyle();
@@ -1956,6 +1966,7 @@ void EditorController::buildCommandHandlers()
                 r.request.value(QStringLiteral("fontFamily")).toString(),
                 r.request.value(QStringLiteral("fallbackFontFamily")).toString(),
                 r.request.value(QStringLiteral("fontPointSize")).toInt(),
+                r.request.value(QStringLiteral("fontWeight")).toInt(),
                 r.request.value(QStringLiteral("animationsEnabled")).toBool());
             QJsonObject response = statusObject();
             response.insert(QStringLiteral("command"), r.command);
@@ -3269,6 +3280,7 @@ QJsonObject EditorController::statusObject() const
     status.insert(QStringLiteral("editorFontFamilies"),
                   QJsonArray::fromStringList(editorFont().families()));
     status.insert(QStringLiteral("editorFontPointSize"), m_editorFontPointSize);
+    status.insert(QStringLiteral("editorFontWeight"), editorFont().weight());
     status.insert(QStringLiteral("animationsEnabled"), m_animationsEnabled);
     status.insert(QStringLiteral("settingsError"), m_settingsError);
     status.insert(QStringLiteral("markdownHighlighting"), markdownHighlighting());

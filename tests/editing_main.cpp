@@ -356,6 +356,8 @@ int main(int argc, char *argv[])
           initial.value(QStringLiteral("editorFallbackFontFamily")).toString()},
          {QStringLiteral("fontPointSize"),
           initial.value(QStringLiteral("editorFontPointSize")).toInt()},
+         {QStringLiteral("fontWeight"),
+          initial.value(QStringLiteral("editorFontWeight")).toInt()},
          {QStringLiteral("animationsEnabled"), false}});
     addCheck(checks, details, QStringLiteral("editingScrollAnimationsDisabled"),
              scrollAnimationsOff.value(QStringLiteral("applied")).toBool()

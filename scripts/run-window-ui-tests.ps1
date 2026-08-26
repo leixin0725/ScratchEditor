@@ -189,12 +189,14 @@ maxWidth=360
     $migrated = Send-IpcCommand -Command "status"
     $migratedText = Get-Content -LiteralPath $settingsFile -Raw -Encoding UTF8
     $migrationPassed = (
-        [int]$migrated.settingsSchemaVersion -eq 3 -and
+        [int]$migrated.settingsSchemaVersion -eq 4 -and
         $migrated.editorFontFamily -eq "Microsoft YaHei UI" -and
         $migrated.editorFallbackFontFamily -eq "NSimSun" -and
+        [int]$migrated.editorFontWeight -eq 400 -and
         $migratedText.Contains("[appearance]") -and
         $migratedText.Contains("fontFamily=Microsoft YaHei UI") -and
         $migratedText.Contains("fontPointSize=13") -and
+        $migratedText.Contains("fontWeight=400") -and
         $migratedText.Contains("animationsEnabled=true") -and
         -not $migratedText.Contains("[editor]") -and
         -not $migratedText.Contains("[ui]")
@@ -232,6 +234,7 @@ maxWidth=360
         $persisted.editorFontFamily -eq "Consolas" -and
         $persisted.editorFallbackFontFamily -eq "NSimSun" -and
         [int]$persisted.editorFontPointSize -eq 15 -and
+        [int]$persisted.editorFontWeight -eq 600 -and
         -not [bool]$persisted.animationsEnabled -and
         $persistedShortcut.shortcut -eq "Ctrl+Alt+B" -and
         [int]$persisted.x -eq $expectedGeometry.x -and

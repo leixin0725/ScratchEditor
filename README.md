@@ -155,7 +155,7 @@ Windows 登录用户上下文仍有能力解密，因此不要把它当作抵御
 ## 外观、设置与配置
 
 按 `Ctrl+,` 打开设置页，可调整深浅主题、编辑区 ASCII 主字体、中文 fallback 字体、字号、
-动画开关、状态面板显示方式，
+九档字体粗细（100–900）、动画开关、状态面板显示方式，
 以及各编辑命令的快捷键。窗口尺寸会自动记忆；临时剪贴板编辑器与 CLI 外部编辑器分别保存
 自己的窗口几何。
 
@@ -172,7 +172,7 @@ Windows 登录用户上下文仍有能力解密，因此不要把它当作抵御
 
 编辑区默认按 `Consolas → NSimSun` 的有序字体链渲染：ASCII 优先使用 Consolas，Consolas
 缺失的汉字和全角标点回退到 NSimSun；Consolas 已提供的弯引号等字形不会强制切换字体。
-正文、行内代码和围栏代码共用设置页中的同一字体链。
+正文、行内代码和围栏代码共用设置页中的同一字体链与字体粗细，默认粗细为常规（400）。
 
 ## 常见问题
 
@@ -216,7 +216,7 @@ Qt 6 Quick/QML、C++20 和 CMake；AutoHotkey 继续负责全局快捷键与启�
 - Markdown 标题支持层级折叠、常驻标记和上一个/下一个标题导航。
 - 查找替换、延迟加载命令面板和可配置快捷键。
 - 可直接拖动已有文本选区移动内容，支持跨行落点、边缘自动滚动和单步撤销。
-- 延迟加载设置页、深浅主题、编辑字体/字号，以及同步透明度与居中形变的轻量唤出/关闭动画开关。
+- 延迟加载设置页、深浅主题、编辑字体/字号/粗细，以及同步透明度与居中形变的轻量唤出/关闭动画开关。
 - 右上角动态状态显示：正常显示字数统计（按 UTF-16 字符数计“字”，另计“汉字”字符数；有选区时两者都显示选区/总数），悬停展开状态面板（按配置展示快捷键提示，含命令面板与设置快捷键，或红色错误详情），错误信息可点击复制；面板字号、悬停/收起延迟与最大宽度可在设置页配置。
 - 配置按职责分层管理：`config/ui.json` 统一 UI/动画设计令牌（JSONC，带注释）、
   `config/markdown-style.json` 管理 Markdown 高亮与强调色，用户覆盖值保存在
@@ -530,11 +530,12 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\switch-ahk-edi
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\run-editor-switch-tests.ps1
 ```
 
-用户可写配置存放在 Qt `AppConfigLocation` 下的 `settings.ini`（schema 版本 3）。
+用户可写配置存放在 Qt `AppConfigLocation` 下的 `settings.ini`（schema 版本 4）。
 首次创建集中配置时会迁移旧 Native Settings 中的窗口几何和快捷键；从 schema 1 升级时
 自动把 `editor/fontFamily`、`editor/fontPointSize`、`ui/animationsEnabled`
 迁移到 `appearance/` 段落；schema 3 新增 `appearance/fallbackFontFamily`，旧配置未设置时
-使用 `ui.json` 中的默认 fallback 字体。测试通过独立环境变量 `SCRATCHEDITOR_SETTINGS_FILE`
+使用 `ui.json` 中的默认 fallback 字体；schema 4 新增 `appearance/fontWeight`，旧配置迁移为
+默认常规粗细（400）。测试通过独立环境变量 `SCRATCHEDITOR_SETTINGS_FILE`
 使用临时 INI，不会触碰用户正式配置。
 
 ## CLI 外部编辑器
