@@ -141,6 +141,16 @@ const QuotePair *quotePairFor(const QChar &character)
     return it == quotePairs.cend() ? nullptr : &it.value();
 }
 
+const QuotePair *quotePairForClosing(const QChar &character)
+{
+    static const QHash<char16_t, QuotePair> quotePairs{
+        {u'\u201D', {u'\u201C', u'\u201D'}},  // “”
+        {u'\u2019', {u'\u2018', u'\u2019'}},  // ‘’
+    };
+    const auto it = quotePairs.constFind(character.unicode());
+    return it == quotePairs.cend() ? nullptr : &it.value();
+}
+
 bool isCjkOrAsciiAlnumOrUnderscore(const QChar &character)
 {
     return character == u'_' || CjkText::isCjk(character)
@@ -175,6 +185,15 @@ int nextSameQuoteOnLine(const QString &text, int from, QChar quote)
     return -1;
 }
 
+bool isEscapedAt(const QString &text, int position, int lineStart)
+{
+    int backslashes = 0;
+    for (int i = position - 1; i >= lineStart && text.at(i) == QLatin1Char('\\'); --i) {
+        ++backslashes;
+    }
+    return (backslashes % 2) == 1;
+}
+
 struct MidlineQuotePlan {
     QChar opening;
     QChar closing;
@@ -191,18 +210,12 @@ std::optional<MidlineQuotePlan> buildMidlineQuotePlan(const QString &text,
     if (position <= lineStart) {
         return std::nullopt;
     }
-    if (!hasNonBlankCharacterAfter(text, position)) {
-        return std::nullopt;
-    }
-    const bool leftTouches = isCjkOrAsciiAlnumOrUnderscore(text.at(position - 1));
-    const bool rightTouches = position < text.size()
-        && text.at(position) != QLatin1Char('\n')
-        && isCjkOrAsciiAlnumOrUnderscore(text.at(position));
-    if (!leftTouches && !rightTouches) {
-        return std::nullopt;
-    }
-
     const QuotePair *pair = quotePairFor(typed);
+    const QuotePair *closingPair = quotePairForClosing(typed);
+    const bool typedExplicitCloser = !pair && closingPair;
+    if (!pair) {
+        pair = closingPair;
+    }
     if (!pair) {
         return std::nullopt;
     }
@@ -220,6 +233,9 @@ std::optional<MidlineQuotePlan> buildMidlineQuotePlan(const QString &text,
             : typed == u'\'' ? u'\u2019' : QChar();
         for (int i = lineStart; i < position; ++i) {
             const QChar character = text.at(i);
+            if (isEscapedAt(text, i, lineStart)) {
+                continue;
+            }
             if (character == typed) {
                 ++count;
                 lastPosition = i;
@@ -252,23 +268,50 @@ std::optional<MidlineQuotePlan> buildMidlineQuotePlan(const QString &text,
             ? (closesFullwidthPair ? fullwidthOpenerPositions.back() : lastPosition)
             : -1;
     } else {
-        QVector<QChar> openStack;
-        int lastOpenerPosition = -1;
+        QVector<QuotePair> openStack;
+        QVector<int> openerPositions;
         for (int i = lineStart; i < position; ++i) {
             const QChar character = text.at(i);
-            const QuotePair *currentPair = quotePairFor(character);
-            if (!currentPair) {
+            if (isEscapedAt(text, i, lineStart)) {
                 continue;
             }
-            if (!openStack.isEmpty() && currentPair->closing == openStack.back()) {
+            if (!openStack.isEmpty() && character == openStack.back().closing) {
                 openStack.pop_back();
+                openerPositions.pop_back();
                 continue;
             }
-            openStack.append(currentPair->opening);
-            lastOpenerPosition = i;
+            const QuotePair *currentPair = quotePairFor(character);
+            if (!currentPair || currentPair->opening == currentPair->closing) {
+                continue;
+            }
+            openStack.append(*currentPair);
+            openerPositions.append(i);
         }
-        plan.closer = !openStack.isEmpty() && pair->closing == openStack.back();
-        plan.openerPosition = plan.closer ? lastOpenerPosition : -1;
+        plan.closer = !openStack.isEmpty()
+            && pair->opening == openStack.back().opening;
+        if (plan.closer) {
+            plan.opening = openStack.back().opening;
+            plan.closing = openStack.back().closing;
+            plan.openerPosition = openerPositions.back();
+        }
+    }
+
+    // 行尾没有后续内容时，仅允许收尾已有的未闭合引号；否则继续交给普通
+    // 配对补全生成一整对。行中仍保持“只插入单个开符号”的既有语义。
+    if (!plan.closer) {
+        if (typedExplicitCloser) {
+            return std::nullopt;
+        }
+        if (!hasNonBlankCharacterAfter(text, position)) {
+            return std::nullopt;
+        }
+        const bool leftTouches = isCjkOrAsciiAlnumOrUnderscore(text.at(position - 1));
+        const bool rightTouches = position < text.size()
+            && text.at(position) != QLatin1Char('\n')
+            && isCjkOrAsciiAlnumOrUnderscore(text.at(position));
+        if (!leftTouches && !rightTouches) {
+            return std::nullopt;
+        }
     }
     return plan;
 }

@@ -2927,6 +2927,39 @@ int main(int argc, char *argv[])
     cjkExpect(checks, details, QStringLiteral("midQuoteLineEndKeepsAutoPair"),
               QStringLiteral("abc"), 3, 3, QStringLiteral("key \" at line end"),
               keyAction(QStringLiteral("\"")), QStringLiteral("abc\"\""), 4);
+    cjkExpect(checks, details, QStringLiteral("lineEndAsciiQuoteClosesUnclosed"),
+              QStringLiteral("a\"bc"), 4, 4,
+              QStringLiteral("key \" closes unclosed quote at line end"),
+              keyAction(QStringLiteral("\"")), QStringLiteral("a\"bc\""), 5);
+    cjkExpect(checks, details, QStringLiteral("lineEndCjkQuoteClosesBeforePairing"),
+              QStringLiteral("中文“内容"), 5, 5,
+              QStringLiteral("key \" closes CJK quote at line end"),
+              keyAction(QStringLiteral("\"")), QStringLiteral("中文 “内容”"), 7);
+    cjkExpect(checks, details, QStringLiteral("lineEndCurlyOpeningKeyClosesUnclosed"),
+              QStringLiteral("a“bc"), 4, 4,
+              QStringLiteral("key “ closes unclosed curly quote at line end"),
+              keyAction(QStringLiteral("“")), QStringLiteral("a “bc”"), 6);
+    cjkExpect(checks, details, QStringLiteral("lineEndFullwidthQuoteClosesUnclosed"),
+              QStringLiteral("a＂bc"), 4, 4,
+              QStringLiteral("key ＂ closes unclosed fullwidth quote at line end"),
+              keyAction(QStringLiteral("＂")), QStringLiteral("a＂bc＂"), 5);
+    cjkExpect(checks, details, QStringLiteral("lineEndBacktickClosesUnclosed"),
+              QStringLiteral("a`code"), 6, 6,
+              QStringLiteral("key ` closes unclosed code span at line end"),
+              keyAction(QStringLiteral("`")), QStringLiteral("a `code`"), 7);
+    cjkExpect(checks, details, QStringLiteral("lineEndImeQuoteClosesUnclosed"),
+              QStringLiteral("a\"中文"), 4, 4,
+              QStringLiteral("IME commit \" closes quote at line end"),
+              [] { return inputMethodCommit(QStringLiteral("\"")); },
+              QStringLiteral("a “中文”"), 6);
+    cjkExpect(checks, details, QStringLiteral("lineEndEscapedQuoteDoesNotClose"),
+              QStringLiteral("abc\\\"def"), 8, 8,
+              QStringLiteral("escaped quote is not an opener"),
+              keyAction(QStringLiteral("\"")), QStringLiteral("abc\\\"def\"\""), 9);
+    cjkExpect(checks, details, QStringLiteral("lineEndQuoteDoesNotCrossLine"),
+              QStringLiteral("\"first\nsecond"), 13, 13,
+              QStringLiteral("quote opener on previous line is ignored"),
+              keyAction(QStringLiteral("\"")), QStringLiteral("\"first\nsecond\"\""), 14);
     {
         // 输入与自动空格必须合并为一次撤销（UNDO-GROUP-001）。
         setTextAndSelection(QStringLiteral("中文"), 2, 2);
@@ -2948,7 +2981,7 @@ int main(int argc, char *argv[])
     cjkExpect(checks, details, QStringLiteral("midQuoteImeCurlyCloseCjk"),
               QStringLiteral("a“中文x"), 4, 4, QStringLiteral("IME commit ” closes wrap"),
               [] { return inputMethodCommit(QStringLiteral("”")); },
-              QStringLiteral("a“中文”x"), 5);
+              QStringLiteral("a “中文” x"), 6);
     cjkExpect(checks, details, QStringLiteral("midQuoteImeAsciiCloseCjkConverts"),
               QStringLiteral("a\"中文x"), 4, 4, QStringLiteral("IME commit \" closes CJK wrap"),
               [] { return inputMethodCommit(QStringLiteral("\"")); },
