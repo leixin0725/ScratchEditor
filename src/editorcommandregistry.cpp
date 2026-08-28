@@ -926,6 +926,15 @@ bool orderedListStructureAffected(const QString &text, int start, int end)
         && orderedListNearby;
 }
 
+bool orderedListEditRequiresRepair(const QString &beforeText, const QString &afterText,
+                                   int start, int beforeEnd, int afterEnd)
+{
+    // 裸行首数字是有序列表前缀的中间状态，但在其后输入正文后就不再是列表。
+    // 只有编辑前后都命中列表结构时才短路到编号修复，避免跳过常规输入处理。
+    return orderedListStructureAffected(beforeText, start, beforeEnd)
+        && orderedListStructureAffected(afterText, start, afterEnd);
+}
+
 MarkupKind markupKind(const QString &opening, const QString &closing)
 {
     if (opening == QStringLiteral("**") && closing == opening) {
@@ -1861,7 +1870,10 @@ bool EditorCommandRegistry::handleEditorEvent(QEvent *event)
             undoGroupCursor.beginEditBlock();
             const TypedEditResult result = handleTypedText(text);
             if (!result.consumed) {
-                if (orderedListStructureAffected(beforeText, start, end)) {
+                QString expectedText = beforeText;
+                expectedText.replace(start, end - start, text);
+                if (orderedListEditRequiresRepair(
+                        beforeText, expectedText, start, end, start + text.size())) {
                     QTextCursor insertionCursor(m_document);
                     insertionCursor.setPosition(start);
                     insertionCursor.setPosition(end, QTextCursor::KeepAnchor);
@@ -1875,8 +1887,6 @@ bool EditorCommandRegistry::handleEditorEvent(QEvent *event)
                     queueInputAutoScrollCheck();
                     return true;
                 }
-                QString expectedText = beforeText;
-                expectedText.replace(start, end - start, text);
                 QTimer::singleShot(0, this,
                                    [this, start, text, expectedText,
                                     undoGroupCursor]() mutable {
@@ -1932,7 +1942,10 @@ bool EditorCommandRegistry::handleEditorEvent(QEvent *event)
         const int start = m_editor->property("selectionStart").toInt();
         const int end = m_editor->property("selectionEnd").toInt();
         const QString beforeText = m_documentTextSnapshot;
-        const bool repairOrderedList = orderedListStructureAffected(beforeText, start, end);
+        QString expectedText = beforeText;
+        expectedText.replace(start, end - start, committedText);
+        const bool repairOrderedList = orderedListEditRequiresRepair(
+            beforeText, expectedText, start, end, start + committedText.size());
         // 连续输入 `·`：提交文本尚未插入，若前一步正是上一个字面 `·`
         // （或其生成的 `` 对），先撤销该步再在本事件内完成转换；
         // 返回 true 阻止编辑器再次插入提交文本。
@@ -1951,8 +1964,6 @@ bool EditorCommandRegistry::handleEditorEvent(QEvent *event)
         undoGroupCursor.setPosition(start);
         undoGroupCursor.beginEditBlock();
         if (!relevant) {
-            QString expectedText = beforeText;
-            expectedText.replace(start, end - start, committedText);
             QTimer::singleShot(0, this,
                                [this, beforeText, start, committedText, expectedText,
                                 repairOrderedList, undoGroupCursor]() mutable {

@@ -3535,6 +3535,38 @@ int main(int argc, char *argv[])
     cjkExpect(checks, details, QStringLiteral("liveAsciiThenCjk"),
               QStringLiteral("ABC"), 3, 3, QStringLiteral("key 中"),
               keyAction(QStringLiteral("中")), QStringLiteral("ABC 中"), 5);
+    cjkExpect(checks, details, QStringLiteral("liveSingleLineStartNumberThenCjk"),
+              QStringLiteral("1"), 1, 1, QStringLiteral("key 中"),
+              keyAction(QStringLiteral("中")), QStringLiteral("1 中"), 3);
+    cjkExpect(checks, details, QStringLiteral("liveLineStartNumberThenCjk"),
+              QStringLiteral("123"), 3, 3, QStringLiteral("key 中"),
+              keyAction(QStringLiteral("中")), QStringLiteral("123 中"), 5);
+    const QJsonObject lineStartNumberUndo = request(QStringLiteral("testUndo"));
+    addCheck(checks, details, QStringLiteral("liveLineStartNumberThenCjkUndo"),
+             lineStartNumberUndo.value(QStringLiteral("text")).toString()
+                    == QStringLiteral("123")
+                 && lineStartNumberUndo.value(QStringLiteral("cursorPosition")).toInt() == 3,
+             lineStartNumberUndo);
+    cjkExpect(checks, details, QStringLiteral("liveLaterLineStartNumberThenCjkIme"),
+              QStringLiteral("上一行\n123"), 7, 7, QStringLiteral("IME commit 中文"),
+              [] { return inputMethodCommit(QStringLiteral("中文")); },
+              QStringLiteral("上一行\n123 中文"), 10);
+    cjkExpect(checks, details, QStringLiteral("liveOrderedListDotPrefixPreserved"),
+              QStringLiteral("1"), 1, 1, QStringLiteral("key . + space + 中"),
+              [] {
+                  keyPress(QStringLiteral("."), QStringLiteral("."));
+                  keyPress(QStringLiteral(" "), QStringLiteral(" "));
+                  return keyPress(QStringLiteral("中"), QStringLiteral("中"));
+              },
+              QStringLiteral("1. 中"), 4);
+    cjkExpect(checks, details, QStringLiteral("liveOrderedListParenPrefixPreserved"),
+              QStringLiteral("1"), 1, 1, QStringLiteral("key ) + space + 中"),
+              [] {
+                  keyPress(QStringLiteral(")"), QStringLiteral(")"));
+                  keyPress(QStringLiteral(" "), QStringLiteral(" "));
+                  return keyPress(QStringLiteral("中"), QStringLiteral("中"));
+              },
+              QStringLiteral("1) 中"), 4);
     cjkExpect(checks, details, QStringLiteral("liveMiddleInsert"),
               QStringLiteral("中文"), 1, 1, QStringLiteral("key A"),
               keyAction(QStringLiteral("A")), QStringLiteral("中 A 文"), 3);
