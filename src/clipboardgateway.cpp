@@ -32,15 +32,20 @@ void ClipboardGateway::setTestFault(const QString &, bool) {}
 bool ClipboardGateway::decodeUnicodeTextBuffer(const QByteArray &bytes, QString *text,
                                                QString *errorMessage)
 {
+    if (errorMessage) {
+        errorMessage->clear();
+    }
     if (!text) {
         return false;
     }
-    if (bytes.size() < 2 || (bytes.size() % 2) != 0) {
+    text->clear();
+    if (bytes.size() < 2) {
         if (errorMessage) {
             *errorMessage = QStringLiteral("剪贴板文本缓冲区长度无效");
         }
         return false;
     }
+    // GlobalSize 返回整个分配块的大小；只要存在对齐终止符，其后的填充无需成对。
     qsizetype terminatorByte = -1;
     for (qsizetype offset = 0; offset + 1 < bytes.size(); offset += 2) {
         if (bytes.at(offset) == 0 && bytes.at(offset + 1) == 0) {
@@ -50,11 +55,12 @@ bool ClipboardGateway::decodeUnicodeTextBuffer(const QByteArray &bytes, QString 
     }
     if (terminatorByte < 0) {
         if (errorMessage) {
-            *errorMessage = QStringLiteral("剪贴板文本缺少终止符");
+            *errorMessage = (bytes.size() % 2) != 0
+                ? QStringLiteral("剪贴板文本缓冲区长度无效")
+                : QStringLiteral("剪贴板文本缺少终止符");
         }
         return false;
     }
-    text->clear();
     text->reserve(terminatorByte / 2);
     for (qsizetype offset = 0; offset < terminatorByte; offset += 2) {
         const auto *unit = reinterpret_cast<const uchar *>(bytes.constData() + offset);

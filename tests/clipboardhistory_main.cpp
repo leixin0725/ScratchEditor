@@ -129,18 +129,64 @@ void decoderTests()
     checkTrue("utf16 decoder valid",
               ClipboardGateway::decodeUnicodeTextBuffer(valid, &text, &error));
     checkEqual("utf16 decoder text", text, QStringLiteral("AB"));
-    checkEqual("utf16 decoder odd",
+    text = QStringLiteral("stale");
+    error = QStringLiteral("stale error");
+    checkTrue("utf16 decoder accepts odd allocation padding",
+              ClipboardGateway::decodeUnicodeTextBuffer(
+                  QByteArray("A\0\0\0X", 5), &text, &error));
+    checkEqual("utf16 decoder ignores odd allocation padding", text,
+               QStringLiteral("A"));
+    checkEqual("utf16 decoder clears stale error on success", error, QString());
+    checkTrue("utf16 decoder accepts padded empty text",
+              ClipboardGateway::decodeUnicodeTextBuffer(
+                  QByteArray("\0\0X", 3), &text, &error));
+    checkEqual("utf16 decoder padded empty text", text, QString());
+    checkTrue("utf16 decoder accepts even allocation padding",
+              ClipboardGateway::decodeUnicodeTextBuffer(
+                  QByteArray("A\0\0\0X\0", 6), &text, &error));
+    checkEqual("utf16 decoder ignores even allocation padding", text,
+               QStringLiteral("A"));
+
+    text = QStringLiteral("stale");
+    error = QStringLiteral("stale error");
+    checkEqual("utf16 decoder rejects empty buffer",
+               ClipboardGateway::decodeUnicodeTextBuffer(QByteArray(), &text, &error),
+               false);
+    checkEqual("utf16 decoder clears text after empty buffer", text, QString());
+    checkEqual("utf16 decoder reports empty buffer", error,
+               QStringLiteral("剪贴板文本缓冲区长度无效"));
+    text = QStringLiteral("stale");
+    checkEqual("utf16 decoder rejects one byte",
                ClipboardGateway::decodeUnicodeTextBuffer(QByteArray("A", 1), &text, &error),
                false);
+    checkEqual("utf16 decoder clears text after short buffer", text, QString());
+    checkEqual("utf16 decoder reports short buffer", error,
+               QStringLiteral("剪贴板文本缓冲区长度无效"));
+    text = QStringLiteral("stale");
+    checkEqual("utf16 decoder rejects odd unterminated buffer",
+               ClipboardGateway::decodeUnicodeTextBuffer(
+                   QByteArray("A\0X", 3), &text, &error),
+               false);
+    checkEqual("utf16 decoder clears text after odd unterminated buffer", text, QString());
+    checkEqual("utf16 decoder reports odd unterminated buffer", error,
+               QStringLiteral("剪贴板文本缓冲区长度无效"));
+    text = QStringLiteral("stale");
     checkEqual("utf16 decoder no terminator",
                ClipboardGateway::decodeUnicodeTextBuffer(QByteArray("A\0", 2), &text, &error),
                false);
+    checkEqual("utf16 decoder clears text without terminator", text, QString());
+    checkEqual("utf16 decoder reports missing terminator", error,
+               QStringLiteral("剪贴板文本缺少终止符"));
     QByteArray oversizeUtf16((ClipboardHistoryModel::MaximumItemUtf8Bytes + 1) * 2 + 2, 0);
     for (qsizetype offset = 0; offset < oversizeUtf16.size() - 2; offset += 2) {
         oversizeUtf16[offset] = 'a';
     }
+    text = QStringLiteral("stale");
     checkEqual("utf16 decoder rejects over 1 MiB",
                ClipboardGateway::decodeUnicodeTextBuffer(oversizeUtf16, &text, &error), false);
+    checkEqual("utf16 decoder clears oversize text", text, QString());
+    checkEqual("utf16 decoder reports oversize text", error,
+               QStringLiteral("剪贴板文本超过 1 MiB"));
 }
 
 void modelTests()
