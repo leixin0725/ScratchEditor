@@ -1541,6 +1541,61 @@ void EditorController::buildCommandHandlers()
             response.insert(QStringLiteral("edgeExitEmitted"), emitted);
             sendResponse(r.socket, response, r.startedNs, r.requestId);
         }}},
+        {QStringLiteral("testDragClipboardHistory"), {Gate::Test, [this](const DispatchRequest &r) {
+            const QString id = r.request.value(QStringLiteral("id")).toString();
+            const int dropPosition = r.request.value(QStringLiteral("dropPosition")).toInt();
+            const bool outsideEditor = r.request.value(
+                QStringLiteral("outsideEditor")).toBool();
+            QRectF dropRectangle;
+            const bool dropLocated = m_editor && QMetaObject::invokeMethod(
+                m_editor, "positionToRectangle", Qt::DirectConnection,
+                Q_RETURN_ARG(QRectF, dropRectangle), Q_ARG(int, dropPosition));
+            bool armed = false;
+            bool dragActivated = false;
+            bool canDrop = false;
+            bool inserted = false;
+            if (dropLocated) {
+                if (auto *item = qobject_cast<QQuickItem *>(m_editor.data())) {
+                    const QPointF dropScene = item->mapToScene(dropRectangle.center());
+                    const QPointF pressScene = dropScene - QPointF(100.0, 100.0);
+                    const QPointF releaseScene = outsideEditor
+                        ? QPointF(-500.0, -500.0) : dropScene;
+                    armed = beginClipboardHistoryDrag(id, pressScene.x(), pressScene.y());
+                    const QVariantMap update = updateClipboardHistoryDrag(
+                        releaseScene.x(), releaseScene.y());
+                    dragActivated = update.value(QStringLiteral("active")).toBool();
+                    canDrop = update.value(QStringLiteral("canDrop")).toBool();
+                    inserted = finishClipboardHistoryDrag(
+                        releaseScene.x(), releaseScene.y());
+                }
+            }
+            QJsonObject response = statusObject();
+            response.insert(QStringLiteral("command"), r.command);
+            response.insert(QStringLiteral("armed"), armed);
+            response.insert(QStringLiteral("dragActivated"), dragActivated);
+            response.insert(QStringLiteral("canDrop"), canDrop);
+            response.insert(QStringLiteral("inserted"), inserted);
+            response.insert(QStringLiteral("text"),
+                            m_editor ? m_editor->property("text").toString() : QString());
+            sendResponse(r.socket, response, r.startedNs, r.requestId);
+        }}},
+        {QStringLiteral("testClipboardHistoryDragUi"), {Gate::Test, [this](const DispatchRequest &r) {
+            QVariant accepted;
+            const bool invoked = m_window && QMetaObject::invokeMethod(
+                m_window, "dispatchHistoryTestDrag", Qt::DirectConnection,
+                Q_RETURN_ARG(QVariant, accepted),
+                Q_ARG(QVariant, r.request.value(QStringLiteral("id")).toVariant()),
+                Q_ARG(QVariant, r.request.value(QStringLiteral("dropPosition")).toVariant()),
+                Q_ARG(QVariant, r.request.value(QStringLiteral("activateDrag")).toVariant()),
+                Q_ARG(QVariant, r.request.value(QStringLiteral("outsideEditor")).toVariant()),
+                Q_ARG(QVariant, r.request.value(QStringLiteral("finishDrag")).toVariant()));
+            QJsonObject response = statusObject();
+            response.insert(QStringLiteral("command"), r.command);
+            response.insert(QStringLiteral("eventsAccepted"), invoked && accepted.toBool());
+            response.insert(QStringLiteral("text"),
+                            m_editor ? m_editor->property("text").toString() : QString());
+            waitForNextFrame(r.socket, response, r.startedNs, r.requestId);
+        }}},
         {QStringLiteral("testDragSelection"), {Gate::Test, [this](const DispatchRequest &r) {
             // 合成的拖拽按压事件视为一次全新的单击，避免与多重点击放行逻辑互相干扰。
             m_lastMouseClickElapsedMs = -1;
@@ -2517,6 +2572,7 @@ bool EditorController::commitAndHide(bool deliverAfterHide, bool persistState)
     if (m_hiding) {
         return true;
     }
+    cancelClipboardHistoryDrag();
 
     if (persistState) {
         const QString text = m_editor->property("text").toString();
@@ -2720,6 +2776,39 @@ void EditorController::selectClipboardHistoryItem(const QString &id)
     if (m_clipboardHistory) {
         m_clipboardHistory->setSelectedId(id);
         emit clipboardHistoryUiStateChanged();
+    }
+}
+
+bool EditorController::beginClipboardHistoryDrag(const QString &id,
+                                                 qreal sceneX, qreal sceneY)
+{
+    if (!m_clipboardHistory || !m_commands) {
+        return false;
+    }
+    const QString text = m_clipboardHistory->textById(id);
+    return !text.isEmpty()
+        && m_commands->beginExternalTextDrag(text, QPointF(sceneX, sceneY));
+}
+
+QVariantMap EditorController::updateClipboardHistoryDrag(qreal sceneX, qreal sceneY)
+{
+    const bool canDrop = m_commands
+        && m_commands->updateExternalTextDrag(QPointF(sceneX, sceneY));
+    return {{QStringLiteral("active"),
+             m_commands && m_commands->externalTextDragActive()},
+            {QStringLiteral("canDrop"), canDrop}};
+}
+
+bool EditorController::finishClipboardHistoryDrag(qreal sceneX, qreal sceneY)
+{
+    return m_commands
+        && m_commands->finishExternalTextDrag(QPointF(sceneX, sceneY));
+}
+
+void EditorController::cancelClipboardHistoryDrag()
+{
+    if (m_commands) {
+        m_commands->cancelExternalTextDrag();
     }
 }
 
@@ -3530,6 +3619,10 @@ QJsonObject EditorController::statusObject() const
                       m_window->property("editorVisibleContentHeight").toDouble());
         status.insert(QStringLiteral("historyQueryFocused"),
                       m_window->property("historyQueryFocused").toBool());
+        status.insert(QStringLiteral("historyCardDragActive"),
+                      m_window->property("historyCardDragActive").toBool());
+        status.insert(QStringLiteral("historyCardDropAllowed"),
+                      m_window->property("historyCardDropAllowed").toBool());
         status.insert(QStringLiteral("historyPanelLoaded"),
                       m_window->property("historyPanelLoaded").toBool());
         status.insert(QStringLiteral("historyTriggerWidth"),

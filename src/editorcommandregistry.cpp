@@ -1417,7 +1417,11 @@ EditorCommandRegistry::EditorCommandRegistry(AppSettings *settings,
 
     m_selectionDragScrollTimer.setInterval(30);
     connect(&m_selectionDragScrollTimer, &QTimer::timeout, this, [this] {
-        updateSelectionDrag(m_selectionDragScenePosition, true);
+        if (m_externalDragActive) {
+            updateExternalTextDragPosition(m_externalDragScenePosition, true);
+        } else {
+            updateSelectionDrag(m_selectionDragScenePosition, true);
+        }
     });
 
     m_headingScrollTimer.setSingleShot(true);
@@ -1440,6 +1444,7 @@ EditorCommandRegistry::~EditorCommandRegistry() = default;
 void EditorCommandRegistry::setEditor(QObject *editor, QTextDocument *document)
 {
     resetSelectionDrag(true);
+    resetExternalTextDrag();
     if (m_document) {
         QObject::disconnect(m_document.data(), nullptr, this, nullptr);
     }
@@ -2502,6 +2507,98 @@ bool EditorCommandRegistry::moveSelection(int selectionStart, int selectionEnd,
     return true;
 }
 
+bool EditorCommandRegistry::insertExternalText(const QString &text, int dropPosition)
+{
+    if (!m_editor || !m_document || text.isEmpty()
+        || m_editor->property("readOnly").toBool()) {
+        return false;
+    }
+
+    const QString beforeText = m_documentTextSnapshot;
+    if (dropPosition < 0 || dropPosition > beforeText.size()) {
+        return false;
+    }
+
+    const bool repairOrderedList = text.contains(QLatin1Char('\n'))
+        || orderedListStructureAffected(beforeText, dropPosition, dropPosition);
+    QTextCursor cursor(m_document);
+    cursor.beginEditBlock();
+    cursor.setPosition(dropPosition);
+    cursor.insertText(text);
+    selectRange(dropPosition, dropPosition + text.size());
+    if (repairOrderedList) {
+        repairOrderedLists(beforeText, m_document->toPlainText(), true);
+    }
+    cursor.endEditBlock();
+    focusEditor();
+    return true;
+}
+
+bool EditorCommandRegistry::beginExternalTextDrag(const QString &text,
+                                                  const QPointF &scenePosition)
+{
+    if (!m_editor || !m_document || text.isEmpty()
+        || m_editor->property("readOnly").toBool()
+        || m_editor->property("inputMethodComposing").toBool()) {
+        return false;
+    }
+
+    resetSelectionDrag(true);
+    resetExternalTextDrag();
+    m_externalDragText = text;
+    m_externalDragPressScenePosition = scenePosition;
+    m_externalDragScenePosition = scenePosition;
+    return true;
+}
+
+bool EditorCommandRegistry::updateExternalTextDrag(const QPointF &scenePosition)
+{
+    if (m_externalDragText.isEmpty()) {
+        return false;
+    }
+
+    m_externalDragScenePosition = scenePosition;
+    if (!m_externalDragActive) {
+        const qreal distance = (scenePosition
+                                - m_externalDragPressScenePosition).manhattanLength();
+        if (distance < QGuiApplication::styleHints()->startDragDistance()) {
+            return false;
+        }
+        m_externalDragActive = true;
+        m_selectionDragScrollTimer.start();
+    }
+
+    updateExternalTextDragPosition(scenePosition, true);
+    return m_externalDropPosition >= 0;
+}
+
+bool EditorCommandRegistry::finishExternalTextDrag(const QPointF &scenePosition)
+{
+    if (m_externalDragText.isEmpty()) {
+        return false;
+    }
+
+    if (m_externalDragActive) {
+        updateExternalTextDragPosition(scenePosition, false);
+    }
+    const bool wasActive = m_externalDragActive;
+    const int dropPosition = m_externalDropPosition;
+    const QString text = m_externalDragText;
+    resetExternalTextDrag();
+    return wasActive && dropPosition >= 0
+        && insertExternalText(text, dropPosition);
+}
+
+void EditorCommandRegistry::cancelExternalTextDrag()
+{
+    resetExternalTextDrag();
+}
+
+bool EditorCommandRegistry::externalTextDragActive() const
+{
+    return m_externalDragActive;
+}
+
 bool EditorCommandRegistry::handleSelectionDragEvent(QEvent *event)
 {
     if (event->type() == QEvent::MouseButtonPress) {
@@ -2619,6 +2716,33 @@ int EditorCommandRegistry::editorPositionAt(const QPointF &localPosition) const
     return invoked ? qBound(0, position, m_documentTextSnapshot.size()) : -1;
 }
 
+int EditorCommandRegistry::visibleEditorPositionAt(const QPointF &scenePosition) const
+{
+    QQuickItem *item = editorItem();
+    QQuickItem *viewport = editorViewport();
+    if (!item || !viewport) {
+        return -1;
+    }
+
+    const QPointF viewportPosition = viewport->mapFromScene(scenePosition);
+    const QPointF editorPosition = item->mapFromScene(scenePosition);
+    if (!viewport->contains(viewportPosition) || !item->contains(editorPosition)) {
+        return -1;
+    }
+    // 窄窗口中历史面板覆盖在编辑器上方；被面板遮住的 TextEdit 区域
+    // 不能作为有效落点，否则在卡片尚未拖出面板时就可能误插入。
+    if (m_window && m_window->property("historyPanelOpen").toBool()
+        && m_window->property("historyPanelOverlay").toBool()) {
+        const QPointF viewportSceneTopLeft = viewport->mapToScene(QPointF());
+        const qreal panelRight = viewportSceneTopLeft.x()
+            + m_window->property("historyPanelWidth").toReal();
+        if (scenePosition.x() < panelRight) {
+            return -1;
+        }
+    }
+    return editorPositionAt(editorPosition);
+}
+
 QQuickItem *EditorCommandRegistry::editorItem() const
 {
     return qobject_cast<QQuickItem *>(m_editor.data());
@@ -2707,6 +2831,7 @@ void EditorCommandRegistry::scrollViewportToHeading(int position)
 void EditorCommandRegistry::beginSelectionDrag(int selectionStart, int selectionEnd,
                                                 const QPointF &scenePosition)
 {
+    resetExternalTextDrag();
     m_selectionDragStart = selectionStart;
     m_selectionDragEnd = selectionEnd;
     m_selectionDropPosition = -1;
@@ -2731,30 +2856,7 @@ void EditorCommandRegistry::updateSelectionDrag(const QPointF &scenePosition,
 
     m_selectionDragScenePosition = scenePosition;
     if (scrollViewport) {
-        if (QQuickItem *viewport = editorViewport()) {
-            const QPointF viewportPosition = viewport->mapFromScene(scenePosition);
-            const qreal viewportHeight = viewport->height();
-            const qreal edge = qMin<qreal>(32.0, viewportHeight / 4.0);
-            const qreal currentY = viewport->property("contentY").toReal();
-            const qreal maximumY = qMax<qreal>(
-                0.0, viewport->property("contentHeight").toReal() - viewportHeight);
-            qreal scrollDelta = 0.0;
-            if (viewportPosition.x() >= -edge
-                && viewportPosition.x() <= viewport->width() + edge) {
-                if (viewportPosition.y() < edge) {
-                    scrollDelta = -qBound<qreal>(2.0,
-                                                 (edge - viewportPosition.y()) * 0.5,
-                                                 24.0);
-                } else if (viewportPosition.y() > viewportHeight - edge) {
-                    scrollDelta = qBound<qreal>(
-                        2.0, (viewportPosition.y() - viewportHeight + edge) * 0.5, 24.0);
-                }
-            }
-            const qreal requestedY = qBound<qreal>(0.0, currentY + scrollDelta, maximumY);
-            if (!qFuzzyCompare(requestedY + 1.0, currentY + 1.0)) {
-                viewport->setProperty("contentY", requestedY);
-            }
-        }
+        scrollTextDragViewport(scenePosition);
     }
 
     QQuickItem *item = editorItem();
@@ -2794,6 +2896,64 @@ void EditorCommandRegistry::resetSelectionDrag(bool releaseMouseGrab)
         if (releaseMouseGrab) {
             item->ungrabMouse();
         }
+    }
+}
+
+void EditorCommandRegistry::updateExternalTextDragPosition(
+    const QPointF &scenePosition, bool scrollViewport)
+{
+    if (!m_externalDragActive || !m_editor) {
+        return;
+    }
+
+    m_externalDragScenePosition = scenePosition;
+    if (scrollViewport) {
+        scrollTextDragViewport(scenePosition);
+    }
+    m_externalDropPosition = visibleEditorPositionAt(scenePosition);
+    m_editor->setProperty("selectionDragPosition", m_externalDropPosition);
+}
+
+void EditorCommandRegistry::resetExternalTextDrag()
+{
+    m_selectionDragScrollTimer.stop();
+    m_externalDragText.clear();
+    m_externalDragPressScenePosition = {};
+    m_externalDragScenePosition = {};
+    m_externalDropPosition = -1;
+    m_externalDragActive = false;
+    if (m_editor) {
+        m_editor->setProperty("selectionDragPosition", -1);
+    }
+}
+
+void EditorCommandRegistry::scrollTextDragViewport(const QPointF &scenePosition)
+{
+    QQuickItem *viewport = editorViewport();
+    if (!viewport) {
+        return;
+    }
+
+    const QPointF viewportPosition = viewport->mapFromScene(scenePosition);
+    const qreal viewportHeight = viewport->height();
+    const qreal edge = qMin<qreal>(32.0, viewportHeight / 4.0);
+    const qreal currentY = viewport->property("contentY").toReal();
+    const qreal maximumY = qMax<qreal>(
+        0.0, viewport->property("contentHeight").toReal() - viewportHeight);
+    qreal scrollDelta = 0.0;
+    if (viewportPosition.x() >= -edge
+        && viewportPosition.x() <= viewport->width() + edge) {
+        if (viewportPosition.y() < edge) {
+            scrollDelta = -qBound<qreal>(
+                2.0, (edge - viewportPosition.y()) * 0.5, 24.0);
+        } else if (viewportPosition.y() > viewportHeight - edge) {
+            scrollDelta = qBound<qreal>(
+                2.0, (viewportPosition.y() - viewportHeight + edge) * 0.5, 24.0);
+        }
+    }
+    const qreal requestedY = qBound<qreal>(0.0, currentY + scrollDelta, maximumY);
+    if (!qFuzzyCompare(requestedY + 1.0, currentY + 1.0)) {
+        viewport->setProperty("contentY", requestedY);
     }
 }
 

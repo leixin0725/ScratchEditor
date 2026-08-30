@@ -14,6 +14,8 @@ inline const QStringList &clipboardHistoryTestCommands()
         QStringLiteral("testWaitForClipboardHistoryIdle"),
         QStringLiteral("testClipboardHistoryUiAction"),
         QStringLiteral("testClipboardHistoryWindowLeave"),
+        QStringLiteral("testDragClipboardHistory"),
+        QStringLiteral("testClipboardHistoryDragUi"),
     };
     return commands;
 }
