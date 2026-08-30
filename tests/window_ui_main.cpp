@@ -285,6 +285,17 @@ int main(int argc, char *argv[])
                         QStringLiteral("headingNavigationHighlightFadeDurationMs")).toInt()
                     == 300,
              initial);
+    addCheck(checks, details, QStringLiteral("fileDropAreaCoversOnlyEditorViewport"),
+             !initial.value(QStringLiteral("fileDropEnabled")).toBool()
+                 && qAbs(initial.value(QStringLiteral("fileDropAreaX")).toDouble()
+                         - initial.value(QStringLiteral("editorViewportX")).toDouble()) <= 0.5
+                 && qAbs(initial.value(QStringLiteral("fileDropAreaY")).toDouble()
+                         - initial.value(QStringLiteral("editorViewportY")).toDouble()) <= 0.5
+                 && qAbs(initial.value(QStringLiteral("fileDropAreaWidth")).toDouble()
+                         - initial.value(QStringLiteral("editorViewportWidth")).toDouble()) <= 0.5
+                 && qAbs(initial.value(QStringLiteral("fileDropAreaHeight")).toDouble()
+                         - initial.value(QStringLiteral("editorViewportHeight")).toDouble()) <= 0.5,
+             initial);
     addCheck(checks, details, QStringLiteral("appearanceDefaults"),
              initial.value(QStringLiteral("theme")).toString() == QStringLiteral("dark")
                  && initial.value(QStringLiteral("editorFontFamily")).toString()
@@ -395,6 +406,11 @@ int main(int argc, char *argv[])
         navigationHighlightText.indexOf(QStringLiteral("   \n"));
     request(QStringLiteral("show"));
     QThread::msleep(180);
+    const QJsonObject visibleFileDrop = request(QStringLiteral("status"));
+    addCheck(checks, details, QStringLiteral("fileDropEnabledForVisibleEditor"),
+             visibleFileDrop.value(QStringLiteral("visible")).toBool()
+                 && visibleFileDrop.value(QStringLiteral("fileDropEnabled")).toBool(),
+             visibleFileDrop);
     request(QStringLiteral("testSetText"),
             {{QStringLiteral("text"), navigationHighlightText}});
     request(QStringLiteral("testSetSelection"),
@@ -855,11 +871,25 @@ int main(int argc, char *argv[])
                  && opened.value(QStringLiteral("settingsPageLoaded")).toBool()
                  && opened.value(QStringLiteral("settingsPageVisible")).toBool(),
              opened);
+    addCheck(checks, details, QStringLiteral("fileDropDisabledBySettings"),
+             !opened.value(QStringLiteral("fileDropEnabled")).toBool(), opened);
     const QJsonObject closed = request(QStringLiteral("testCloseOverlays"));
     addCheck(checks, details, QStringLiteral("settingsPageCloses"),
              closed.value(QStringLiteral("settingsClosed")).toBool()
                  && !closed.value(QStringLiteral("settingsPageLoaded")).toBool(),
              closed);
+    const QJsonObject findOpened = execute(QStringLiteral("find"));
+    addCheck(checks, details, QStringLiteral("fileDropDisabledByFindPanel"),
+             findOpened.value(QStringLiteral("findPanelVisible")).toBool()
+                 && !findOpened.value(QStringLiteral("fileDropEnabled")).toBool(),
+             findOpened);
+    request(QStringLiteral("testCloseOverlays"));
+    const QJsonObject paletteOpened = execute(QStringLiteral("commandPalette"));
+    addCheck(checks, details, QStringLiteral("fileDropDisabledByCommandPalette"),
+             paletteOpened.value(QStringLiteral("commandPaletteLoaded")).toBool()
+                 && !paletteOpened.value(QStringLiteral("fileDropEnabled")).toBool(),
+             paletteOpened);
+    request(QStringLiteral("testCloseOverlays"));
 
     const QJsonObject light = request(
         QStringLiteral("testApplyAppearance"),
@@ -1283,6 +1313,11 @@ int main(int argc, char *argv[])
              toggledReopenedHistory.value(QStringLiteral("historyPanelOpen")).toBool()
                  && toggledReopenedHistory.value(QStringLiteral("historyQueryFocused")).toBool(),
              toggledReopenedHistory);
+    addCheck(checks, details, QStringLiteral("fileDropDisabledByHistoryPanel"),
+             toggledReopenedHistory.value(QStringLiteral("historyPanelOpen")).toBool()
+                 && !toggledReopenedHistory.value(
+                        QStringLiteral("fileDropEnabled")).toBool(),
+             toggledReopenedHistory);
 
     const QJsonObject historyState = request(QStringLiteral("testClipboardHistoryState"));
     const QJsonArray historyItems = historyState.value(QStringLiteral("items")).toArray();
@@ -1337,6 +1372,11 @@ int main(int argc, char *argv[])
                                         .value(QStringLiteral("text")).toString();
     historyAction(QStringLiteral("historyActivateSelected"));
     const QJsonObject dirtyConfirmation = request(QStringLiteral("status"));
+    addCheck(checks, details, QStringLiteral("fileDropDisabledByLoadConfirmation"),
+             dirtyConfirmation.value(
+                QStringLiteral("historyLoadConfirmationVisible")).toBool()
+                 && !dirtyConfirmation.value(QStringLiteral("fileDropEnabled")).toBool(),
+             dirtyConfirmation);
     historyAction(QStringLiteral("historyCancelLoad"));
     const QJsonObject dirtyCancelled = request(QStringLiteral("status"));
     const QString dirtyTextAfterCancel = request(QStringLiteral("testText"))
@@ -1495,6 +1535,11 @@ int main(int argc, char *argv[])
     const QJsonObject afterDelete = request(QStringLiteral("testClipboardHistoryState"));
     historyAction(QStringLiteral("historyRequestClear"));
     const QJsonObject clearRequested = request(QStringLiteral("status"));
+    addCheck(checks, details, QStringLiteral("fileDropDisabledByClearConfirmation"),
+             clearRequested.value(
+                QStringLiteral("historyClearConfirmationVisible")).toBool()
+                 && !clearRequested.value(QStringLiteral("fileDropEnabled")).toBool(),
+             clearRequested);
     historyAction(QStringLiteral("historyEscape"));
     const QJsonObject afterClearEscape = request(QStringLiteral("testClipboardHistoryState"));
     historyAction(QStringLiteral("historyRequestClear"));

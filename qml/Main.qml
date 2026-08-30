@@ -122,6 +122,7 @@ Window {
     readonly property bool findPanelVisible: findPanel.visible
     readonly property bool settingsPageLoaded: settingsLoader.active
     readonly property bool settingsPageVisible: settingsLoader.active
+    readonly property bool fileDropEnabled: fileDropArea.enabled
     readonly property bool darkTheme: controller.theme !== "light"
     readonly property var uiThemeColors: uiConfig.palette[darkTheme ? "dark" : "light"]
     readonly property color themeBackgroundColor: uiThemeColors.background
@@ -1074,6 +1075,38 @@ Window {
                 height: Math.max(1, editor.selectionDragRectangle.height)
                 visible: editor.selectionDragPosition >= 0
                 color: root.selectionDragColor
+            }
+        }
+    }
+
+    DropArea {
+        id: fileDropArea
+        objectName: "fileDropArea"
+        z: 18
+        x: editorViewport.x
+        y: editorViewport.y
+        width: editorViewport.width
+        height: editorViewport.height
+        enabled: root.visible
+                 && !findPanel.visible
+                 && !commandPaletteLoader.active
+                 && !settingsLoader.active
+                 && !root.historyPanelOpen
+                 && !controller.historyLoadConfirmationVisible
+                 && !controller.historyClearConfirmationVisible
+
+        onEntered: function(drag) {
+            if (drag.hasUrls) {
+                drag.accept(Qt.CopyAction)
+            } else {
+                drag.accepted = false
+            }
+        }
+        onDropped: function(drop) {
+            if (drop.hasUrls && controller.insertDroppedUrls(drop.urls)) {
+                drop.accept(Qt.CopyAction)
+            } else {
+                drop.accepted = false
             }
         }
     }

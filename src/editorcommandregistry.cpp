@@ -1634,27 +1634,6 @@ bool EditorCommandRegistry::handleEditorEvent(QEvent *event)
             && !shiftPressed
             && !modifiers.testFlag(Qt::AltModifier)
             && !modifiers.testFlag(Qt::MetaModifier);
-        if (ctrlZ && m_formatUndoSnapshot) {
-            const QString currentText = m_documentTextSnapshot;
-            if (currentText == m_formatUndoSnapshot->formattedText) {
-                beginInputAutoScrollTracking(QStringLiteral("undo"));
-                QMetaObject::invokeMethod(m_editor, "undo");
-                if (m_documentTextSnapshot == m_formatUndoSnapshot->originalText) {
-                    const int activeEnd = m_formatUndoSnapshot->cursorPosition
-                            == m_formatUndoSnapshot->selectionEnd
-                        ? m_formatUndoSnapshot->selectionEnd
-                        : m_formatUndoSnapshot->selectionStart;
-                    selectRangeWithActiveEnd(m_formatUndoSnapshot->selectionStart,
-                                             m_formatUndoSnapshot->selectionEnd,
-                                             activeEnd);
-                }
-                m_formatUndoSnapshot.reset();
-                focusEditor();
-                queueInputAutoScrollCheck();
-                return true;
-            }
-            m_formatUndoSnapshot.reset();
-        }
         // 撤销/重做视为普通编辑：不预设方向，编辑后光标落在哪条视口边
         // 就按哪条规则自动滚动（撤销可能对应删除也可能对应输入，重做亦然）。
         if (ctrlZ) {
@@ -2283,12 +2262,69 @@ bool EditorCommandRegistry::performUndo()
     if (!m_editor) {
         return false;
     }
+    std::optional<SelectionUndoSnapshot> selectionSnapshot;
+    if (m_selectionUndoSnapshot
+        && m_documentTextSnapshot == m_selectionUndoSnapshot->formattedText) {
+        selectionSnapshot = m_selectionUndoSnapshot;
+    }
+    m_selectionUndoSnapshot.reset();
     // 撤销视为一次普通编辑：可能是删除也可能是输入，不预设方向，
     // 撤销后光标落在哪条视口边就按哪条规则处理。
     beginInputAutoScrollTracking(QStringLiteral("undo"));
     const bool invoked = QMetaObject::invokeMethod(m_editor, "undo");
+    if (selectionSnapshot
+        && m_documentTextSnapshot == selectionSnapshot->originalText) {
+        const int activeEnd = selectionSnapshot->cursorPosition
+                == selectionSnapshot->selectionEnd
+            ? selectionSnapshot->selectionEnd
+            : selectionSnapshot->selectionStart;
+        selectRangeWithActiveEnd(selectionSnapshot->selectionStart,
+                                 selectionSnapshot->selectionEnd, activeEnd);
+        focusEditor();
+    }
     queueInputAutoScrollCheck();
     return invoked;
+}
+
+bool EditorCommandRegistry::insertPathText(const QString &text)
+{
+    if (!m_editor || !m_document || text.isEmpty()
+        || m_editor->property("readOnly").toBool()
+        || m_editor->property("inputMethodComposing").toBool()) {
+        return false;
+    }
+
+    const QString beforeText = m_documentTextSnapshot;
+    const int selectionStart = m_editor->property("selectionStart").toInt();
+    const int selectionEnd = m_editor->property("selectionEnd").toInt();
+    const int cursorPosition = m_editor->property("cursorPosition").toInt();
+    if (selectionStart < 0 || selectionEnd < selectionStart
+        || selectionEnd > beforeText.size()) {
+        return false;
+    }
+
+    const bool repairOrderedList = orderedListStructureAffected(
+        beforeText, selectionStart, selectionEnd);
+    beginInputAutoScrollTracking(QStringLiteral("drop"));
+    QTextCursor editCursor(m_document);
+    editCursor.beginEditBlock();
+    editCursor.setPosition(selectionStart);
+    editCursor.setPosition(selectionEnd, QTextCursor::KeepAnchor);
+    editCursor.insertText(text);
+    const int cursorAfter = selectionStart + text.size();
+    m_editor->setProperty("cursorPosition", cursorAfter);
+    selectRange(cursorAfter, cursorAfter);
+    if (repairOrderedList) {
+        // 与粘贴、剪切等结构编辑共用一次编辑后全文读取和编号修复。
+        repairOrderedLists(beforeText, m_document->toPlainText(), false);
+    }
+    editCursor.endEditBlock();
+
+    m_selectionUndoSnapshot = SelectionUndoSnapshot{
+        beforeText, m_documentTextSnapshot, selectionStart, selectionEnd, cursorPosition};
+    focusEditor();
+    queueInputAutoScrollCheck();
+    return true;
 }
 
 bool EditorCommandRegistry::performRedo()
@@ -4739,7 +4775,7 @@ bool EditorCommandRegistry::formatSpacing()
     }
     editCursor.endEditBlock();
     if (start != end) {
-        m_formatUndoSnapshot = FormatUndoSnapshot{
+        m_selectionUndoSnapshot = SelectionUndoSnapshot{
             documentText, m_document->toPlainText(), start, end, cursorPosition};
     }
 

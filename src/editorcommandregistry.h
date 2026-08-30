@@ -52,6 +52,7 @@ public:
     bool handleEditorEvent(QEvent *event);
     bool performUndo();
     bool performRedo();
+    bool insertPathText(const QString &text);
     QVariantMap inputScrollDiagnostics() const;
 
     bool findNext(const QString &query, bool caseSensitive, bool backwards);
@@ -83,7 +84,7 @@ private:
         bool autoSpace = true;
     };
 
-    struct FormatUndoSnapshot {
+    struct SelectionUndoSnapshot {
         QString originalText;
         QString formattedText;
         int selectionStart = 0;
@@ -234,7 +235,7 @@ private:
     bool m_selectionDragPreviousKeepMouseGrab = false;
     QCursor m_selectionDragOriginalCursor;
     bool m_doubleClickReplaying = false;
-    std::optional<FormatUndoSnapshot> m_formatUndoSnapshot;
+    std::optional<SelectionUndoSnapshot> m_selectionUndoSnapshot;
     bool m_inputAutoScrollCheckQueued = false;
     QTimer m_headingScrollTimer;
     int m_pendingHeadingScrollPosition = -1;

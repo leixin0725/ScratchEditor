@@ -861,6 +861,38 @@ bool EditorController::executeCommand(const QString &commandId)
     return m_commands && m_commands->execute(commandId);
 }
 
+bool EditorController::insertDroppedUrls(const QList<QUrl> &urls)
+{
+    if (!m_commands || urls.isEmpty()) {
+        return false;
+    }
+
+    QStringList paths;
+    paths.reserve(urls.size());
+    for (const QUrl &url : urls) {
+        if (!url.isValid() || !url.isLocalFile()) {
+            return false;
+        }
+        const QString localFile = url.toLocalFile();
+        if (localFile.isEmpty()) {
+            return false;
+        }
+        const QFileInfo fileInfo(localFile);
+        if (!fileInfo.exists() || (!fileInfo.isFile() && !fileInfo.isDir())) {
+            return false;
+        }
+
+        QString path = QDir::toNativeSeparators(fileInfo.absoluteFilePath());
+        const bool containsWhitespace = std::any_of(
+            path.cbegin(), path.cend(), [](QChar character) { return character.isSpace(); });
+        if (containsWhitespace) {
+            path = QStringLiteral("\"") + path + QStringLiteral("\"");
+        }
+        paths.append(std::move(path));
+    }
+    return m_commands->insertPathText(paths.join(QLatin1Char(' ')));
+}
+
 bool EditorController::toggleHeadingFoldAt(int headingPosition)
 {
     return m_commands && m_commands->toggleHeadingFoldAt(headingPosition);
@@ -1280,6 +1312,20 @@ void EditorController::buildCommandHandlers()
             QJsonObject response = statusObject();
             response.insert(QStringLiteral("command"), r.command);
             response.insert(QStringLiteral("invoked"), invoked);
+            sendResponse(r.socket, response, r.startedNs, r.requestId);
+        }}},
+        {QStringLiteral("testInsertDroppedUrls"), {Gate::Test, [this](const DispatchRequest &r) {
+            QList<QUrl> urls;
+            const QJsonArray values = r.request.value(QStringLiteral("urls")).toArray();
+            urls.reserve(values.size());
+            for (const QJsonValue &value : values) {
+                urls.append(QUrl(value.toString()));
+            }
+            const bool inserted = insertDroppedUrls(urls);
+            QJsonObject response = statusObject();
+            response.insert(QStringLiteral("command"), r.command);
+            response.insert(QStringLiteral("inserted"), inserted);
+            response.insert(QStringLiteral("text"), m_editor->property("text").toString());
             sendResponse(r.socket, response, r.startedNs, r.requestId);
         }}},
         {QStringLiteral("testSetScrollY"), {Gate::Test, [this](const DispatchRequest &r) {
@@ -3364,6 +3410,8 @@ QJsonObject EditorController::statusObject() const
                       m_window->property("settingsPageLoaded").toBool());
         status.insert(QStringLiteral("settingsPageVisible"),
                       m_window->property("settingsPageVisible").toBool());
+        status.insert(QStringLiteral("fileDropEnabled"),
+                      m_window->property("fileDropEnabled").toBool());
         status.insert(QStringLiteral("themeBackgroundColor"),
                       m_window->property("themeBackgroundColor").toString());
         status.insert(QStringLiteral("themeEditorSurfaceColor"),
@@ -3437,6 +3485,8 @@ QJsonObject EditorController::statusObject() const
                                QStringLiteral("historyDeleteButton"));
             insertItemGeometry(QStringLiteral("editorViewport"),
                                QStringLiteral("editorViewport"));
+            insertItemGeometry(QStringLiteral("fileDropArea"),
+                               QStringLiteral("fileDropArea"));
         }
         status.insert(QStringLiteral("editorVisibleWidth"),
                       m_window->property("editorVisibleWidth").toDouble());
