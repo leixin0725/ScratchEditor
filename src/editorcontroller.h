@@ -179,6 +179,11 @@ public:
     Q_INVOKABLE bool copyToClipboard(const QString &text);
     Q_INVOKABLE void setClipboardHistoryFilter(const QString &query);
     Q_INVOKABLE void selectClipboardHistoryItem(const QString &id);
+    Q_INVOKABLE bool beginClipboardHistoryDrag(const QString &id,
+                                               qreal sceneX, qreal sceneY);
+    Q_INVOKABLE QVariantMap updateClipboardHistoryDrag(qreal sceneX, qreal sceneY);
+    Q_INVOKABLE bool finishClipboardHistoryDrag(qreal sceneX, qreal sceneY);
+    Q_INVOKABLE void cancelClipboardHistoryDrag();
     Q_INVOKABLE void requestLoadClipboardHistory(const QString &id);
     Q_INVOKABLE void confirmLoadClipboardHistory();
     Q_INVOKABLE void cancelLoadClipboardHistory();

@@ -53,6 +53,11 @@ public:
     bool performUndo();
     bool performRedo();
     QVariantMap inputScrollDiagnostics() const;
+    bool beginExternalTextDrag(const QString &text, const QPointF &scenePosition);
+    bool updateExternalTextDrag(const QPointF &scenePosition);
+    bool finishExternalTextDrag(const QPointF &scenePosition);
+    void cancelExternalTextDrag();
+    bool externalTextDragActive() const;
 
     bool findNext(const QString &query, bool caseSensitive, bool backwards);
     bool replaceCurrent(const QString &query, const QString &replacement, bool caseSensitive);
@@ -149,12 +154,18 @@ private:
     bool deleteByCjkAwareWord(bool backwards);
     bool handleCjkDoubleClick(QMouseEvent *event);
     bool moveSelection(int selectionStart, int selectionEnd, int dropPosition);
+    bool insertExternalText(const QString &text, int dropPosition);
     int editorPositionAt(const QPointF &localPosition) const;
+    int visibleEditorPositionAt(const QPointF &scenePosition) const;
     QQuickItem *editorItem() const;
     void beginSelectionDrag(int selectionStart, int selectionEnd,
                             const QPointF &scenePosition);
     void updateSelectionDrag(const QPointF &scenePosition, bool scrollViewport);
     void resetSelectionDrag(bool releaseMouseGrab);
+    void updateExternalTextDragPosition(const QPointF &scenePosition,
+                                        bool scrollViewport);
+    void resetExternalTextDrag();
+    void scrollTextDragViewport(const QPointF &scenePosition);
     void beginInputAutoScrollTracking(const QString &kind);
     void queueInputAutoScrollCheck();
     void checkInputAutoScroll();
@@ -233,6 +244,11 @@ private:
     bool m_selectionDragActive = false;
     bool m_selectionDragPreviousKeepMouseGrab = false;
     QCursor m_selectionDragOriginalCursor;
+    QString m_externalDragText;
+    QPointF m_externalDragPressScenePosition;
+    QPointF m_externalDragScenePosition;
+    int m_externalDropPosition = -1;
+    bool m_externalDragActive = false;
     bool m_doubleClickReplaying = false;
     std::optional<FormatUndoSnapshot> m_formatUndoSnapshot;
     bool m_inputAutoScrollCheckQueued = false;

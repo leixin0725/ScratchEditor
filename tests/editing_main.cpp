@@ -100,6 +100,15 @@ QJsonObject dragSelection(int start, int end, int dropPosition)
                     {QStringLiteral("dropPosition"), dropPosition}});
 }
 
+QJsonObject dragClipboardHistory(const QString &id, int dropPosition,
+                                 bool outsideEditor = false)
+{
+    return request(QStringLiteral("testDragClipboardHistory"),
+                   {{QStringLiteral("id"), id},
+                    {QStringLiteral("dropPosition"), dropPosition},
+                    {QStringLiteral("outsideEditor"), outsideEditor}});
+}
+
 QJsonObject tripleClick(int position)
 {
     return request(QStringLiteral("testTripleClick"),
@@ -4165,19 +4174,69 @@ int main(int argc, char *argv[])
              {QStringLiteral("text"), QStringLiteral("immutable-original")},
              {QStringLiteral("sequenceNumber"), 901},
              {QStringLiteral("capturedAtMs"), 1786200000000.0}});
+    request(QStringLiteral("testEmitClipboardChange"),
+            {{QStringLiteral("kind"), QStringLiteral("text")},
+             {QStringLiteral("text"), QStringLiteral("9. second\n")},
+             {QStringLiteral("sequenceNumber"), 902},
+             {QStringLiteral("capturedAtMs"), 1786200001000.0}});
     const QJsonObject beforeLoadHistory = request(
         QStringLiteral("testClipboardHistoryState"));
     const QJsonArray beforeLoadItems = beforeLoadHistory.value(
         QStringLiteral("items")).toArray();
     QString originalId;
+    QString orderedListDragId;
     for (const QJsonValue &value : beforeLoadItems) {
-        if (value.toObject().value(QStringLiteral("text")).toString()
-            == QStringLiteral("immutable-original")) {
+        const QString itemText = value.toObject().value(QStringLiteral("text")).toString();
+        if (itemText == QStringLiteral("immutable-original")) {
             originalId = value.toObject().value(QStringLiteral("id")).toString();
-            break;
+        } else if (itemText == QStringLiteral("9. second\n")) {
+            orderedListDragId = value.toObject().value(QStringLiteral("id")).toString();
         }
     }
     request(QStringLiteral("show"));
+
+    const QString historyDragTarget = QStringLiteral("头😀尾");
+    setTextAndSelection(historyDragTarget, 0, 1);
+    const QJsonObject historyDragged = dragClipboardHistory(originalId, 3);
+    const QJsonObject historyDragUndone = request(QStringLiteral("testUndo"));
+    setTextAndSelection(historyDragTarget, 0, 1);
+    const QJsonObject historyDragOutside = dragClipboardHistory(originalId, 3, true);
+    addCheck(checks, details, QStringLiteral("clipboardHistoryDragInsertsAtUtf16DropAndUndoesOnce"),
+             !originalId.isEmpty()
+                 && historyDragged.value(QStringLiteral("dragActivated")).toBool()
+                 && historyDragged.value(QStringLiteral("inserted")).toBool()
+                 && historyDragged.value(QStringLiteral("text")).toString()
+                    == QStringLiteral("头😀immutable-original尾")
+                 && historyDragged.value(QStringLiteral("selectionStart")).toInt() == 3
+                 && historyDragged.value(QStringLiteral("selectionEnd")).toInt() == 21
+                 && historyDragUndone.value(QStringLiteral("text")).toString()
+                    == historyDragTarget
+                 && historyDragOutside.value(QStringLiteral("dragActivated")).toBool()
+                 && !historyDragOutside.value(QStringLiteral("inserted")).toBool()
+                 && historyDragOutside.value(QStringLiteral("text")).toString()
+                    == historyDragTarget,
+             QJsonObject{{QStringLiteral("dropped"), historyDragged},
+                         {QStringLiteral("undone"), historyDragUndone},
+                         {QStringLiteral("outside"), historyDragOutside}});
+
+    const QString orderedListBefore = QStringLiteral("1. first\n2. third");
+    setTextAndSelection(orderedListBefore, 0, 0);
+    const QJsonObject orderedListDragged = dragClipboardHistory(orderedListDragId, 9);
+    const QJsonObject orderedListDragUndone = request(QStringLiteral("testUndo"));
+    addCheck(checks, details, QStringLiteral("clipboardHistoryDragRepairsOrderedListInUndoBlock"),
+             !orderedListDragId.isEmpty()
+                 && orderedListDragged.value(QStringLiteral("inserted")).toBool()
+                 && orderedListDragged.value(QStringLiteral("text")).toString()
+                    == QStringLiteral("1. first\n2. second\n3. third")
+                 && orderedListDragUndone.value(QStringLiteral("text")).toString()
+                    == orderedListBefore,
+             QJsonObject{{QStringLiteral("dropped"), orderedListDragged},
+                         {QStringLiteral("undone"), orderedListDragUndone}});
+
+    request(QStringLiteral("testDiscardClose"));
+    QThread::msleep(150);
+    request(QStringLiteral("show"));
+
     request(QStringLiteral("testClipboardHistoryUiAction"),
             {{QStringLiteral("action"), QStringLiteral("historySelect")},
              {QStringLiteral("value"), originalId}});

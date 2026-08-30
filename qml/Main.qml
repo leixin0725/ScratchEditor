@@ -210,6 +210,9 @@ Window {
     property bool historyPanelOpenedByCommand: false
     property bool historyRevealHovered: false
     property bool historyPanelHovered: false
+    property bool historyCardDragActive: false
+    property bool historyCardDropAllowed: false
+    property bool historyCardDragCanceled: false
     // 历史面板开/合的布局进度：几何直接绑定进度，缩放时即时跟随，
     // 只有开/合切换时由 Behavior 动画，避免窗口缩放期间逐帧重启动画。
     property real historyLayoutProgress: historyPanelOpen ? 1 : 0
@@ -384,6 +387,10 @@ Window {
     function closeClipboardHistory() {
         historyOpenTimer.stop()
         historyCloseTimer.stop()
+        controller.cancelClipboardHistoryDrag()
+        historyCardDragCanceled = true
+        historyCardDragActive = false
+        historyCardDropAllowed = false
         historyPanelOpen = false
         historyPanelOpenedByCommand = false
         historySelectedId = ""
@@ -417,7 +424,8 @@ Window {
 
     function scheduleClipboardHistoryClose() {
         if (historyPanelOpen && !historyPanelOpenedByCommand
-            && !historyRevealHovered && !historyPanelHovered) {
+            && !historyRevealHovered && !historyPanelHovered
+            && !historyCardDragActive) {
             historyCloseTimer.restart()
         }
     }
@@ -431,7 +439,16 @@ Window {
     }
 
     function handleEscapeAction() {
-        if (controller.historyLoadConfirmationVisible) {
+        if (historyCardDragActive) {
+            historyCardDragCanceled = true
+            if (historyPanelLoader.item) {
+                historyPanelLoader.item.cancelCardDrag()
+            } else {
+                controller.cancelClipboardHistoryDrag()
+                historyCardDragActive = false
+                historyCardDropAllowed = false
+            }
+        } else if (controller.historyLoadConfirmationVisible) {
             controller.cancelLoadClipboardHistory()
         } else if (controller.historyClearConfirmationVisible) {
             controller.cancelClearClipboardHistory()
@@ -494,6 +511,32 @@ Window {
             return false
         }
         return true
+    }
+
+    function dispatchHistoryTestDrag(
+        id, dropPosition, activateDrag, outsideEditor, finishDrag) {
+        if (!historyPanelLoader.item) return false
+        const dropRectangle = editor.positionToRectangle(dropPosition)
+        const dropPoint = editor.mapToItem(
+            null,
+            dropRectangle.x + dropRectangle.width / 2,
+            dropRectangle.y + dropRectangle.height / 2)
+        const pressPoint = Qt.point(dropPoint.x - 100, dropPoint.y - 100)
+        const releasePoint = !activateDrag
+            ? pressPoint
+            : (outsideEditor ? Qt.point(-50, -50) : dropPoint)
+        if (!historyPanelLoader.item.beginCardDrag(id, pressPoint.x, pressPoint.y)) {
+            return false
+        }
+        const state = historyPanelLoader.item.updateCardDrag(
+            releasePoint.x, releasePoint.y)
+        if (!finishDrag) return state.active
+        const result = historyPanelLoader.item.finishCardDrag(
+            releasePoint.x, releasePoint.y)
+        if (!state.active) {
+            historyPanelLoader.item.selectId(id)
+        }
+        return activateDrag ? result.active : !result.active
     }
 
     Component.onCompleted: {

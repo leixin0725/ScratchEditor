@@ -54,6 +54,38 @@ Loader {
                 host.historyHoveredId = ""
             }
         }
+        function beginCardDrag(id, sceneX, sceneY) {
+            const armed = root.appController.beginClipboardHistoryDrag(id, sceneX, sceneY)
+            if (armed) historyCloseTimer.stop()
+            return armed
+        }
+        function updateCardDrag(sceneX, sceneY) {
+            const state = root.appController.updateClipboardHistoryDrag(sceneX, sceneY)
+            if (state.active) {
+                host.historyCardDragActive = true
+                host.historyCardDropAllowed = state.canDrop
+                historyCloseTimer.stop()
+            }
+            return state
+        }
+        function finishCardDrag(sceneX, sceneY) {
+            const state = updateCardDrag(sceneX, sceneY)
+            const inserted = root.appController.finishClipboardHistoryDrag(sceneX, sceneY)
+            host.historyCardDragActive = false
+            host.historyCardDropAllowed = false
+            if (inserted) {
+                host.closeClipboardHistory()
+            } else {
+                host.scheduleClipboardHistoryClose()
+            }
+            return { "active": state.active, "inserted": inserted }
+        }
+        function cancelCardDrag() {
+            root.appController.cancelClipboardHistoryDrag()
+            host.historyCardDragActive = false
+            host.historyCardDropAllowed = false
+            host.scheduleClipboardHistoryClose()
+        }
         function moveSelection(delta) {
             if (historyList.count === 0) return
             historyList.currentIndex = Math.max(
@@ -227,18 +259,83 @@ Loader {
                         elide: Text.ElideRight
                     }
                     MouseArea {
+                        id: historyRowPointer
                         anchors.fill: parent
+                        property bool dragArmed: false
+                        property bool dragActivated: false
+                        property bool dropAllowed: false
+                        property bool suppressClick: false
                         acceptedButtons: Qt.LeftButton
                         hoverEnabled: true
+                        preventStealing: true
+                        cursorShape: dragActivated
+                                     ? (dropAllowed ? Qt.DragCopyCursor
+                                                    : Qt.ForbiddenCursor)
+                                     : Qt.ArrowCursor
                         onEntered: historyRoot.setHoveredId(historyRow.historyId)
                         onExited: historyRoot.clearHoveredId(historyRow.historyId)
-                        onClicked: historyRoot.selectId(historyRow.historyId)
+                        onPressed: function(mouse) {
+                            suppressClick = false
+                            dragActivated = false
+                            dropAllowed = false
+                            host.historyCardDragCanceled = false
+                            const scenePoint = historyRow.mapToItem(
+                                null, mouse.x, mouse.y)
+                            dragArmed = historyRoot.beginCardDrag(
+                                historyRow.historyId, scenePoint.x, scenePoint.y)
+                        }
+                        onPositionChanged: function(mouse) {
+                            if (!dragArmed || !pressed) return
+                            const scenePoint = historyRow.mapToItem(
+                                null, mouse.x, mouse.y)
+                            const state = historyRoot.updateCardDrag(scenePoint.x, scenePoint.y)
+                            dragActivated = state.active
+                            dropAllowed = state.canDrop
+                        }
+                        onReleased: function(mouse) {
+                            if (!dragArmed) return
+                            if (host.historyCardDragCanceled) {
+                                suppressClick = true
+                                dragArmed = false
+                                dragActivated = false
+                                dropAllowed = false
+                                host.historyCardDragCanceled = false
+                                return
+                            }
+                            const scenePoint = historyRow.mapToItem(
+                                null, mouse.x, mouse.y)
+                            const state = historyRoot.updateCardDrag(
+                                scenePoint.x, scenePoint.y)
+                            suppressClick = state.active
+                            dragArmed = false
+                            dragActivated = false
+                            dropAllowed = false
+                            historyRoot.finishCardDrag(scenePoint.x, scenePoint.y)
+                        }
+                        onCanceled: {
+                            if (dragArmed) historyRoot.cancelCardDrag()
+                            dragArmed = false
+                            dragActivated = false
+                            dropAllowed = false
+                        }
+                        onClicked: {
+                            if (suppressClick) {
+                                suppressClick = false
+                                return
+                            }
+                            historyRoot.selectId(historyRow.historyId)
+                        }
                         onDoubleClicked: {
                             historyRoot.selectId(historyRow.historyId)
                             historyRoot.activateSelected()
                         }
                     }
-                    Component.onDestruction: historyRoot.clearHoveredId(historyRow.historyId)
+                    Component.onDestruction: {
+                        historyRoot.clearHoveredId(historyRow.historyId)
+                        if (historyRowPointer.dragArmed) {
+                            historyRoot.cancelCardDrag()
+                        }
+                    }
                 }
             }
 
