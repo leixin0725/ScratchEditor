@@ -2986,6 +2986,36 @@ int main(int argc, char *argv[])
               QStringLiteral("a“中文x"), 4, 4, QStringLiteral("IME commit ” closes wrap"),
               [] { return inputMethodCommit(QStringLiteral("”")); },
               QStringLiteral("a “中文” x"), 6);
+    cjkExpect(checks, details, QStringLiteral("lineEndImeCurlyDoubleQuotePairsAndSpaces"),
+              QStringLiteral("中文"), 2, 2,
+              QStringLiteral("IME commit “ after CJK at line end"),
+              [] { return inputMethodCommit(QStringLiteral("“")); },
+              QStringLiteral("中文 “”"), 4);
+    cjkExpect(checks, details, QStringLiteral("lineEndImeCurlySingleQuotePairsAndSpaces"),
+              QStringLiteral("中文"), 2, 2,
+              QStringLiteral("IME commit ‘ after CJK at line end"),
+              [] { return inputMethodCommit(QStringLiteral("‘")); },
+              QStringLiteral("中文 ‘’"), 4);
+    cjkExpect(checks, details, QStringLiteral("imeCurlyDoubleQuoteSkipsExistingCloser"),
+              QStringLiteral("中文 “内容”"), 6, 6,
+              QStringLiteral("IME commit ” before existing closer"),
+              [] { return inputMethodCommit(QStringLiteral("”")); },
+              QStringLiteral("中文 “内容”"), 7);
+    cjkExpect(checks, details, QStringLiteral("imeCurlySingleQuoteSkipsExistingCloser"),
+              QStringLiteral("中文 ‘内容’"), 6, 6,
+              QStringLiteral("IME commit ’ before existing closer"),
+              [] { return inputMethodCommit(QStringLiteral("’")); },
+              QStringLiteral("中文 ‘内容’"), 7);
+    cjkExpect(checks, details, QStringLiteral("midQuoteImeCurlySingleCloseCjk"),
+              QStringLiteral("a‘中文x"), 4, 4,
+              QStringLiteral("IME commit ’ closes single-quote wrap"),
+              [] { return inputMethodCommit(QStringLiteral("’")); },
+              QStringLiteral("a ‘中文’ x"), 6);
+    cjkExpect(checks, details, QStringLiteral("midQuoteImeCurlyReverseOrderSpacing"),
+              QStringLiteral("前中文”后"), 1, 1,
+              QStringLiteral("IME commit “ before an existing closer"),
+              [] { return inputMethodCommit(QStringLiteral("“")); },
+              QStringLiteral("前 “中文” 后"), 3);
     cjkExpect(checks, details, QStringLiteral("midQuoteImeAsciiCloseCjkConverts"),
               QStringLiteral("a\"中文x"), 4, 4, QStringLiteral("IME commit \" closes CJK wrap"),
               [] { return inputMethodCommit(QStringLiteral("\"")); },
@@ -3003,6 +3033,20 @@ int main(int argc, char *argv[])
               QStringLiteral("IME commit ` closes wrap with boundary spacing"),
               [] { return inputMethodCommit(QStringLiteral("`")); },
               QStringLiteral("a `中文` x"), 5);
+    {
+        setTextAndSelection(QStringLiteral("中文"), 2, 2);
+        inputMethodCommit(QStringLiteral("“"));
+        QThread::msleep(30);
+        const QString completed = editorText();
+        request(QStringLiteral("testUndo"));
+        QThread::msleep(30);
+        const QString undone = editorText();
+        addCheck(checks, details, QStringLiteral("imeCurlyQuoteCompletionSingleUndo"),
+                 completed == QStringLiteral("中文 “”")
+                     && undone == QStringLiteral("中文"),
+                 QJsonObject{{QStringLiteral("completed"), completed},
+                             {QStringLiteral("undone"), undone}});
+    }
 
     // --- `·`（U+00B7）反引号别名（DOT-ALIAS-001..012） ---
     // 紧贴字符输入单个 `·` 保持字面；连续两个 `·` 生成反引号对（光标居中）。

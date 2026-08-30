@@ -4518,14 +4518,17 @@ EditorCommandRegistry::completeInputMethodCommit(const QString &committedText,
     // 行中引号与键盘路径一致：只保留单个开符号；闭合时收尾并格式化。
     if (selectionStart == selectionEnd && committedText.size() == 1) {
         const QString currentText = m_document->toPlainText();
+        // IME 事件到达此处时，Qt 已把 committedText 插入文档。引号角色必须基于
+        // 提交前快照判断，否则行尾开引号会把自身误认成后续正文，已有闭引号前的
+        // 提交也无法区分“新插入字符”和“待跳过字符”。
         const auto midlinePlan = buildMidlineQuotePlan(
-            currentText, selectionStart, committedText.at(0));
+            beforeText, selectionStart, committedText.at(0));
         if (midlinePlan) {
             if (!midlinePlan->closer) {
-                // 后提交开符号：若行内其后已有同号闭符号，视为先闭后开的
+                // 后提交开符号：若行内其后已有匹配闭符号，视为先闭后开的
                 // 包裹收尾，与先开后闭一样补两侧自动空格。
                 const int existingCloser = nextSameQuoteOnLine(
-                    currentText, selectionStart + 1, midlinePlan->opening);
+                    currentText, selectionStart + 1, midlinePlan->closing);
                 if (existingCloser >= 0) {
                     return finishMidlineQuoteOpening(
                         selectionStart, existingCloser, midlinePlan->opening);
@@ -4536,6 +4539,19 @@ EditorCommandRegistry::completeInputMethodCommit(const QString &committedText,
             }
 
             const int openerPosition = midlinePlan->openerPosition;
+            const bool closingAlreadyAtCursor =
+                beforeText.mid(selectionStart, 1) == QString(midlinePlan->closing);
+            if (closingAlreadyAtCursor) {
+                // Qt 已在原闭符号前插入本次 IME 提交。先删除新增字符，再按键盘路径
+                // 越过原闭符号，避免 `””` / `’’` 等重复闭合。
+                QTextCursor cursor(m_document);
+                cursor.setPosition(selectionStart);
+                cursor.setPosition(selectionStart + committedText.size(),
+                                   QTextCursor::KeepAnchor);
+                cursor.removeSelectedText();
+                return finishMidlineQuoteClosure(
+                    openerPosition, selectionStart, midlinePlan->opening, true);
+            }
             // IME 提交的闭符号已位于光标处；若与计划闭符号不同（如 ASCII
             // 引号闭合全角引号对），先替换为计划闭符号，再与键盘路径共用
             // 同一收尾（转换、边界空格与光标）。
