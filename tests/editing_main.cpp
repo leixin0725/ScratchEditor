@@ -2996,6 +2996,65 @@ int main(int argc, char *argv[])
               QStringLiteral("IME commit ‘ after CJK at line end"),
               [] { return inputMethodCommit(QStringLiteral("‘")); },
               QStringLiteral("中文 ‘’"), 4);
+    cjkExpect(checks, details, QStringLiteral("lineEndImeCurlyDoubleCloserStartsPair"),
+              QStringLiteral("中文"), 2, 2,
+              QStringLiteral("IME commit ” without a matching opener at line end"),
+              [] { return inputMethodCommit(QStringLiteral("”")); },
+              QStringLiteral("中文 “”"), 4);
+    cjkExpect(checks, details, QStringLiteral("lineEndImeCurlySingleCloserStartsPair"),
+              QStringLiteral("中文"), 2, 2,
+              QStringLiteral("IME commit ’ without a matching opener at line end"),
+              [] { return inputMethodCommit(QStringLiteral("’")); },
+              QStringLiteral("中文 ‘’"), 4);
+    cjkExpect(checks, details, QStringLiteral("emptyLineImeCurlyCloserStartsPair"),
+              QString(), 0, 0,
+              QStringLiteral("IME commit ” on an empty line"),
+              [] { return inputMethodCommit(QStringLiteral("”")); },
+              QStringLiteral("“”"), 1);
+    cjkExpect(checks, details, QStringLiteral("asciiLineEndImeCurlyCloserStartsPair"),
+              QStringLiteral("abc"), 3, 3,
+              QStringLiteral("IME commit ” after ASCII at line end"),
+              [] { return inputMethodCommit(QStringLiteral("”")); },
+              QStringLiteral("abc “”"), 5);
+    cjkExpect(checks, details, QStringLiteral("trailingWhitespaceImeCurlyCloserStartsPair"),
+              QStringLiteral("中文 \t"), 2, 2,
+              QStringLiteral("IME commit ” before trailing whitespace"),
+              [] { return inputMethodCommit(QStringLiteral("”")); },
+              QStringLiteral("中文 “” \t"), 4);
+    cjkExpect(checks, details, QStringLiteral("midlineImeCurlyCloserRemainsLiteral"),
+              QStringLiteral("中文正文"), 2, 2,
+              QStringLiteral("IME commit ” before line content"),
+              [] { return inputMethodCommit(QStringLiteral("”")); },
+              QStringLiteral("中文”正文"), 3);
+    cjkExpect(checks, details, QStringLiteral("lineEndKeyCurlyCloserRemainsLiteral"),
+              QStringLiteral("中文"), 2, 2,
+              QStringLiteral("key ” without a matching opener at line end"),
+              keyAction(QStringLiteral("”")), QStringLiteral("中文”"), 3);
+    cjkExpect(checks, details, QStringLiteral("lineEndImeCurlyCloserClosesMatchingOpener"),
+              QStringLiteral("中文“内容"), 5, 5,
+              QStringLiteral("IME commit ” closes a matching opener"),
+              [] { return inputMethodCommit(QStringLiteral("”")); },
+              QStringLiteral("中文 “内容”"), 7);
+    cjkExpect(checks, details, QStringLiteral("lineEndImeMismatchedCloserStartsNestedPair"),
+              QStringLiteral("“abc"), 4, 4,
+              QStringLiteral("IME commit ’ after an unmatched double opener"),
+              [] { return inputMethodCommit(QStringLiteral("’")); },
+              QStringLiteral("“abc ‘’"), 6);
+    cjkExpect(checks, details, QStringLiteral("lineEndImeCloserIgnoresEscapedOpener"),
+              QStringLiteral("\\“abc"), 5, 5,
+              QStringLiteral("IME commit ” after an escaped opener"),
+              [] { return inputMethodCommit(QStringLiteral("”")); },
+              QStringLiteral("\\“abc“”"), 6);
+    cjkExpect(checks, details, QStringLiteral("lineEndImeCloserDoesNotCrossLine"),
+              QStringLiteral("“first\n中文"), 9, 9,
+              QStringLiteral("IME commit ” with an opener on the previous line"),
+              [] { return inputMethodCommit(QStringLiteral("”")); },
+              QStringLiteral("“first\n中文 “”"), 11);
+    cjkExpect(checks, details, QStringLiteral("selectionImeCurlyCloserRemainsLiteral"),
+              QStringLiteral("中文"), 0, 2,
+              QStringLiteral("IME commit ” over a selection"),
+              [] { return inputMethodCommit(QStringLiteral("”")); },
+              QStringLiteral("”"), 1);
     cjkExpect(checks, details, QStringLiteral("imeCurlyDoubleQuoteSkipsExistingCloser"),
               QStringLiteral("中文 “内容”"), 6, 6,
               QStringLiteral("IME commit ” before existing closer"),
@@ -3042,6 +3101,20 @@ int main(int argc, char *argv[])
         QThread::msleep(30);
         const QString undone = editorText();
         addCheck(checks, details, QStringLiteral("imeCurlyQuoteCompletionSingleUndo"),
+                 completed == QStringLiteral("中文 “”")
+                     && undone == QStringLiteral("中文"),
+                 QJsonObject{{QStringLiteral("completed"), completed},
+                             {QStringLiteral("undone"), undone}});
+    }
+    {
+        setTextAndSelection(QStringLiteral("中文"), 2, 2);
+        inputMethodCommit(QStringLiteral("”"));
+        QThread::msleep(30);
+        const QString completed = editorText();
+        request(QStringLiteral("testUndo"));
+        QThread::msleep(30);
+        const QString undone = editorText();
+        addCheck(checks, details, QStringLiteral("imeCurlyCloserCompatibilitySingleUndo"),
                  completed == QStringLiteral("中文 “”")
                      && undone == QStringLiteral("中文"),
                  QJsonObject{{QStringLiteral("completed"), completed},

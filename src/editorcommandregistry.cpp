@@ -4568,9 +4568,19 @@ EditorCommandRegistry::completeInputMethodCommit(const QString &committedText,
         }
     }
 
-    // 有选区时提交 `·` 等价于提交 `` ` ``：用反引号对包裹选区并触发自动空格。
-    const QString delimiterText = (committedText == QStringLiteral("·"))
+    // 先把 IME 提交的别名解析为标准开符号；有选区时 `·` 等价于 `` ` ``，
+    // 用反引号对包裹选区并触发自动空格。
+    QString delimiterText = (committedText == QStringLiteral("·"))
         ? QStringLiteral("`") : committedText;
+    // 部分输入法会记忆弯引号的左右状态，导致新一对引号从闭符号开始。
+    // 同类未闭合引号已由上方的 midlinePlan 优先收尾；仅在无选区且光标后
+    // 到行末没有非空白内容时，把孤立闭符号按对应开符号交给普通配对流程。
+    if (selectionStart == selectionEnd && committedText.size() == 1
+        && !hasNonBlankCharacterAfter(beforeText, selectionStart)) {
+        if (const QuotePair *closingPair = quotePairForClosing(committedText.at(0))) {
+            delimiterText = QString(closingPair->opening);
+        }
+    }
     const DelimiterPair *openingPair = pairForOpening(delimiterText);
     const bool symmetricPair = openingPair && openingPair->opening == openingPair->closing;
     const bool skipExisting = selectionStart == selectionEnd
