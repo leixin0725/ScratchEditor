@@ -1418,7 +1418,7 @@ EditorCommandRegistry::EditorCommandRegistry(AppSettings *settings,
     m_selectionDragScrollTimer.setInterval(30);
     connect(&m_selectionDragScrollTimer, &QTimer::timeout, this, [this] {
         if (m_externalDragActive) {
-            updateExternalTextDragPosition(m_externalDragScenePosition, true);
+            updateExternalTextDrag(m_externalDragScenePosition);
         } else {
             updateSelectionDrag(m_selectionDragScenePosition, true);
         }
@@ -1439,7 +1439,10 @@ EditorCommandRegistry::EditorCommandRegistry(AppSettings *settings,
     });
 }
 
-EditorCommandRegistry::~EditorCommandRegistry() = default;
+EditorCommandRegistry::~EditorCommandRegistry()
+{
+    resetExternalTextDrag();
+}
 
 void EditorCommandRegistry::setEditor(QObject *editor, QTextDocument *document)
 {
@@ -2569,6 +2572,7 @@ bool EditorCommandRegistry::updateExternalTextDrag(const QPointF &scenePosition)
     }
 
     updateExternalTextDragPosition(scenePosition, true);
+    updateExternalTextDragCursor(m_externalDropPosition >= 0);
     return m_externalDropPosition >= 0;
 }
 
@@ -2597,6 +2601,16 @@ void EditorCommandRegistry::cancelExternalTextDrag()
 bool EditorCommandRegistry::externalTextDragActive() const
 {
     return m_externalDragActive;
+}
+
+bool EditorCommandRegistry::externalTextDragCursorOverridden() const
+{
+    return m_externalDragCursorOverridden;
+}
+
+int EditorCommandRegistry::externalTextDragCursorShape() const
+{
+    return static_cast<int>(m_externalDragCursorShape);
 }
 
 bool EditorCommandRegistry::handleSelectionDragEvent(QEvent *event)
@@ -2914,14 +2928,31 @@ void EditorCommandRegistry::updateExternalTextDragPosition(
     m_editor->setProperty("selectionDragPosition", m_externalDropPosition);
 }
 
+void EditorCommandRegistry::updateExternalTextDragCursor(bool canDrop)
+{
+    const Qt::CursorShape shape = canDrop ? Qt::DragCopyCursor : Qt::ForbiddenCursor;
+    if (!m_externalDragCursorOverridden) {
+        QGuiApplication::setOverrideCursor(QCursor(shape));
+        m_externalDragCursorOverridden = true;
+    } else if (m_externalDragCursorShape != shape) {
+        QGuiApplication::changeOverrideCursor(QCursor(shape));
+    }
+    m_externalDragCursorShape = shape;
+}
+
 void EditorCommandRegistry::resetExternalTextDrag()
 {
     m_selectionDragScrollTimer.stop();
+    if (m_externalDragCursorOverridden) {
+        QGuiApplication::restoreOverrideCursor();
+    }
     m_externalDragText.clear();
     m_externalDragPressScenePosition = {};
     m_externalDragScenePosition = {};
     m_externalDropPosition = -1;
     m_externalDragActive = false;
+    m_externalDragCursorOverridden = false;
+    m_externalDragCursorShape = Qt::ArrowCursor;
     if (m_editor) {
         m_editor->setProperty("selectionDragPosition", -1);
     }

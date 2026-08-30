@@ -214,6 +214,11 @@ Window {
     property bool historyCardDragActive: false
     property bool historyCardDropAllowed: false
     property bool historyCardDragCanceled: false
+    property string historyDragPreviewText: ""
+    property real historyDragSceneX: 0
+    property real historyDragSceneY: 0
+    readonly property bool historyDragPreviewVisible:
+        historyCardDragActive && historyDragPreviewText.length > 0
     // 历史面板开/合的布局进度：几何直接绑定进度，缩放时即时跟随，
     // 只有开/合切换时由 Behavior 动画，避免窗口缩放期间逐帧重启动画。
     property real historyLayoutProgress: historyPanelOpen ? 1 : 0
@@ -392,6 +397,7 @@ Window {
         historyCardDragCanceled = true
         historyCardDragActive = false
         historyCardDropAllowed = false
+        historyDragPreviewText = ""
         historyPanelOpen = false
         historyPanelOpenedByCommand = false
         historySelectedId = ""
@@ -448,6 +454,7 @@ Window {
                 controller.cancelClipboardHistoryDrag()
                 historyCardDragActive = false
                 historyCardDropAllowed = false
+                historyDragPreviewText = ""
             }
         } else if (controller.historyLoadConfirmationVisible) {
             controller.cancelLoadClipboardHistory()
@@ -515,7 +522,7 @@ Window {
     }
 
     function dispatchHistoryTestDrag(
-        id, dropPosition, activateDrag, outsideEditor, finishDrag) {
+        id, dropPosition, activateDrag, outsideEditor, finishDrag, previewText) {
         if (!historyPanelLoader.item) return false
         const dropRectangle = editor.positionToRectangle(dropPosition)
         const dropPoint = editor.mapToItem(
@@ -526,7 +533,8 @@ Window {
         const releasePoint = !activateDrag
             ? pressPoint
             : (outsideEditor ? Qt.point(-50, -50) : dropPoint)
-        if (!historyPanelLoader.item.beginCardDrag(id, pressPoint.x, pressPoint.y)) {
+        if (!historyPanelLoader.item.beginCardDrag(
+                id, previewText, pressPoint.x, pressPoint.y)) {
             return false
         }
         const state = historyPanelLoader.item.updateCardDrag(
@@ -1464,6 +1472,49 @@ Window {
                     (requestedTop - editorViewport.y) / trackRange
                     * Math.max(0, editorViewport.contentHeight - editorViewport.height)
             }
+        }
+    }
+
+    Rectangle {
+        id: historyDragPreview
+        objectName: "historyDragPreview"
+        z: 90
+        readonly property real edgeMargin: uiConfig.layout.spacingLarge
+        readonly property real pointerGap: uiConfig.layout.spacingLarge * 2
+        readonly property real requestedX: root.historyDragSceneX + pointerGap
+        readonly property real requestedY: root.historyDragSceneY + pointerGap
+        readonly property real alternateX: root.historyDragSceneX - pointerGap - width
+        readonly property real alternateY: root.historyDragSceneY - pointerGap - height
+        x: Math.max(edgeMargin,
+                    Math.min(requestedX + width <= root.width - edgeMargin
+                             ? requestedX : alternateX,
+                             root.width - edgeMargin - width))
+        y: Math.max(edgeMargin,
+                    Math.min(requestedY + height <= root.height - edgeMargin
+                             ? requestedY : alternateY,
+                             root.height - edgeMargin - height))
+        width: Math.min(uiConfig.panels.history.dragPreviewWidth,
+                        root.width - edgeMargin * 2)
+        height: historyDragPreviewLabel.implicitHeight + uiConfig.layout.spacingLarge * 2
+        radius: uiConfig.layout.radiusNormal
+        color: root.themePanelColor
+        border.color: root.themeBorderColor
+        border.width: uiConfig.layout.borderWidth
+        opacity: uiConfig.panels.history.dragPreviewOpacity
+        visible: root.historyDragPreviewVisible
+        clip: true
+
+        Text {
+            id: historyDragPreviewLabel
+            anchors.fill: parent
+            anchors.margins: uiConfig.layout.spacingLarge
+            text: root.historyDragPreviewText
+            color: root.themeTextColor
+            font.family: root.uiFontFamily
+            font.pointSize: uiConfig.fonts.small
+            wrapMode: Text.Wrap
+            maximumLineCount: uiConfig.panels.history.cardMaxLines
+            elide: Text.ElideRight
         }
     }
 

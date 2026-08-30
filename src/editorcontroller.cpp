@@ -1588,7 +1588,8 @@ void EditorController::buildCommandHandlers()
                 Q_ARG(QVariant, r.request.value(QStringLiteral("dropPosition")).toVariant()),
                 Q_ARG(QVariant, r.request.value(QStringLiteral("activateDrag")).toVariant()),
                 Q_ARG(QVariant, r.request.value(QStringLiteral("outsideEditor")).toVariant()),
-                Q_ARG(QVariant, r.request.value(QStringLiteral("finishDrag")).toVariant()));
+                Q_ARG(QVariant, r.request.value(QStringLiteral("finishDrag")).toVariant()),
+                Q_ARG(QVariant, r.request.value(QStringLiteral("previewText")).toVariant()));
             QJsonObject response = statusObject();
             response.insert(QStringLiteral("command"), r.command);
             response.insert(QStringLiteral("eventsAccepted"), invoked && accepted.toBool());
@@ -3623,6 +3624,31 @@ QJsonObject EditorController::statusObject() const
                       m_window->property("historyCardDragActive").toBool());
         status.insert(QStringLiteral("historyCardDropAllowed"),
                       m_window->property("historyCardDropAllowed").toBool());
+        if (m_testMode) {
+            // 预览摘要可能包含用户剪贴板内容，只允许隔离测试 IPC 读取。
+            status.insert(QStringLiteral("historyDragPreviewVisible"),
+                          m_window->property("historyDragPreviewVisible").toBool());
+            status.insert(QStringLiteral("historyDragPreviewText"),
+                          m_window->property("historyDragPreviewText").toString());
+            status.insert(QStringLiteral("historyDragCursorOverridden"),
+                          m_commands && m_commands->externalTextDragCursorOverridden());
+            status.insert(QStringLiteral("historyDragCursorShape"),
+                          m_commands ? m_commands->externalTextDragCursorShape()
+                                     : static_cast<int>(Qt::ArrowCursor));
+            if (QObject *preview = m_window->findChild<QObject *>(
+                    QStringLiteral("historyDragPreview"))) {
+                status.insert(QStringLiteral("historyDragPreviewX"),
+                              preview->property("x").toDouble());
+                status.insert(QStringLiteral("historyDragPreviewY"),
+                              preview->property("y").toDouble());
+                status.insert(QStringLiteral("historyDragPreviewWidth"),
+                              preview->property("width").toDouble());
+                status.insert(QStringLiteral("historyDragPreviewHeight"),
+                              preview->property("height").toDouble());
+                status.insert(QStringLiteral("historyDragPreviewOpacity"),
+                              preview->property("opacity").toDouble());
+            }
+        }
         status.insert(QStringLiteral("historyPanelLoaded"),
                       m_window->property("historyPanelLoaded").toBool());
         status.insert(QStringLiteral("historyTriggerWidth"),

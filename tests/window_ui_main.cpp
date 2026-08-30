@@ -80,14 +80,15 @@ QJsonObject historyAction(const QString &action, const QString &value = {})
 
 QJsonObject dragHistoryUi(const QString &id, int dropPosition,
                           bool activateDrag = true, bool outsideEditor = false,
-                          bool finishDrag = true)
+                          bool finishDrag = true, const QString &previewText = {})
 {
     return request(QStringLiteral("testClipboardHistoryDragUi"),
                    {{QStringLiteral("id"), id},
                     {QStringLiteral("dropPosition"), dropPosition},
                     {QStringLiteral("activateDrag"), activateDrag},
                     {QStringLiteral("outsideEditor"), outsideEditor},
-                    {QStringLiteral("finishDrag"), finishDrag}}, 5000);
+                    {QStringLiteral("finishDrag"), finishDrag},
+                    {QStringLiteral("previewText"), previewText}}, 5000);
 }
 
 void addCheck(QJsonObject &checks, QJsonObject &details, const QString &name, bool passed,
@@ -1338,6 +1339,8 @@ int main(int argc, char *argv[])
         ? QString() : historyItems.first().toObject().value(QStringLiteral("id")).toString();
     const QString selectedHistoryText = historyItems.isEmpty()
         ? QString() : historyItems.first().toObject().value(QStringLiteral("text")).toString();
+    QString selectedHistoryPreview = selectedHistoryText.left(240);
+    selectedHistoryPreview.remove(QLatin1Char('\r'));
     const QString hoveredHistoryId = historyItems.size() > 1
         ? historyItems.at(1).toObject().value(QStringLiteral("id")).toString()
         : QString();
@@ -1354,30 +1357,64 @@ int main(int argc, char *argv[])
                     == hoveredHistoryId
                  && historyPointerClick.value(QStringLiteral("historyPanelOpen")).toBool()
                  && !historyPointerClick.value(
-                        QStringLiteral("historyCardDragActive")).toBool(),
+                        QStringLiteral("historyCardDragActive")).toBool()
+                 && !historyPointerClick.value(
+                        QStringLiteral("historyDragPreviewVisible")).toBool()
+                 && !historyPointerClick.value(
+                        QStringLiteral("historyDragCursorOverridden")).toBool(),
              historyPointerClick);
 
     request(QStringLiteral("testSetText"),
             {{QStringLiteral("text"), QStringLiteral("A😀B")}});
     const QJsonObject historyDragHeld = dragHistoryUi(
-        selectedHistoryId, 3, true, false, false);
+        selectedHistoryId, 3, true, false, false, selectedHistoryPreview);
     const QJsonObject historyDragCanceled = historyAction(
         QStringLiteral("historyEscape"));
     addCheck(checks, details, QStringLiteral("historyDragKeepsPanelStableUntilFinish"),
              historyDragHeld.value(QStringLiteral("eventsAccepted")).toBool()
                  && historyDragHeld.value(QStringLiteral("historyCardDragActive")).toBool()
                  && historyDragHeld.value(QStringLiteral("historyCardDropAllowed")).toBool()
+                 && historyDragHeld.value(
+                        QStringLiteral("historyDragPreviewVisible")).toBool()
+                 && historyDragHeld.value(QStringLiteral("historyDragPreviewText")).toString()
+                    == selectedHistoryPreview
+                 && historyDragHeld.value(
+                        QStringLiteral("historyDragCursorOverridden")).toBool()
+                 && historyDragHeld.value(QStringLiteral("historyDragCursorShape")).toInt()
+                    == static_cast<int>(Qt::DragCopyCursor)
+                 && historyDragHeld.value(QStringLiteral("historyDragPreviewX")).toDouble() >= 0
+                 && historyDragHeld.value(QStringLiteral("historyDragPreviewY")).toDouble() >= 0
+                 && historyDragHeld.value(QStringLiteral("historyDragPreviewX")).toDouble()
+                        + historyDragHeld.value(
+                            QStringLiteral("historyDragPreviewWidth")).toDouble()
+                    <= historyDragHeld.value(QStringLiteral("width")).toDouble()
+                 && historyDragHeld.value(QStringLiteral("historyDragPreviewY")).toDouble()
+                        + historyDragHeld.value(
+                            QStringLiteral("historyDragPreviewHeight")).toDouble()
+                    <= historyDragHeld.value(QStringLiteral("height")).toDouble()
+                 && historyDragHeld.value(
+                        QStringLiteral("historyDragPreviewWidth")).toDouble() > 0
+                 && historyDragHeld.value(
+                        QStringLiteral("historyDragPreviewHeight")).toDouble() > 0
+                 && qAbs(historyDragHeld.value(
+                             QStringLiteral("historyDragPreviewOpacity")).toDouble()
+                         - 0.72) <= 0.001
                  && historyDragHeld.value(QStringLiteral("historyPanelOpen")).toBool()
                  && historyDragHeld.value(QStringLiteral("editorVisibleWidth"))
                     == toggledReopenedHistory.value(QStringLiteral("editorVisibleWidth"))
                  && historyDragCanceled.value(QStringLiteral("invoked")).toBool()
                  && !historyDragCanceled.value(
                         QStringLiteral("historyCardDragActive")).toBool()
+                 && !historyDragCanceled.value(
+                        QStringLiteral("historyDragPreviewVisible")).toBool()
+                 && !historyDragCanceled.value(
+                        QStringLiteral("historyDragCursorOverridden")).toBool()
                  && historyDragCanceled.value(QStringLiteral("historyPanelOpen")).toBool(),
              QJsonObject{{QStringLiteral("held"), historyDragHeld},
                          {QStringLiteral("canceled"), historyDragCanceled}});
 
-    const QJsonObject historyPointerDrop = dragHistoryUi(selectedHistoryId, 3);
+    const QJsonObject historyPointerDrop = dragHistoryUi(
+        selectedHistoryId, 3, true, false, true, selectedHistoryPreview);
     const QJsonObject historyPointerUndo = request(QStringLiteral("testUndo"));
     addCheck(checks, details, QStringLiteral("historyDragClosesPanelAndFocusesEditor"),
              !selectedHistoryId.isEmpty()
@@ -1393,6 +1430,10 @@ int main(int argc, char *argv[])
                         QStringLiteral("historyCardDragActive")).toBool()
                  && !historyPointerDrop.value(
                         QStringLiteral("historyCardDropAllowed")).toBool()
+                 && !historyPointerDrop.value(
+                        QStringLiteral("historyDragPreviewVisible")).toBool()
+                 && !historyPointerDrop.value(
+                        QStringLiteral("historyDragCursorOverridden")).toBool()
                  && historyPointerUndo.value(QStringLiteral("text")).toString()
                     == QStringLiteral("A😀B"),
              QJsonObject{{QStringLiteral("dropped"), historyPointerDrop},
@@ -1406,8 +1447,31 @@ int main(int argc, char *argv[])
     QThread::msleep(150);
     request(QStringLiteral("testSetText"),
             {{QStringLiteral("text"), QStringLiteral("outside-drop-target")}});
+    const QJsonObject historyOutsideHeld = dragHistoryUi(
+        selectedHistoryId, 0, true, true, false, selectedHistoryPreview);
+    const QJsonObject historyOutsideCanceled = historyAction(
+        QStringLiteral("historyEscape"));
+    addCheck(checks, details, QStringLiteral("historyDragOutsideShowsForbiddenFeedback"),
+             historyOutsideHeld.value(QStringLiteral("eventsAccepted")).toBool()
+                 && historyOutsideHeld.value(
+                        QStringLiteral("historyCardDragActive")).toBool()
+                 && !historyOutsideHeld.value(
+                        QStringLiteral("historyCardDropAllowed")).toBool()
+                 && historyOutsideHeld.value(
+                        QStringLiteral("historyDragPreviewVisible")).toBool()
+                 && historyOutsideHeld.value(
+                        QStringLiteral("historyDragCursorOverridden")).toBool()
+                 && historyOutsideHeld.value(QStringLiteral("historyDragCursorShape")).toInt()
+                    == static_cast<int>(Qt::ForbiddenCursor)
+                 && historyOutsideCanceled.value(QStringLiteral("invoked")).toBool()
+                 && !historyOutsideCanceled.value(
+                        QStringLiteral("historyDragPreviewVisible")).toBool()
+                 && !historyOutsideCanceled.value(
+                        QStringLiteral("historyDragCursorOverridden")).toBool(),
+             QJsonObject{{QStringLiteral("held"), historyOutsideHeld},
+                         {QStringLiteral("canceled"), historyOutsideCanceled}});
     const QJsonObject historyPointerOutside = dragHistoryUi(
-        selectedHistoryId, 0, true, true);
+        selectedHistoryId, 0, true, true, true, selectedHistoryPreview);
     addCheck(checks, details, QStringLiteral("historyDragDropOutsideCancels"),
              historyPointerOutside.value(QStringLiteral("eventsAccepted")).toBool()
                  && historyPointerOutside.value(QStringLiteral("text")).toString()

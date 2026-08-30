@@ -54,13 +54,20 @@ Loader {
                 host.historyHoveredId = ""
             }
         }
-        function beginCardDrag(id, sceneX, sceneY) {
+        function beginCardDrag(id, previewText, sceneX, sceneY) {
             const armed = root.appController.beginClipboardHistoryDrag(id, sceneX, sceneY)
-            if (armed) historyCloseTimer.stop()
+            if (armed) {
+                host.historyDragPreviewText = previewText === undefined ? "" : previewText
+                host.historyDragSceneX = sceneX
+                host.historyDragSceneY = sceneY
+                historyCloseTimer.stop()
+            }
             return armed
         }
         function updateCardDrag(sceneX, sceneY) {
             const state = root.appController.updateClipboardHistoryDrag(sceneX, sceneY)
+            host.historyDragSceneX = sceneX
+            host.historyDragSceneY = sceneY
             if (state.active) {
                 host.historyCardDragActive = true
                 host.historyCardDropAllowed = state.canDrop
@@ -73,6 +80,7 @@ Loader {
             const inserted = root.appController.finishClipboardHistoryDrag(sceneX, sceneY)
             host.historyCardDragActive = false
             host.historyCardDropAllowed = false
+            host.historyDragPreviewText = ""
             if (inserted) {
                 host.closeClipboardHistory()
             } else {
@@ -84,6 +92,7 @@ Loader {
             root.appController.cancelClipboardHistoryDrag()
             host.historyCardDragActive = false
             host.historyCardDropAllowed = false
+            host.historyDragPreviewText = ""
             host.scheduleClipboardHistoryClose()
         }
         function moveSelection(delta) {
@@ -282,7 +291,8 @@ Loader {
                             const scenePoint = historyRow.mapToItem(
                                 null, mouse.x, mouse.y)
                             dragArmed = historyRoot.beginCardDrag(
-                                historyRow.historyId, scenePoint.x, scenePoint.y)
+                                historyRow.historyId, historyRow.previewText,
+                                scenePoint.x, scenePoint.y)
                         }
                         onPositionChanged: function(mouse) {
                             if (!dragArmed || !pressed) return

@@ -59,6 +59,8 @@ public:
     bool finishExternalTextDrag(const QPointF &scenePosition);
     void cancelExternalTextDrag();
     bool externalTextDragActive() const;
+    bool externalTextDragCursorOverridden() const;
+    int externalTextDragCursorShape() const;
 
     bool findNext(const QString &query, bool caseSensitive, bool backwards);
     bool replaceCurrent(const QString &query, const QString &replacement, bool caseSensitive);
@@ -165,6 +167,7 @@ private:
     void resetSelectionDrag(bool releaseMouseGrab);
     void updateExternalTextDragPosition(const QPointF &scenePosition,
                                         bool scrollViewport);
+    void updateExternalTextDragCursor(bool canDrop);
     void resetExternalTextDrag();
     void scrollTextDragViewport(const QPointF &scenePosition);
     void beginInputAutoScrollTracking(const QString &kind);
@@ -250,6 +253,8 @@ private:
     QPointF m_externalDragScenePosition;
     int m_externalDropPosition = -1;
     bool m_externalDragActive = false;
+    bool m_externalDragCursorOverridden = false;
+    Qt::CursorShape m_externalDragCursorShape = Qt::ArrowCursor;
     bool m_doubleClickReplaying = false;
     std::optional<SelectionUndoSnapshot> m_selectionUndoSnapshot;
     bool m_inputAutoScrollCheckQueued = false;

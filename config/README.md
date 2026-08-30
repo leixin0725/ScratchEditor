@@ -37,7 +37,8 @@
 - `animation`：过渡动画时长、窗口开合缩放比例、标题导航高亮的透明度/停留/淡出时长、
   历史面板悬停延迟、滚动指标刷新节流与性能探针参数。
 - `panels`：状态文字、状态面板、查找面板、历史面板、确认对话框、
-  命令面板与设置页的尺寸和布局参数。
+  命令面板与设置页的尺寸和布局参数；历史拖拽摘要宽度和透明度分别由
+  `history.dragPreviewWidth`、`history.dragPreviewOpacity` 控制。
 - `palette`：dark / light 两套界面基础色角色。
 - `placement`：窗口唤起时的锚定间距。
 - `preferences`：主题与动画开关的默认值（可被设置页覆盖）。

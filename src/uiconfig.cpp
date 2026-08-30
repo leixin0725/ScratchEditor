@@ -305,6 +305,8 @@ UiConfig UiConfig::defaults()
     put({"panels", "history", "cardMetaBottomGap"}, 16);
     put({"panels", "history", "cardLineHeight"}, 18);
     put({"panels", "history", "cardMaxLines"}, 3);
+    put({"panels", "history", "dragPreviewWidth"}, 260);
+    put({"panels", "history", "dragPreviewOpacity"}, 0.72);
     put({"panels", "history", "emptyTextInsetX"}, 24);
     put({"panels", "history", "footerMarginX"}, 12);
     put({"panels", "history", "footerBottomGap"}, 10);
@@ -531,6 +533,8 @@ QVariantMap UiConfig::sanitize(const QVariantMap &input)
     fixInt({"panels", "history", "cardMetaBottomGap"}, 0, 500);
     fixInt({"panels", "history", "cardLineHeight"}, 8, 500);
     fixInt({"panels", "history", "cardMaxLines"}, 1, 20);
+    fixInt({"panels", "history", "dragPreviewWidth"}, 80, 1000);
+    fixDouble({"panels", "history", "dragPreviewOpacity"}, 0.1, 1.0);
     fixInt({"panels", "history", "emptyTextInsetX"}, 0, 1000);
     fixInt({"panels", "history", "footerMarginX"}, 0, 1000);
     fixInt({"panels", "history", "footerBottomGap"}, 0, 1000);

@@ -150,6 +150,8 @@
       "cardMetaBottomGap": 16,
       "cardLineHeight": 18,
       "cardMaxLines": 3,
+      "dragPreviewWidth": 260,
+      "dragPreviewOpacity": 0.72,
       "emptyTextInsetX": 24,
       "footerMarginX": 12,
       "footerBottomGap": 10,
