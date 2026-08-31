@@ -4884,6 +4884,53 @@ int main(int argc, char *argv[])
                  && originalUnchanged && editedRecorded,
              afterEditHistory);
 
+    const QString crlfHistoryText = QStringLiteral("first\r\nsecond\r\nthird");
+    request(QStringLiteral("testEmitClipboardChange"),
+            {{QStringLiteral("kind"), QStringLiteral("text")},
+             {QStringLiteral("text"), crlfHistoryText},
+             {QStringLiteral("sequenceNumber"), 903},
+             {QStringLiteral("capturedAtMs"), 1786200002000.0}});
+    const QJsonArray crlfHistoryItems = request(
+        QStringLiteral("testClipboardHistoryState"))
+        .value(QStringLiteral("items")).toArray();
+    QString crlfDragId;
+    for (const QJsonValue &value : crlfHistoryItems) {
+        if (value.toObject().value(QStringLiteral("text")).toString() == crlfHistoryText) {
+            crlfDragId = value.toObject().value(QStringLiteral("id")).toString();
+            break;
+        }
+    }
+    request(QStringLiteral("show"));
+    const QString crlfDragTarget = QStringLiteral("ORIGINAL");
+    const QString normalizedCrlfText = QStringLiteral("first\nsecond\nthird");
+    setTextAndSelection(crlfDragTarget, 2, 5);
+    const QJsonObject crlfDragged = dragClipboardHistory(crlfDragId, 0);
+    const QJsonObject crlfDragUndone = request(QStringLiteral("testUndo"));
+    addCheck(checks, details,
+             QStringLiteral("clipboardHistoryDragSelectsNormalizedCrlfTextOnly"),
+             !crlfDragId.isEmpty()
+                 && crlfDragged.value(QStringLiteral("inserted")).toBool()
+                 && crlfDragged.value(QStringLiteral("text")).toString()
+                    == normalizedCrlfText + crlfDragTarget
+                 && crlfDragged.value(QStringLiteral("selectionStart")).toInt() == 0
+                 && crlfDragged.value(QStringLiteral("selectionEnd")).toInt()
+                    == normalizedCrlfText.size()
+                 && crlfDragged.value(QStringLiteral("cursorPosition")).toInt()
+                    == normalizedCrlfText.size()
+                 && crlfDragUndone.value(QStringLiteral("text")).toString()
+                    == crlfDragTarget
+                 && crlfDragUndone.value(QStringLiteral("selectionStart")).toInt() == 2
+                 && crlfDragUndone.value(QStringLiteral("selectionEnd")).toInt() == 5
+                 && crlfDragUndone.value(QStringLiteral("cursorPosition")).toInt() == 5,
+             QJsonObject{{QStringLiteral("expectedText"),
+                          normalizedCrlfText + crlfDragTarget},
+                         {QStringLiteral("expectedSelectionStart"), 0},
+                         {QStringLiteral("expectedSelectionEnd"), normalizedCrlfText.size()},
+                         {QStringLiteral("dropped"), crlfDragged},
+                         {QStringLiteral("undone"), crlfDragUndone}});
+    request(QStringLiteral("testDiscardClose"));
+    QThread::msleep(150);
+
     // --- CJK Fix: Pure Spacing Planner Tests (SPACE-001..018) ---
     const auto spaceExpect = [&](const QString &name, const QString &text,
                                  CjkText::BoundaryRange range,

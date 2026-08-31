@@ -2771,7 +2771,9 @@ bool EditorCommandRegistry::insertExternalText(const QString &text, int dropPosi
     // 记录为撤销位置；原有选区及活动端由统一快照完整恢复。
     cursor.beginEditBlock();
     cursor.insertText(text);
-    selectRange(dropPosition, dropPosition + text.size());
+    // QTextDocument 会把 CRLF 等外部换行规范化为文档段落；使用插入后
+    // cursor 的真实位置，避免按源字符串长度计算时把后续正文也选中。
+    selectRange(dropPosition, cursor.position());
     if (repairOrderedList) {
         repairOrderedLists(beforeText, m_document->toPlainText(), true);
     }
