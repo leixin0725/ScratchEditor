@@ -2759,18 +2759,25 @@ bool EditorCommandRegistry::insertExternalText(const QString &text, int dropPosi
     if (dropPosition < 0 || dropPosition > beforeText.size()) {
         return false;
     }
+    const int selectionStart = m_editor->property("selectionStart").toInt();
+    const int selectionEnd = m_editor->property("selectionEnd").toInt();
+    const int cursorPosition = m_editor->property("cursorPosition").toInt();
 
     const bool repairOrderedList = text.contains(QLatin1Char('\n'))
         || orderedListStructureAffected(beforeText, dropPosition, dropPosition);
     QTextCursor cursor(m_document);
-    cursor.beginEditBlock();
     cursor.setPosition(dropPosition);
+    // 先定位临时 cursor 再开启撤销块，避免 Qt 把构造时的文档开头
+    // 记录为撤销位置；原有选区及活动端由统一快照完整恢复。
+    cursor.beginEditBlock();
     cursor.insertText(text);
     selectRange(dropPosition, dropPosition + text.size());
     if (repairOrderedList) {
         repairOrderedLists(beforeText, m_document->toPlainText(), true);
     }
     cursor.endEditBlock();
+    m_selectionUndoSnapshot = SelectionUndoSnapshot{
+        beforeText, m_documentTextSnapshot, selectionStart, selectionEnd, cursorPosition};
     focusEditor();
     return true;
 }

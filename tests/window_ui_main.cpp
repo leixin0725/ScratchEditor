@@ -1480,6 +1480,13 @@ int main(int argc, char *argv[])
                     == QStringLiteral("A😀B"),
              QJsonObject{{QStringLiteral("dropped"), historyPointerDrop},
                          {QStringLiteral("undone"), historyPointerUndo}});
+    addCheck(checks, details, QStringLiteral("historyDragUndoRestoresOriginalCursor"),
+             historyPointerUndo.value(QStringLiteral("text")).toString()
+                    == QStringLiteral("A😀B")
+                 && historyPointerUndo.value(QStringLiteral("selectionStart")).toInt() == 4
+                 && historyPointerUndo.value(QStringLiteral("selectionEnd")).toInt() == 4
+                 && historyPointerUndo.value(QStringLiteral("cursorPosition")).toInt() == 4,
+             historyPointerUndo);
 
     request(QStringLiteral("testDiscardClose"));
     QThread::msleep(180);

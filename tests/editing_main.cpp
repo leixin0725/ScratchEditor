@@ -4776,6 +4776,7 @@ int main(int argc, char *argv[])
 
     const QString historyDragTarget = QStringLiteral("头😀尾");
     setTextAndSelection(historyDragTarget, 0, 1);
+    const QJsonObject historyDragBefore = editorStatus();
     const QJsonObject historyDragged = dragClipboardHistory(originalId, 3);
     const QJsonObject historyDragUndone = request(QStringLiteral("testUndo"));
     setTextAndSelection(historyDragTarget, 0, 1);
@@ -4790,13 +4791,46 @@ int main(int argc, char *argv[])
                  && historyDragged.value(QStringLiteral("selectionEnd")).toInt() == 21
                  && historyDragUndone.value(QStringLiteral("text")).toString()
                     == historyDragTarget
+                 && historyDragUndone.value(QStringLiteral("selectionStart"))
+                    == historyDragBefore.value(QStringLiteral("selectionStart"))
+                 && historyDragUndone.value(QStringLiteral("selectionEnd"))
+                    == historyDragBefore.value(QStringLiteral("selectionEnd"))
+                 && historyDragUndone.value(QStringLiteral("cursorPosition"))
+                    == historyDragBefore.value(QStringLiteral("cursorPosition"))
                  && historyDragOutside.value(QStringLiteral("dragActivated")).toBool()
                  && !historyDragOutside.value(QStringLiteral("inserted")).toBool()
                  && historyDragOutside.value(QStringLiteral("text")).toString()
                     == historyDragTarget,
-             QJsonObject{{QStringLiteral("dropped"), historyDragged},
+             QJsonObject{{QStringLiteral("before"), historyDragBefore},
+                         {QStringLiteral("dropped"), historyDragged},
                          {QStringLiteral("undone"), historyDragUndone},
                          {QStringLiteral("outside"), historyDragOutside}});
+
+    setTextAndSelection(historyDragTarget, 0, 1, 0);
+    const QJsonObject historyReverseDragged = dragClipboardHistory(originalId, 3);
+    const QJsonObject historyReverseUndone = request(QStringLiteral("testUndo"));
+    addCheck(checks, details, QStringLiteral("clipboardHistoryDragUndoRestoresReverseSelection"),
+             historyReverseDragged.value(QStringLiteral("inserted")).toBool()
+                 && historyReverseUndone.value(QStringLiteral("text")).toString()
+                    == historyDragTarget
+                 && historyReverseUndone.value(QStringLiteral("selectionStart")).toInt() == 0
+                 && historyReverseUndone.value(QStringLiteral("selectionEnd")).toInt() == 1
+                 && historyReverseUndone.value(QStringLiteral("cursorPosition")).toInt() == 0,
+             QJsonObject{{QStringLiteral("dropped"), historyReverseDragged},
+                         {QStringLiteral("undone"), historyReverseUndone}});
+
+    setTextAndSelection(historyDragTarget, 3, 3);
+    const QJsonObject historyCursorDragged = dragClipboardHistory(originalId, 0);
+    const QJsonObject historyCursorUndone = request(QStringLiteral("testUndo"));
+    addCheck(checks, details, QStringLiteral("clipboardHistoryDragUndoRestoresUtf16Cursor"),
+             historyCursorDragged.value(QStringLiteral("inserted")).toBool()
+                 && historyCursorUndone.value(QStringLiteral("text")).toString()
+                    == historyDragTarget
+                 && historyCursorUndone.value(QStringLiteral("selectionStart")).toInt() == 3
+                 && historyCursorUndone.value(QStringLiteral("selectionEnd")).toInt() == 3
+                 && historyCursorUndone.value(QStringLiteral("cursorPosition")).toInt() == 3,
+             QJsonObject{{QStringLiteral("dropped"), historyCursorDragged},
+                         {QStringLiteral("undone"), historyCursorUndone}});
 
     const QString orderedListBefore = QStringLiteral("1. first\n2. third");
     setTextAndSelection(orderedListBefore, 0, 0);
@@ -4808,7 +4842,10 @@ int main(int argc, char *argv[])
                  && orderedListDragged.value(QStringLiteral("text")).toString()
                     == QStringLiteral("1. first\n2. second\n3. third")
                  && orderedListDragUndone.value(QStringLiteral("text")).toString()
-                    == orderedListBefore,
+                    == orderedListBefore
+                 && orderedListDragUndone.value(QStringLiteral("selectionStart")).toInt() == 0
+                 && orderedListDragUndone.value(QStringLiteral("selectionEnd")).toInt() == 0
+                 && orderedListDragUndone.value(QStringLiteral("cursorPosition")).toInt() == 0,
              QJsonObject{{QStringLiteral("dropped"), orderedListDragged},
                          {QStringLiteral("undone"), orderedListDragUndone}});
 
