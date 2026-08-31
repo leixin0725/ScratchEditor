@@ -5126,7 +5126,11 @@ int main(int argc, char *argv[])
         + secondScrolledInput.value(QStringLiteral("cursorRectY")).toDouble()
         - secondScrolledInput.value(QStringLiteral("scrollContentY")).toDouble();
     request(QStringLiteral("testUndo"));
-    QThread::msleep(80);
+    // 文本高度收缩后的首帧必须继续保持编辑前视口；旧实现会先被
+    // Flickable 钳到新的自然 max，40ms 自动滚动检查后才恢复，形成抽动。
+    QThread::msleep(20);
+    const QJsonObject firstUndoTransient = editorStatus();
+    QThread::msleep(60);
     const QJsonObject firstUndo = editorStatus();
     const double firstUndoScreenY =
         firstUndo.value(QStringLiteral("editorContentOffsetY")).toDouble()
@@ -5140,6 +5144,10 @@ int main(int argc, char *argv[])
                     > bottomEdgeY
                  && firstUndo.value(QStringLiteral("textLength")).toInt()
                     == scrollEndCursor + 1
+                 && std::abs(firstUndoTransient.value(
+                                 QStringLiteral("scrollContentY")).toDouble()
+                             - secondScrolledInput.value(
+                                 QStringLiteral("scrollContentY")).toDouble()) < 1.5
                  && std::abs(firstUndo.value(QStringLiteral("scrollContentY")).toDouble()
                              - secondScrolledInput.value(
                                  QStringLiteral("scrollContentY")).toDouble()) < 1.5
@@ -5158,6 +5166,7 @@ int main(int argc, char *argv[])
                          {QStringLiteral("first"), firstScrolledInput},
                          {QStringLiteral("second"), secondScrolledInput},
                          {QStringLiteral("secondScreenY"), secondScrolledScreenY},
+                         {QStringLiteral("firstUndoTransient"), firstUndoTransient},
                          {QStringLiteral("firstUndo"), firstUndo},
                          {QStringLiteral("firstUndoScreenY"), firstUndoScreenY},
                          {QStringLiteral("secondUndo"), secondUndo},
@@ -5192,7 +5201,9 @@ int main(int argc, char *argv[])
         + redoAtMax.value(QStringLiteral("cursorRectY")).toDouble()
         - redoAtMax.value(QStringLiteral("scrollContentY")).toDouble();
     keyPress({}, QStringLiteral("Backspace"));
-    QThread::msleep(80);
+    QThread::msleep(20);
+    const QJsonObject redoBackspaceTransient = editorStatus();
+    QThread::msleep(60);
     const QJsonObject redoBackspace = editorStatus();
     const double redoBackspaceScreenY =
         redoBackspace.value(QStringLiteral("editorContentOffsetY")).toDouble()
@@ -5206,7 +5217,9 @@ int main(int argc, char *argv[])
         + redoRestored.value(QStringLiteral("cursorRectY")).toDouble()
         - redoRestored.value(QStringLiteral("scrollContentY")).toDouble();
     request(QStringLiteral("testRedo"));
-    QThread::msleep(80);
+    QThread::msleep(20);
+    const QJsonObject redoDeletedTransient = editorStatus();
+    QThread::msleep(60);
     const QJsonObject redoDeleted = editorStatus();
     const double redoDeletedScreenY =
         redoDeleted.value(QStringLiteral("editorContentOffsetY")).toDouble()
@@ -5220,6 +5233,10 @@ int main(int argc, char *argv[])
                      - (redoEntered.value(QStringLiteral("scrollContentHeight")).toDouble()
                          - redoEntered.value(QStringLiteral("scrollViewportHeight")).toDouble()))
                     < 1.5
+                 && std::abs(redoBackspaceTransient.value(
+                                 QStringLiteral("scrollContentY")).toDouble()
+                             - redoAtMax.value(
+                                 QStringLiteral("scrollContentY")).toDouble()) < 1.5
                  && std::abs(redoBackspace.value(QStringLiteral("scrollContentY")).toDouble()
                              - redoAtMax.value(QStringLiteral("scrollContentY")).toDouble())
                         < 1.5
@@ -5227,6 +5244,10 @@ int main(int argc, char *argv[])
                  && std::abs(redoDeleted.value(QStringLiteral("scrollContentY")).toDouble()
                              - redoRestored.value(QStringLiteral("scrollContentY")).toDouble())
                         < 1.5
+                 && std::abs(redoDeletedTransient.value(
+                                 QStringLiteral("scrollContentY")).toDouble()
+                             - redoRestored.value(
+                                 QStringLiteral("scrollContentY")).toDouble()) < 1.5
                  && redoDeletedScreenY < redoRestoredScreenY - 10.0
                  && redoDeleted.value(QStringLiteral("textLength")).toInt()
                     == scrollEndCursor + 1
@@ -5237,10 +5258,12 @@ int main(int argc, char *argv[])
                          {QStringLiteral("entered"), redoEntered},
                          {QStringLiteral("atMax"), redoAtMax},
                          {QStringLiteral("enteredScreenY"), redoEnteredScreenY},
+                         {QStringLiteral("backspaceTransient"), redoBackspaceTransient},
                          {QStringLiteral("backspace"), redoBackspace},
                          {QStringLiteral("backspaceScreenY"), redoBackspaceScreenY},
                          {QStringLiteral("restored"), redoRestored},
                          {QStringLiteral("restoredScreenY"), redoRestoredScreenY},
+                         {QStringLiteral("deletedTransient"), redoDeletedTransient},
                          {QStringLiteral("deleted"), redoDeleted},
                          {QStringLiteral("deletedScreenY"), redoDeletedScreenY},
                          {QStringLiteral("deletedMaxY"), redoDeletedMaxY}});

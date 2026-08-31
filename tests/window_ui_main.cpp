@@ -781,6 +781,33 @@ int main(int argc, char *argv[])
                          {QStringLiteral("mid"), animAutoMid},
                          {QStringLiteral("settled"), animAutoSettled}});
 
+    // 动画开启时新增一行并等待自动滚动完全落定，再撤销该行。文本高度
+    // 收缩后的首帧与延迟检查后都必须保持同一 contentY，不能先钳到新 max
+    // 再恢复，避免用户看到编辑框抽动。
+    keyPress({}, QStringLiteral("Enter"));
+    QThread::msleep(300);
+    const QJsonObject animShrinkBase = request(QStringLiteral("status"));
+    request(QStringLiteral("testUndo"));
+    QThread::msleep(20);
+    const QJsonObject animShrinkTransient = request(QStringLiteral("status"));
+    QThread::msleep(240);
+    const QJsonObject animShrinkSettled = request(QStringLiteral("status"));
+    addCheck(checks, details, QStringLiteral("undoAfterAnimatedScrollDoesNotTwitch"),
+             animShrinkBase.value(QStringLiteral("animationsEnabled")).toBool()
+                 && qAbs(animShrinkTransient.value(
+                             QStringLiteral("scrollContentY")).toDouble()
+                         - animShrinkBase.value(
+                             QStringLiteral("scrollContentY")).toDouble()) < 1.5
+                 && qAbs(animShrinkSettled.value(
+                             QStringLiteral("scrollContentY")).toDouble()
+                         - animShrinkBase.value(
+                             QStringLiteral("scrollContentY")).toDouble()) < 1.5
+                 && animShrinkSettled.value(QStringLiteral("textLength")).toInt()
+                    == scrollAnimText.size() + 1,
+             QJsonObject{{QStringLiteral("base"), animShrinkBase},
+                         {QStringLiteral("transient"), animShrinkTransient},
+                         {QStringLiteral("settled"), animShrinkSettled}});
+
     // 标题跳转滚动共用同一轻量动画入口：延迟 40ms 后启动约 160ms 平滑滚动，
     // 落定后标题首行锚定到视口上 1/3。
     QString headingAnimText;

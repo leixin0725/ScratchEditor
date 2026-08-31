@@ -285,6 +285,9 @@ Window {
     property bool statusPanelOpen: false
     property bool statusCopyFeedback: false
     property bool inputScrollHoldBottom: false
+    property bool releaseInputScrollHoldAfterAnimation: false
+    readonly property real inputScrollNaturalContentHeight:
+        editorViewport.naturalContentHeight
     // 标题跳转（Ctrl+Up/Down）期间由 C++ 置位：抑制跳转瞬间的光标瞬时贴边
     // 跟随，让整段跳转由统一的轻量滚动动画完成（跳转后标题锚定到视口上 1/3）。
     property bool suppressHeadingCursorFollow: false
@@ -295,18 +298,36 @@ Window {
 
     property real requestedScrollY: -1
 
+    // 文本编辑前先冻结当前视口范围，避免内容高度收缩时 Flickable 在
+    // 延迟自动滚动检查前把 contentY 钳到新的自然上限。若上一次输入
+    // 滚动动画仍在进行，则停在当前帧，由本次编辑重新决定后续滚动。
+    function prepareInputScrollTracking() {
+        releaseInputScrollHoldAfterAnimation = false
+        scrollAnimation.stop()
+        inputScrollHoldBottom = true
+    }
+
     // PageUp/PageDown 与输入触底/删除触顶的自动滚动共用同一个动画入口：
     // 动画开启时从当前位置平滑滑到目标，关闭时直接落位。
     function animateScrollTo() {
         const targetY = requestedScrollY
-        const maximumY = Math.max(0, editorViewport.contentHeight - editorViewport.height)
+        const releaseHold = releaseInputScrollHoldAfterAnimation
+        releaseInputScrollHoldAfterAnimation = false
+        const targetContentHeight = releaseHold
+            ? editorViewport.naturalContentHeight
+            : editorViewport.contentHeight
+        const maximumY = Math.max(0, targetContentHeight - editorViewport.height)
         const clampedY = Math.max(0, Math.min(maximumY, targetY))
         scrollAnimation.stop()
         if (root.scrollAnimationDurationMs <= 0
                 || Math.abs(clampedY - editorViewport.contentY) < 0.5) {
             editorViewport.contentY = clampedY
+            if (releaseHold) {
+                inputScrollHoldBottom = false
+            }
             return
         }
+        releaseInputScrollHoldAfterAnimation = releaseHold
         scrollAnimation.from = editorViewport.contentY
         scrollAnimation.to = clampedY
         scrollAnimation.start()
@@ -948,12 +969,13 @@ Window {
         // contentY + 视口高，避免内容收缩时 Flickable 把视口钳制回新 max，
         // 让光标随删除自然上移、再次触顶才触发镜像滚动。
         // editorContentBottomGap 作为最小留白值参与计算（默认远小于 2/3 页）。
-        contentHeight: Math.max(
+        readonly property real naturalContentHeight: Math.max(
             height,
-            root.editorVisibleContentHeight + (root.inputScrollHoldBottom
-                ? Math.max(Math.max(height * 2 / 3, uiConfig.layout.editorContentBottomGap),
-                           editorViewport.contentY + height - root.editorVisibleContentHeight)
-                : Math.max(height * 2 / 3, uiConfig.layout.editorContentBottomGap)))
+            root.editorVisibleContentHeight
+                + Math.max(height * 2 / 3, uiConfig.layout.editorContentBottomGap))
+        contentHeight: Math.max(
+            naturalContentHeight,
+            root.inputScrollHoldBottom ? editorViewport.contentY + height : 0)
         pixelAligned: true
 
         NumberAnimation {
@@ -962,15 +984,23 @@ Window {
             property: "contentY"
             duration: root.scrollAnimationDurationMs
             easing.type: Easing.OutCubic
+            onFinished: {
+                if (root.releaseInputScrollHoldAfterAnimation) {
+                    root.releaseInputScrollHoldAfterAnimation = false
+                    root.inputScrollHoldBottom = false
+                }
+            }
         }
 
         // 用户拖动/甩动时立即停止动画，避免与手势互相打架；
         // 同时释放删除/撤销保持期间的弹性底部缓冲，手动滚动后由下一次检查重新判定。
         onDragStarted: {
+            root.releaseInputScrollHoldAfterAnimation = false
             scrollAnimation.stop()
             root.inputScrollHoldBottom = false
         }
         onFlickStarted: {
+            root.releaseInputScrollHoldAfterAnimation = false
             scrollAnimation.stop()
             root.inputScrollHoldBottom = false
         }
@@ -980,7 +1010,10 @@ Window {
         WheelHandler {
             target: null
             blocking: false
-            onWheel: root.inputScrollHoldBottom = false
+            onWheel: {
+                root.releaseInputScrollHoldAfterAnimation = false
+                root.inputScrollHoldBottom = false
+            }
         }
 
         Item {
@@ -1453,7 +1486,9 @@ Window {
             property real grabOffset: 0
 
             onPressed: function(mouse) {
+                root.releaseInputScrollHoldAfterAnimation = false
                 scrollAnimation.stop()
+                root.inputScrollHoldBottom = false
                 grabOffset = mouse.y
             }
             onPositionChanged: function(mouse) {

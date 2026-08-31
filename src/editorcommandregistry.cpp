@@ -1614,7 +1614,8 @@ bool EditorCommandRegistry::execute(const QString &commandId)
             beginInputAutoScrollTracking(commandId);
         }
         const bool handled = handler.value()();
-        if (trackedEdit && handled) {
+        if (trackedEdit) {
+            // 失败或无文本变化的命令也必须排队检查，以释放编辑前临时保持。
             queueInputAutoScrollCheck();
         }
         return handled;
@@ -1804,15 +1805,13 @@ bool EditorCommandRegistry::handleEditorEvent(QEvent *event)
             beginInputAutoScrollTracking(QStringLiteral("tab"));
             if (shiftPressed || keyEvent->key() == Qt::Key_Backtab) {
                 const bool outdented = changeIndent(true);
-                if (outdented) {
-                    queueInputAutoScrollCheck();
-                }
+                // 未处理时 TextEdit 仍可能接手按键；即使最终无文本变化，
+                // 延迟检查也负责恢复编辑前临时保持状态。
+                queueInputAutoScrollCheck();
                 return outdented;
             }
             const bool handled = jumpOutOfPair() || changeIndent(false);
-            if (handled) {
-                queueInputAutoScrollCheck();
-            }
+            queueInputAutoScrollCheck();
             return handled;
         }
 
@@ -1998,6 +1997,25 @@ void EditorCommandRegistry::beginInputAutoScrollTracking(const QString &kind)
     if (!m_editor || !m_document) {
         return;
     }
+    if (!m_inputAutoScrollTrackingActive) {
+        m_inputAutoScrollTrackingActive = true;
+        const bool releasePending = m_window
+            && m_window->property("releaseInputScrollHoldAfterAnimation").toBool();
+        // 正在随输入滚动动画等待释放的 hold 属于上一轮临时状态；新编辑
+        // 打断动画后不应把它误认成需要永久保留的既有缓冲。
+        m_inputScrollHoldWasActive = m_window
+            && m_window->property("inputScrollHoldBottom").toBool()
+            && !releasePending;
+    }
+    // 必须在文本实际变化前扩大 Flickable 的有效内容范围；否则内容高度
+    // 一旦收缩，contentY 会先被钳到新的 max，延迟检查再恢复时便产生抽动。
+    // QML 入口同时停止尚未结束的输入滚动动画并停在当前帧。
+    if (!m_window
+        || !QMetaObject::invokeMethod(m_window, "prepareInputScrollTracking")) {
+        if (m_window) {
+            m_window->setProperty("inputScrollHoldBottom", true);
+        }
+    }
     ++m_inputScrollDiag.inputCount;
     m_inputScrollDiag.lastKind = kind;
     if (QQuickItem *viewport = editorViewport()) {
@@ -2048,6 +2066,12 @@ void EditorCommandRegistry::checkInputAutoScroll()
     if (documentLength == m_inputPreTextLength) {
         // 本次编辑没有改变文本（如被 IME 组合状态拦截、空撤销/删除），
         // 不触发滚动。
+        if (m_window) {
+            m_window->setProperty("inputScrollHoldBottom", m_inputScrollHoldWasActive);
+        }
+        m_inputAutoScrollTrackingActive = false;
+        m_inputScrollHoldWasActive = false;
+        m_inputPreTextLength = -1;
         ++m_inputScrollEarlyReturnCount;
         event.earlyReturn = true;
         recordInputScrollEvent(event);
@@ -2068,8 +2092,13 @@ void EditorCommandRegistry::checkInputAutoScroll()
     if (QQuickItem *viewport = editorViewport()) {
         const qreal viewportHeight = viewport->height();
         const qreal currentY = viewport->property("contentY").toReal();
-        const qreal maximumY = qMax<qreal>(
-            0.0, viewport->property("contentHeight").toReal() - viewportHeight);
+        // 预保持会临时扩展 viewport.contentHeight；所有边界判断必须使用
+        // 不含保持缓冲的自然内容高度，否则会把临时范围误当成真实滚动范围。
+        const qreal naturalContentHeight = m_window
+                && m_window->property("inputScrollNaturalContentHeight").isValid()
+            ? m_window->property("inputScrollNaturalContentHeight").toReal()
+            : viewport->property("contentHeight").toReal();
+        const qreal maximumY = qMax<qreal>(0.0, naturalContentHeight - viewportHeight);
         m_inputScrollDiag.currentY = currentY;
         m_inputScrollDiag.viewportHeight = viewportHeight;
         m_inputScrollDiag.maxY = maximumY;
@@ -2101,9 +2130,6 @@ void EditorCommandRegistry::checkInputAutoScroll()
         if (cursorTouchesBottomEdge) {
             triggered = true;
             ++m_inputScrollDiag.triggerCount;
-            if (m_window) {
-                m_window->setProperty("inputScrollHoldBottom", false);
-            }
             qreal targetY = currentY;
             if (atDocumentEnd && rectLocated) {
                 targetY = maximumY;
@@ -2114,7 +2140,9 @@ void EditorCommandRegistry::checkInputAutoScroll()
                     0.0, editorY + cursorRect.y() - viewportHeight / 3.0, maximumY);
             }
             if (!qFuzzyCompare(targetY + 1.0, currentY + 1.0)) {
-                animateViewportScrollTo(viewport, targetY);
+                animateViewportScrollTo(viewport, targetY, true);
+            } else if (m_window) {
+                m_window->setProperty("inputScrollHoldBottom", false);
             }
             m_inputScrollDiag.targetY = targetY;
             event.targetY = targetY;
@@ -2129,9 +2157,6 @@ void EditorCommandRegistry::checkInputAutoScroll()
             // 滚到底对称）。
             triggered = true;
             ++m_inputScrollDiag.triggerCount;
-            if (m_window) {
-                m_window->setProperty("inputScrollHoldBottom", false);
-            }
             qreal targetY = currentY;
             if (atDocumentStart && rectLocated) {
                 targetY = 0.0;
@@ -2143,7 +2168,9 @@ void EditorCommandRegistry::checkInputAutoScroll()
                     maximumY);
             }
             if (!qFuzzyCompare(targetY + 1.0, currentY + 1.0)) {
-                animateViewportScrollTo(viewport, targetY);
+                animateViewportScrollTo(viewport, targetY, true);
+            } else if (m_window) {
+                m_window->setProperty("inputScrollHoldBottom", false);
             }
             m_inputScrollDiag.targetY = targetY;
             event.targetY = targetY;
@@ -2183,16 +2210,20 @@ void EditorCommandRegistry::checkInputAutoScroll()
             // 这里恢复输入前的视口位置（保持不动），让光标随删除自然上移，
             // 越过顶边时再由顶规则间歇触发。撤销/重做视为删除类编辑，
             // 与删除共用同一套保持与顶镜像规则。
-            if (m_window) {
-                // 开启弹性底部缓冲：contentHeight 保持不小于
-                // contentY + 视口高，Flickable 不会把视口钳制回新 max。
-                m_window->setProperty("inputScrollHoldBottom", true);
-            }
-            viewport->setProperty("contentY", m_inputPreScrollY);
+            // 弹性底部缓冲已在编辑前开启，contentY 从未离开输入前位置；
+            // 保持该缓冲，直到光标触顶或用户主动滚动。
             m_inputScrollDiag.heldY = m_inputPreScrollY;
             event.heldY = m_inputPreScrollY;
+        } else if (m_window) {
+            // 本次编辑不需要把自然边界之外的视口保持下来；恢复进入本轮
+            // 跟踪前的状态，避免临时缓冲泄漏到后续普通滚动。
+            m_window->setProperty("inputScrollHoldBottom", m_inputScrollHoldWasActive);
         }
+    } else if (m_window) {
+        m_window->setProperty("inputScrollHoldBottom", m_inputScrollHoldWasActive);
     }
+    m_inputAutoScrollTrackingActive = false;
+    m_inputScrollHoldWasActive = false;
     m_inputPreTextLength = -1;
     recordInputScrollEvent(event);
 }
@@ -2775,7 +2806,8 @@ QQuickItem *EditorCommandRegistry::editorViewport() const
     return nullptr;
 }
 
-void EditorCommandRegistry::animateViewportScrollTo(QQuickItem *viewport, qreal targetY)
+void EditorCommandRegistry::animateViewportScrollTo(QQuickItem *viewport, qreal targetY,
+                                                     bool releaseInputHold)
 {
     // 优先走 QML 侧轻量动画（动画开关关闭时直接落位）；
     // 若 QML 函数不可用（异常场景）则回退为瞬时滚动，保持原有行为。
@@ -2784,8 +2816,13 @@ void EditorCommandRegistry::animateViewportScrollTo(QQuickItem *viewport, qreal 
         return;
     }
     m_window->setProperty("requestedScrollY", targetY);
+    m_window->setProperty("releaseInputScrollHoldAfterAnimation", releaseInputHold);
     if (!QMetaObject::invokeMethod(m_window, "animateScrollTo")) {
         viewport->setProperty("contentY", targetY);
+        if (releaseInputHold) {
+            m_window->setProperty("inputScrollHoldBottom", false);
+            m_window->setProperty("releaseInputScrollHoldAfterAnimation", false);
+        }
     }
 }
 

@@ -173,7 +173,8 @@ private:
     void beginInputAutoScrollTracking(const QString &kind);
     void queueInputAutoScrollCheck();
     void checkInputAutoScroll();
-    void animateViewportScrollTo(QQuickItem *viewport, qreal targetY);
+    void animateViewportScrollTo(QQuickItem *viewport, qreal targetY,
+                                 bool releaseInputHold = false);
     bool navigateToHeading(bool backwards);
     void scheduleHeadingScroll(int position);
     void scrollViewportToHeading(int position);
@@ -258,6 +259,8 @@ private:
     bool m_doubleClickReplaying = false;
     std::optional<SelectionUndoSnapshot> m_selectionUndoSnapshot;
     bool m_inputAutoScrollCheckQueued = false;
+    bool m_inputAutoScrollTrackingActive = false;
+    bool m_inputScrollHoldWasActive = false;
     QTimer m_headingScrollTimer;
     int m_pendingHeadingScrollPosition = -1;
     int m_inputPreTextLength = -1;
