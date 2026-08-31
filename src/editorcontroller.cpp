@@ -3577,6 +3577,12 @@ QJsonObject EditorController::statusObject() const
                                QStringLiteral("editorViewport"));
             insertItemGeometry(QStringLiteral("fileDropArea"),
                                QStringLiteral("fileDropArea"));
+            if (QQuickItem *statusPanel =
+                    m_window->findChild<QQuickItem *>(QStringLiteral("statusPanel"))) {
+                status.insert(QStringLiteral("statusPanelRootLevel"),
+                              statusPanel->parentItem() == m_window->contentItem());
+                status.insert(QStringLiteral("statusPanelZ"), statusPanel->z());
+            }
         }
         status.insert(QStringLiteral("editorVisibleWidth"),
                       m_window->property("editorVisibleWidth").toDouble());

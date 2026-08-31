@@ -473,6 +473,11 @@ int main(int argc, char *argv[])
         hintsMatch = initialHints.at(index).toString() == expectedHints.at(index);
     }
     addCheck(checks, details, QStringLiteral("statusPanelHintsDefault"), hintsMatch, initial);
+    addCheck(checks, details, QStringLiteral("statusPanelRootOverlayLayer"),
+             initial.value(QStringLiteral("statusPanelRootLevel")).toBool()
+                 && initial.value(QStringLiteral("statusPanelZ")).toDouble() > 20.0
+                 && initial.value(QStringLiteral("statusPanelZ")).toDouble() < 35.0,
+             initial);
     addCheck(checks, details, QStringLiteral("windowInteractionLayout"),
              initial.value(QStringLiteral("cornerResizeEnabled")).toBool()
                  && initial.value(QStringLiteral("edgeDragEnabled")).toBool()

@@ -808,112 +808,113 @@ Window {
             }
         }
 
-        Rectangle {
-            id: statusPanel
-            z: 40
-            anchors.top: statusText.bottom
-            anchors.topMargin: uiConfig.panels.statusPanel.topGap
-            anchors.right: statusText.right
-            width: Math.min(controller.statusPanelMaxWidth,
-                            header.width - statusText.x - uiConfig.panels.statusPanel.topGap)
-            height: Math.min(contentHeight,
-                             root.height - y - uiConfig.panels.statusPanel.bottomGap)
-            radius: uiConfig.layout.radiusMedium
-            color: root.themePanelColor
-            border.color: root.themeBorderColor
-            border.width: uiConfig.layout.borderWidth
-            visible: root.statusPanelOpen
-            opacity: root.statusPanelOpen ? 1 : 0
-            clip: true
-
-            property real contentHeight: (controller.statusHealthy
-                                          ? normalColumn.implicitHeight
-                                          : errorText.implicitHeight)
-                                         + uiConfig.panels.statusPanel.padding
-
-            Behavior on opacity {
-                NumberAnimation { duration: root.transitionDuration; easing.type: Easing.OutCubic }
-            }
-
-            Behavior on color {
-                ColorAnimation { duration: root.transitionDuration }
-            }
-
-            HoverHandler {
-                onHoveredChanged: {
-                    root.statusPanelHovered = hovered
-                    if (hovered) {
-                        statusPanelHideTimer.stop()
-                    } else {
-                        statusPanelHideTimer.restart()
-                    }
-                }
-            }
-
-            Column {
-                id: normalColumn
-                anchors.fill: parent
-                anchors.margins: uiConfig.panels.statusPanel.margins
-                spacing: uiConfig.panels.statusPanel.spacing
-                visible: controller.statusHealthy
-
-                Repeater {
-                    model: controller.statusPanelHints
-
-                    delegate: Text {
-                        required property string modelData
-                        width: normalColumn.width
-                        text: modelData
-                        color: root.themeTextColor
-                        font.family: root.uiFontFamily
-                        font.pointSize: controller.statusPanelFontSize
-                        wrapMode: Text.Wrap
-                    }
-                }
-
-                Text {
-                    width: normalColumn.width
-                    text: controller.statusPanelSummary
-                    color: root.themeMutedTextColor
-                    font.family: root.uiFontFamily
-                    font.pointSize: controller.statusPanelFontSize
-                    wrapMode: Text.Wrap
-                }
-            }
-
-            Item {
-                id: errorColumn
-                anchors.fill: parent
-                visible: !controller.statusHealthy
-
-                Text {
-                    id: errorText
-                    anchors.fill: parent
-                    anchors.margins: uiConfig.panels.statusPanel.margins
-                    text: root.statusCopyFeedback ? "已复制" : controller.statusMessage
-                    color: root.statusCopyFeedback ? root.themeAccentColor : root.themeDangerColor
-                    font.family: root.uiFontFamily
-                    font.pointSize: controller.statusPanelFontSize
-                    wrapMode: Text.Wrap
-                    verticalAlignment: Text.AlignVCenter
-                }
-
-                MouseArea {
-                    anchors.fill: parent
-                    cursorShape: Qt.PointingHandCursor
-                    onClicked: {
-                        if (controller.copyToClipboard(controller.statusMessage)) {
-                            root.statusCopyFeedback = true
-                        }
-                    }
-                }
-            }
-        }
-
         MouseArea {
             anchors.fill: parent
             acceptedButtons: Qt.LeftButton
             onPressed: root.startSystemMove()
+        }
+    }
+
+    Rectangle {
+        id: statusPanel
+        objectName: "statusPanel"
+        z: 30
+        x: header.x + statusText.x + statusText.width - width
+        y: header.y + statusText.y + statusText.height
+           + uiConfig.panels.statusPanel.topGap
+        width: Math.min(controller.statusPanelMaxWidth,
+                        header.width - statusText.x - uiConfig.panels.statusPanel.topGap)
+        height: Math.min(contentHeight,
+                         root.height - y - uiConfig.panels.statusPanel.bottomGap)
+        radius: uiConfig.layout.radiusMedium
+        color: root.themePanelColor
+        border.color: root.themeBorderColor
+        border.width: uiConfig.layout.borderWidth
+        visible: root.statusPanelOpen
+        opacity: root.statusPanelOpen ? 1 : 0
+        clip: true
+
+        property real contentHeight: (controller.statusHealthy
+                                      ? normalColumn.implicitHeight
+                                      : errorText.implicitHeight)
+                                     + uiConfig.panels.statusPanel.padding
+
+        Behavior on opacity {
+            NumberAnimation { duration: root.transitionDuration; easing.type: Easing.OutCubic }
+        }
+
+        Behavior on color {
+            ColorAnimation { duration: root.transitionDuration }
+        }
+
+        HoverHandler {
+            onHoveredChanged: {
+                root.statusPanelHovered = hovered
+                if (hovered) {
+                    statusPanelHideTimer.stop()
+                } else {
+                    statusPanelHideTimer.restart()
+                }
+            }
+        }
+
+        Column {
+            id: normalColumn
+            anchors.fill: parent
+            anchors.margins: uiConfig.panels.statusPanel.margins
+            spacing: uiConfig.panels.statusPanel.spacing
+            visible: controller.statusHealthy
+
+            Repeater {
+                model: controller.statusPanelHints
+
+                delegate: Text {
+                    required property string modelData
+                    width: normalColumn.width
+                    text: modelData
+                    color: root.themeTextColor
+                    font.family: root.uiFontFamily
+                    font.pointSize: controller.statusPanelFontSize
+                    wrapMode: Text.Wrap
+                }
+            }
+
+            Text {
+                width: normalColumn.width
+                text: controller.statusPanelSummary
+                color: root.themeMutedTextColor
+                font.family: root.uiFontFamily
+                font.pointSize: controller.statusPanelFontSize
+                wrapMode: Text.Wrap
+            }
+        }
+
+        Item {
+            id: errorColumn
+            anchors.fill: parent
+            visible: !controller.statusHealthy
+
+            Text {
+                id: errorText
+                anchors.fill: parent
+                anchors.margins: uiConfig.panels.statusPanel.margins
+                text: root.statusCopyFeedback ? "已复制" : controller.statusMessage
+                color: root.statusCopyFeedback ? root.themeAccentColor : root.themeDangerColor
+                font.family: root.uiFontFamily
+                font.pointSize: controller.statusPanelFontSize
+                wrapMode: Text.Wrap
+                verticalAlignment: Text.AlignVCenter
+            }
+
+            MouseArea {
+                anchors.fill: parent
+                cursorShape: Qt.PointingHandCursor
+                onClicked: {
+                    if (controller.copyToClipboard(controller.statusMessage)) {
+                        root.statusCopyFeedback = true
+                    }
+                }
+            }
         }
     }
 
