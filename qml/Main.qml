@@ -819,17 +819,25 @@ Window {
         id: statusPanel
         objectName: "statusPanel"
         z: 30
-        x: header.x + statusText.x + statusText.width - width
+        readonly property real deviceScale: Screen.devicePixelRatio > 0
+                                            ? Screen.devicePixelRatio : 1
+        readonly property real requestedRight: header.x + statusText.x + statusText.width
+        readonly property real alignedRight:
+            Math.floor(requestedRight * deviceScale) / deviceScale
+        readonly property real requestedWidth:
+            Math.min(controller.statusPanelMaxWidth,
+                     header.width - statusText.x - uiConfig.panels.statusPanel.topGap)
+        x: alignedRight - width
         y: header.y + statusText.y + statusText.height
            + uiConfig.panels.statusPanel.topGap
-        width: Math.min(controller.statusPanelMaxWidth,
-                        header.width - statusText.x - uiConfig.panels.statusPanel.topGap)
+        width: Math.floor(requestedWidth * deviceScale) / deviceScale
         height: Math.min(contentHeight,
                          root.height - y - uiConfig.panels.statusPanel.bottomGap)
         radius: uiConfig.layout.radiusMedium
         color: root.themePanelColor
         border.color: root.themeBorderColor
         border.width: uiConfig.layout.borderWidth
+        border.pixelAligned: false
         visible: root.statusPanelOpen
         opacity: root.statusPanelOpen ? 1 : 0
         clip: true

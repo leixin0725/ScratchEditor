@@ -265,6 +265,8 @@ private:
     void captureEditorRenderSample(QLocalSocket *socket, QJsonObject response,
                                    const QRectF &editorLocalRect, qint64 startedNs,
                                    const QString &requestId);
+    void captureStatusPanelBorderSample(QLocalSocket *socket, QJsonObject response,
+                                        qint64 startedNs, const QString &requestId);
     bool commitAndHide(bool deliverAfterHide = false, bool persistState = true);
     bool commitExternalFileAndExit();
     void setExternalFileState(bool healthy, const QString &message);

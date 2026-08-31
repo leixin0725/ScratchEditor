@@ -424,6 +424,16 @@ int main(int argc, char *argv[])
              visibleFileDrop.value(QStringLiteral("visible")).toBool()
                  && visibleFileDrop.value(QStringLiteral("fileDropEnabled")).toBool(),
              visibleFileDrop);
+    const QJsonObject statusPanelBorder = request(
+        QStringLiteral("testStatusPanelBorderSample"), {}, 5000);
+    const int leftBorderStrength = statusPanelBorder.value(
+        QStringLiteral("leftBorderStrength")).toInt();
+    const int rightBorderStrength = statusPanelBorder.value(
+        QStringLiteral("rightBorderStrength")).toInt();
+    addCheck(checks, details, QStringLiteral("statusPanelBorderStrengthSymmetric"),
+             leftBorderStrength > 0
+                 && rightBorderStrength * 5 >= leftBorderStrength * 4,
+             statusPanelBorder);
     request(QStringLiteral("testSetText"),
             {{QStringLiteral("text"), navigationHighlightText}});
     request(QStringLiteral("testSetSelection"),

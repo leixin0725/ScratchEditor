@@ -1982,6 +1982,12 @@ void EditorController::buildCommandHandlers()
             captureEditorRenderSample(r.socket, response, sampleRect,
                                       r.startedNs, r.requestId);
         }}},
+        {QStringLiteral("testStatusPanelBorderSample"), {Gate::Test,
+          [this](const DispatchRequest &r) {
+            QJsonObject response;
+            response.insert(QStringLiteral("command"), r.command);
+            captureStatusPanelBorderSample(r.socket, response, r.startedNs, r.requestId);
+        }}},
         {QStringLiteral("testHighlightSummary"), {Gate::Test, [this](const DispatchRequest &r) {
             int blocks = 0;
             int formattedRanges = 0;
@@ -2318,6 +2324,77 @@ void EditorController::captureEditorRenderSample(QLocalSocket *socket, QJsonObje
                     });
             }, Qt::SingleShotConnection);
     m_window->update();
+}
+
+void EditorController::captureStatusPanelBorderSample(QLocalSocket *socket,
+                                                      QJsonObject response,
+                                                      qint64 startedNs,
+                                                      const QString &requestId)
+{
+    QQuickItem *panel = m_window
+        ? m_window->findChild<QQuickItem *>(QStringLiteral("statusPanel")) : nullptr;
+    if (!m_window || !panel) {
+        sendError(socket, response.value(QStringLiteral("command")).toString(),
+                  QStringLiteral("status panel unavailable"), startedNs, requestId);
+        return;
+    }
+
+    m_window->setProperty("statusPanelOpen", true);
+    const QRectF sceneRect(panel->mapToScene(QPointF(0, 0)),
+                           panel->mapToScene(QPointF(panel->width(), panel->height())));
+    QPointer<QLocalSocket> guardedSocket(socket);
+    const int settleMs = m_window->property("transitionDuration").toInt() + 30;
+    QTimer::singleShot(settleMs, this,
+        [this, guardedSocket, response, sceneRect, startedNs, requestId]() mutable {
+            if (!m_window) {
+                sendError(guardedSocket,
+                          response.value(QStringLiteral("command")).toString(),
+                          QStringLiteral("window unavailable"),
+                          startedNs, requestId);
+                return;
+            }
+            const QImage image = m_window->grabWindow();
+            m_window->setProperty("statusPanelOpen", false);
+            if (image.isNull() || m_window->width() <= 0 || m_window->height() <= 0) {
+                sendError(guardedSocket,
+                          response.value(QStringLiteral("command")).toString(),
+                          QStringLiteral("window capture failed"),
+                          startedNs, requestId);
+                return;
+            }
+
+            const qreal scaleX = static_cast<qreal>(image.width()) / m_window->width();
+            const qreal scaleY = static_cast<qreal>(image.height()) / m_window->height();
+            const int sampleY = qBound(
+                0, qRound(sceneRect.center().y() * scaleY), image.height() - 1);
+            const int leftCenter = qRound(sceneRect.left() * scaleX);
+            const int rightCenter = qRound(sceneRect.right() * scaleX);
+            const QColor panelColor(m_window->property("themePanelColor").toString());
+            const int panelIntensity =
+                (panelColor.red() + panelColor.green() + panelColor.blue()) / 3;
+            const auto edgeStrength = [&](int center) {
+                int strength = 0;
+                QJsonArray pixels;
+                for (int x = center - 2; x <= center + 2; ++x) {
+                    const int boundedX = qBound(0, x, image.width() - 1);
+                    const QColor pixel = image.pixelColor(boundedX, sampleY);
+                    const int intensity =
+                        (pixel.red() + pixel.green() + pixel.blue()) / 3;
+                    strength += qMax(0, intensity - panelIntensity);
+                    pixels.append(pixel.name(QColor::HexRgb));
+                }
+                return qMakePair(strength, pixels);
+            };
+            const auto left = edgeStrength(leftCenter);
+            const auto right = edgeStrength(rightCenter);
+            response.insert(QStringLiteral("leftBorderStrength"), left.first);
+            response.insert(QStringLiteral("rightBorderStrength"), right.first);
+            response.insert(QStringLiteral("leftBorderPixels"), left.second);
+            response.insert(QStringLiteral("rightBorderPixels"), right.second);
+            response.insert(QStringLiteral("sampleY"), sampleY);
+            response.insert(QStringLiteral("devicePixelRatio"), scaleX);
+            sendResponse(guardedSocket, response, startedNs, requestId);
+        });
 }
 
 void EditorController::showEditor()
