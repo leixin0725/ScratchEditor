@@ -1736,6 +1736,97 @@ int main(int argc, char *argv[])
                  && pastePlainMidLine.value(QStringLiteral("cursorPosition")).toInt() == 3,
              pastePlainMidLine);
 
+    // 粘贴由独立 QTextCursor 写入；撤销必须显式恢复粘贴前的光标或选区，
+    // 不能采用该临时 cursor 创建时的文档开头位置。
+    setClipboard(QStringLiteral("++"));
+    setTextAndSelection(QStringLiteral("left-right"), 4, 4);
+    const QJsonObject plainPasteBeforeUndo = editorStatus();
+    const QJsonObject plainPasteApplied = keyPress({}, QStringLiteral("V"), false,
+                                                   QStringLiteral("ctrl"));
+    const QJsonObject plainPasteUndone = request(QStringLiteral("testUndo"));
+    const QJsonObject plainPasteRedone = request(QStringLiteral("testRedo"));
+    addCheck(checks, details, QStringLiteral("pasteUndoRestoresInsertionCursor"),
+             plainPasteApplied.value(QStringLiteral("text")).toString()
+                     == QStringLiteral("left++-right")
+                 && plainPasteUndone.value(QStringLiteral("text")).toString()
+                    == QStringLiteral("left-right")
+                 && plainPasteUndone.value(QStringLiteral("cursorPosition")).toInt() == 4
+                 && plainPasteUndone.value(QStringLiteral("selectionStart")).toInt() == 4
+                 && plainPasteUndone.value(QStringLiteral("selectionEnd")).toInt() == 4
+                 && plainPasteRedone.value(QStringLiteral("text")).toString()
+                    == QStringLiteral("left++-right")
+                 && plainPasteRedone.value(QStringLiteral("cursorPosition")).toInt() == 6,
+             QJsonObject{{QStringLiteral("before"), plainPasteBeforeUndo},
+                         {QStringLiteral("pasted"), plainPasteApplied},
+                         {QStringLiteral("undone"), plainPasteUndone},
+                         {QStringLiteral("redone"), plainPasteRedone}});
+
+    setClipboard(QStringLiteral("line\n"));
+    setTextAndSelection(QStringLiteral("alpha\nomega"), 2, 2);
+    const QJsonObject smartPasteApplied = keyPress({}, QStringLiteral("V"), false,
+                                                   QStringLiteral("ctrl"));
+    const QJsonObject smartPasteUndone = request(QStringLiteral("testUndo"));
+    addCheck(checks, details, QStringLiteral("smartLinePasteUndoRestoresOriginalCursor"),
+             smartPasteApplied.value(QStringLiteral("text")).toString()
+                     == QStringLiteral("alpha\nline\nomega")
+                 && smartPasteUndone.value(QStringLiteral("text")).toString()
+                    == QStringLiteral("alpha\nomega")
+                 && smartPasteUndone.value(QStringLiteral("cursorPosition")).toInt() == 2
+                 && smartPasteUndone.value(QStringLiteral("selectionStart")).toInt() == 2
+                 && smartPasteUndone.value(QStringLiteral("selectionEnd")).toInt() == 2,
+             QJsonObject{{QStringLiteral("pasted"), smartPasteApplied},
+                         {QStringLiteral("undone"), smartPasteUndone}});
+
+    const auto checkPasteSelectionUndo = [&](const QString &name, int activeEnd) {
+        setClipboard(QStringLiteral("x"));
+        setTextAndSelection(QStringLiteral("before TARGET after"), 7, 13, activeEnd);
+        const QJsonObject before = editorStatus();
+        const QJsonObject pasted = keyPress({}, QStringLiteral("V"), false,
+                                            QStringLiteral("ctrl"));
+        const QJsonObject undone = request(QStringLiteral("testUndo"));
+        addCheck(checks, details, name,
+                 pasted.value(QStringLiteral("text")).toString()
+                         == QStringLiteral("before x after")
+                     && undone.value(QStringLiteral("text")).toString()
+                        == QStringLiteral("before TARGET after")
+                     && undone.value(QStringLiteral("selectionStart")).toInt() == 7
+                     && undone.value(QStringLiteral("selectionEnd")).toInt() == 13
+                     && undone.value(QStringLiteral("cursorPosition")).toInt() == activeEnd,
+                 QJsonObject{{QStringLiteral("before"), before},
+                             {QStringLiteral("pasted"), pasted},
+                             {QStringLiteral("undone"), undone}});
+    };
+    checkPasteSelectionUndo(QStringLiteral("pasteUndoRestoresForwardSelection"), 13);
+    checkPasteSelectionUndo(QStringLiteral("pasteUndoRestoresReverseSelection"), 7);
+
+    setClipboard(QStringLiteral("中"));
+    setTextAndSelection(QStringLiteral("头😀尾"), 3, 3);
+    const QJsonObject utf16PasteApplied = keyPress({}, QStringLiteral("V"), false,
+                                                   QStringLiteral("ctrl"));
+    const QJsonObject utf16PasteUndone = request(QStringLiteral("testUndo"));
+    addCheck(checks, details, QStringLiteral("pasteUndoRestoresUtf16Cursor"),
+             utf16PasteApplied.value(QStringLiteral("text")).toString()
+                     == QStringLiteral("头😀中尾")
+                 && utf16PasteUndone.value(QStringLiteral("text")).toString()
+                    == QStringLiteral("头😀尾")
+                 && utf16PasteUndone.value(QStringLiteral("cursorPosition")).toInt() == 3,
+             QJsonObject{{QStringLiteral("pasted"), utf16PasteApplied},
+                         {QStringLiteral("undone"), utf16PasteUndone}});
+
+    setClipboard(QStringLiteral("2. second\n"));
+    setTextAndSelection(QStringLiteral("1. first\n2. third"), 3, 3);
+    const QJsonObject listPasteApplied = keyPress({}, QStringLiteral("V"), false,
+                                                  QStringLiteral("ctrl"));
+    const QJsonObject listPasteUndone = request(QStringLiteral("testUndo"));
+    addCheck(checks, details, QStringLiteral("pasteUndoRestoresCursorAfterListRepair"),
+             listPasteApplied.value(QStringLiteral("text")).toString()
+                     == QStringLiteral("1. first\n2. second\n3. third")
+                 && listPasteUndone.value(QStringLiteral("text")).toString()
+                    == QStringLiteral("1. first\n2. third")
+                 && listPasteUndone.value(QStringLiteral("cursorPosition")).toInt() == 3,
+             QJsonObject{{QStringLiteral("pasted"), listPasteApplied},
+                         {QStringLiteral("undone"), listPasteUndone}});
+
     // --- 智能粘贴边界：空文档 / 末尾空行不得产生前导空行 ---
     setClipboard(QStringLiteral("a\nb\n"));
     setTextAndSelection(QString(), 0, 0);
@@ -5436,8 +5527,8 @@ int main(int argc, char *argv[])
     request(QStringLiteral("testUndo"));
     QThread::msleep(80);
     const QJsonObject pasteUndoStatus = editorStatus();
-    // 智能整行粘贴为一次撤销；Qt 撤销后光标落在何处（插入点或文档开头）
-    // 不预设，按实际光标位置计算顶边锚定期望（文档开头时自然夹取到 0）。
+    // 智能整行粘贴为一次撤销；撤销后必须回到粘贴前的 UTF-16 光标，
+    // 再按该位置应用删除方向的顶边锚定规则。
     const double pasteUndoExpectedY = qMax(
         0.0, pasteUndoStatus.value(QStringLiteral("editorContentOffsetY")).toDouble()
                  + pasteUndoStatus.value(QStringLiteral("cursorRectY")).toDouble()
@@ -5445,6 +5536,12 @@ int main(int argc, char *argv[])
                      * 2.0 / 3.0);
     addCheck(checks, details, QStringLiteral("undoJumpsAboveTopAnchorsLikeDelete"),
              pasteUndoStatus.value(QStringLiteral("textLength")).toInt() == scrollEndCursor
+                 && pasteUndoStatus.value(QStringLiteral("cursorPosition")).toInt()
+                    == scrollTopCursor
+                 && pasteUndoStatus.value(QStringLiteral("selectionStart")).toInt()
+                    == scrollTopCursor
+                 && pasteUndoStatus.value(QStringLiteral("selectionEnd")).toInt()
+                    == scrollTopCursor
                  && std::abs(pasteUndoStatus.value(QStringLiteral("scrollContentY")).toDouble()
                              - pasteUndoExpectedY) < 3.0
                  && editorText() == scrollText,

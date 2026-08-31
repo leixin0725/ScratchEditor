@@ -3467,6 +3467,7 @@ bool EditorCommandRegistry::pasteClipboard()
     const QString text = m_document->toPlainText();
     const int selectionStart = m_editor->property("selectionStart").toInt();
     const int selectionEnd = m_editor->property("selectionEnd").toInt();
+    const int cursorPosition = m_editor->property("cursorPosition").toInt();
     const bool smartLinePaste = selectionStart == selectionEnd
         && clipboardText.endsWith(QLatin1Char('\n'));
 
@@ -3488,11 +3489,13 @@ bool EditorCommandRegistry::pasteClipboard()
     }
 
     QTextCursor editCursor(m_document);
-    editCursor.beginEditBlock();
     editCursor.setPosition(insertionPoint);
     if (selectionStart != selectionEnd) {
         editCursor.setPosition(selectionEnd, QTextCursor::KeepAnchor);
     }
+    // 先把临时 cursor 放到真实编辑范围，再开启撤销块；否则 Qt 可能把
+    // cursor 构造时的文档开头位置记录为撤销后的光标位置。
+    editCursor.beginEditBlock();
     editCursor.insertText(insertion);
 
     int cursorAfter = insertionPoint + insertion.size();
@@ -3512,6 +3515,8 @@ bool EditorCommandRegistry::pasteClipboard()
         repairOrderedLists(text, m_document->toPlainText(), !manualNumberEdit);
     }
     editCursor.endEditBlock();
+    m_selectionUndoSnapshot = SelectionUndoSnapshot{
+        text, m_documentTextSnapshot, selectionStart, selectionEnd, cursorPosition};
     focusEditor();
     return true;
 }
