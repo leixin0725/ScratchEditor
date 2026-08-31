@@ -287,7 +287,7 @@ int main(int argc, char *argv[])
                         initial.value(QStringLiteral("uiConfigFile")).toString())
                  && initial.value(QStringLiteral("commandPaletteMaximumWidth")).toInt() == 620
                  && initial.value(QStringLiteral("historyHoverOpenDelayMs")).toInt() == 100
-                 && initial.value(QStringLiteral("historyHoverCloseDelayMs")).toInt() == 250
+                 && initial.value(QStringLiteral("historyHoverCloseDelayMs")).toInt() == 500
                  && qAbs(initial.value(
                         QStringLiteral("headingNavigationHighlightOpacity")).toDouble() - 0.2)
                     <= 0.001
@@ -1170,7 +1170,7 @@ int main(int argc, char *argv[])
                  && historyInitial.value(QStringLiteral("historyPanelClipped")).toBool()
                  && !historyInitial.value(QStringLiteral("historyRevealBlocksPointer")).toBool()
                  && historyInitial.value(QStringLiteral("historyHoverOpenDelayMs")).toInt() == 100
-                 && historyInitial.value(QStringLiteral("historyHoverCloseDelayMs")).toInt() == 250,
+                 && historyInitial.value(QStringLiteral("historyHoverCloseDelayMs")).toInt() == 500,
              historyInitial);
     addCheck(checks, details, QStringLiteral("historyPanelCornerShapeClosed"),
              hasHistoryPanelCornerShape(historyInitial),
@@ -1662,26 +1662,32 @@ int main(int argc, char *argv[])
     QThread::msleep(70);
     const bool hoverAfterThreshold = request(QStringLiteral("status"))
                                          .value(QStringLiteral("historyPanelOpen")).toBool();
+    addCheck(checks, details, QStringLiteral("historyHoverOpenUsesNominalDelay"),
+             !hoverBeforeThreshold && hoverAfterThreshold,
+             QJsonObject{{QStringLiteral("before100Ms"), hoverBeforeThreshold},
+                         {QStringLiteral("after100Ms"), hoverAfterThreshold}});
     historyAction(QStringLiteral("historyHoverTriggerLeave"));
-    QThread::msleep(150);
+    QThread::msleep(300);
     const bool closeBeforeThreshold = request(QStringLiteral("status"))
                                           .value(QStringLiteral("historyPanelOpen")).toBool();
-    QThread::msleep(140);
+    QThread::msleep(280);
     const bool closeAfterThreshold = request(QStringLiteral("status"))
                                          .value(QStringLiteral("historyPanelOpen")).toBool();
-    addCheck(checks, details, QStringLiteral("historyHoverUsesNominalDelays"),
-             !hoverBeforeThreshold && hoverAfterThreshold
-                 && closeBeforeThreshold && !closeAfterThreshold);
+    addCheck(checks, details, QStringLiteral("historyHoverCloseUsesNominalDelay"),
+             closeBeforeThreshold && !closeAfterThreshold,
+             QJsonObject{{QStringLiteral("delayMs"), 500},
+                         {QStringLiteral("openAfter300Ms"), closeBeforeThreshold},
+                         {QStringLiteral("openAfter580Ms"), closeAfterThreshold}});
 
     historyAction(QStringLiteral("historyHoverTriggerEnter"));
     QThread::msleep(130);
     historyAction(QStringLiteral("historyHoverTriggerLeave"));
     historyAction(QStringLiteral("historyPanelEnter"));
-    QThread::msleep(290);
+    QThread::msleep(580);
     const bool panelTransferStaysOpen = request(QStringLiteral("status"))
                                             .value(QStringLiteral("historyPanelOpen")).toBool();
     historyAction(QStringLiteral("historyPanelLeave"));
-    QThread::msleep(280);
+    QThread::msleep(580);
     const bool panelTransferEventuallyCloses = !request(QStringLiteral("status"))
                                                    .value(QStringLiteral("historyPanelOpen")).toBool();
     addCheck(checks, details, QStringLiteral("historyHoverTransferKeepsPanelOpen"),

@@ -241,7 +241,7 @@ UiConfig UiConfig::defaults()
     put({"animation", "headingNavigationHighlightHoldDuration"}, 400);
     put({"animation", "headingNavigationHighlightFadeDuration"}, 300);
     put({"animation", "historyHoverOpenDelay"}, 100);
-    put({"animation", "historyHoverCloseDelay"}, 250);
+    put({"animation", "historyHoverCloseDelay"}, 500);
     put({"animation", "scrollRefreshInterval"}, 60);
     put({"animation", "benchmarkDuration"}, 1000);
     put({"animation", "probeWidth"}, 40);
