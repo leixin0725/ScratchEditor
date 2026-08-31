@@ -112,6 +112,7 @@ private:
     const Definition *definition(const QString &commandId) const;
     bool wrapSelection(const QString &opening, const QString &closing);
     bool transformSelectedLines(const QString &commandId);
+    bool convertToOrderedList();
     bool deleteSelectedLines();
     bool clearDocument();
     bool copyLine();

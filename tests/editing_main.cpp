@@ -1514,6 +1514,176 @@ int main(int argc, char *argv[])
     addCheck(checks, details, QStringLiteral("toggleList"),
              listOn && editorText() == QStringLiteral("one\ntwo"), listOff);
 
+    // --- 把选区所在行的普通无序列表转换为有序列表 ---
+    const QJsonObject orderedConversionShortcut = request(
+        QStringLiteral("testShortcut"),
+        {{QStringLiteral("commandId"), QStringLiteral("convertToOrderedList")}});
+    const QString unorderedOnly = QStringLiteral("- alpha\n+ beta\n* gamma");
+    setTextAndSelection(unorderedOnly, 0, unorderedOnly.size());
+    const QJsonObject convertedUnorderedOnly = execute(
+        QStringLiteral("convertToOrderedList"));
+    const QString convertedUnorderedOnlyText =
+        QStringLiteral("1. alpha\n2. beta\n3. gamma");
+    setTextAndSelection(QStringLiteral("- one\n- two"), 7, 7);
+    const QJsonObject convertedCurrentLine = execute(
+        QStringLiteral("convertToOrderedList"));
+    setTextAndSelection(QStringLiteral("- one\n- two"), 0, 6);
+    const QJsonObject convertedExclusiveEnd = execute(
+        QStringLiteral("convertToOrderedList"));
+    addCheck(checks, details, QStringLiteral("convertUnorderedListBasics"),
+             orderedConversionShortcut.value(QStringLiteral("shortcut")).toString().isEmpty()
+                 && convertedUnorderedOnly.value(QStringLiteral("executed")).toBool()
+                 && convertedUnorderedOnly.value(QStringLiteral("text")).toString()
+                    == convertedUnorderedOnlyText
+                 && convertedUnorderedOnly.value(QStringLiteral("selectionStart")).toInt() == 0
+                 && convertedUnorderedOnly.value(QStringLiteral("selectionEnd")).toInt()
+                    == convertedUnorderedOnlyText.size()
+                 && convertedCurrentLine.value(QStringLiteral("text")).toString()
+                    == QStringLiteral("- one\n1. two")
+                 && convertedCurrentLine.value(QStringLiteral("selectionStart")).toInt() == 6
+                 && convertedCurrentLine.value(QStringLiteral("selectionEnd")).toInt() == 12
+                 && convertedExclusiveEnd.value(QStringLiteral("text")).toString()
+                    == QStringLiteral("1. one\n- two"),
+             QJsonObject{{QStringLiteral("all"), convertedUnorderedOnly},
+                         {QStringLiteral("current"), convertedCurrentLine},
+                         {QStringLiteral("exclusiveEnd"), convertedExclusiveEnd}});
+
+    const QString mixedOrdered = QStringLiteral(
+        "before\n4) one\n5) two\n- three\n8. four\n9. five\nafter");
+    const int mixedSelectionStart = mixedOrdered.indexOf(QStringLiteral("5) two"));
+    const int mixedSelectionEnd = mixedOrdered.indexOf(QStringLiteral("9. five"));
+    setTextAndSelection(mixedOrdered, mixedSelectionStart, mixedSelectionEnd,
+                        mixedSelectionStart);
+    const QJsonObject convertedMixed = execute(QStringLiteral("convertToOrderedList"));
+    const QString expectedMixed = QStringLiteral(
+        "before\n4) one\n5) two\n6) three\n7) four\n8) five\nafter");
+    const int mixedExpandedStart = expectedMixed.indexOf(QStringLiteral("4) one"));
+    const int mixedExpandedEnd = expectedMixed.indexOf(QStringLiteral("\nafter"));
+    const QJsonObject convertedMixedUndo = request(QStringLiteral("testUndo"));
+    const QJsonObject convertedMixedRedo = request(QStringLiteral("testRedo"));
+    addCheck(checks, details, QStringLiteral("convertMixedListExpandsAndUsesTopAnchor"),
+             convertedMixed.value(QStringLiteral("text")).toString() == expectedMixed
+                 && convertedMixed.value(QStringLiteral("selectionStart")).toInt()
+                    == mixedExpandedStart
+                 && convertedMixed.value(QStringLiteral("selectionEnd")).toInt()
+                    == mixedExpandedEnd
+                 && convertedMixedUndo.value(QStringLiteral("text")).toString() == mixedOrdered
+                 && convertedMixedUndo.value(QStringLiteral("selectionStart")).toInt()
+                    == mixedSelectionStart
+                 && convertedMixedUndo.value(QStringLiteral("selectionEnd")).toInt()
+                    == mixedSelectionEnd
+                 && convertedMixedUndo.value(QStringLiteral("cursorPosition")).toInt()
+                    == mixedSelectionStart
+                 && convertedMixedRedo.value(QStringLiteral("text")).toString() == expectedMixed,
+             QJsonObject{{QStringLiteral("converted"), convertedMixed},
+                         {QStringLiteral("undo"), convertedMixedUndo},
+                         {QStringLiteral("redo"), convertedMixedRedo}});
+
+    const QString structuredLists = QStringLiteral(
+        "1. parent\n    - child\n2. next\n- bridge\n4. tail\n"
+        "- [ ] task\n```\n- code\n```\nplain\n> 3. quoted\n> - joined\n- solo");
+    const int structuredSelectionEnd = structuredLists.size();
+    setTextAndSelection(structuredLists, 0, structuredSelectionEnd);
+    const QJsonObject convertedStructured = execute(
+        QStringLiteral("convertToOrderedList"));
+    const QString expectedStructured = QStringLiteral(
+        "1. parent\n    1. child\n2. next\n3. bridge\n4. tail\n"
+        "- [ ] task\n```\n- code\n```\nplain\n> 3. quoted\n> 4. joined\n1. solo");
+    addCheck(checks, details, QStringLiteral("convertListRespectsStructureAndProtectedBoundaries"),
+             convertedStructured.value(QStringLiteral("text")).toString()
+                    == expectedStructured
+                 && convertedStructured.value(QStringLiteral("selectionStart")).toInt() == 0
+                 && convertedStructured.value(QStringLiteral("selectionEnd")).toInt()
+                    == expectedStructured.size(),
+             QJsonObject{{QStringLiteral("actual"), convertedStructured},
+                         {QStringLiteral("expected"), expectedStructured}});
+
+    const QString orderedOnly = QStringLiteral(
+        "lead\n7. one\n8. two\n9. three\ntail");
+    const int orderedOnlySelection = orderedOnly.indexOf(QStringLiteral("8. two"));
+    setTextAndSelection(orderedOnly, orderedOnlySelection, orderedOnlySelection + 2);
+    const QJsonObject expandedOrderedOnly = execute(
+        QStringLiteral("convertToOrderedList"));
+    const QJsonObject expandedOrderedOnlyUndo = request(QStringLiteral("testUndo"));
+    addCheck(checks, details, QStringLiteral("convertOrderedOnlyExpandsWithoutUndoRecord"),
+             expandedOrderedOnly.value(QStringLiteral("text")).toString() == orderedOnly
+                 && expandedOrderedOnly.value(QStringLiteral("selectionStart")).toInt()
+                    == orderedOnly.indexOf(QStringLiteral("7. one"))
+                 && expandedOrderedOnly.value(QStringLiteral("selectionEnd")).toInt()
+                    == orderedOnly.indexOf(QStringLiteral("\ntail"))
+                 && expandedOrderedOnlyUndo.value(QStringLiteral("text")).toString()
+                    == orderedOnly
+                 && expandedOrderedOnlyUndo.value(QStringLiteral("selectionStart")).toInt()
+                    == expandedOrderedOnly.value(QStringLiteral("selectionStart")).toInt()
+                 && expandedOrderedOnlyUndo.value(QStringLiteral("selectionEnd")).toInt()
+                    == expandedOrderedOnly.value(QStringLiteral("selectionEnd")).toInt(),
+             QJsonObject{{QStringLiteral("expanded"), expandedOrderedOnly},
+                         {QStringLiteral("undo"), expandedOrderedOnlyUndo}});
+
+    const QString disorderedOnly = QStringLiteral("7. one\n20. two\n9. three");
+    const int disorderedSelectionStart = disorderedOnly.indexOf(QStringLiteral("20. two"));
+    setTextAndSelection(disorderedOnly, disorderedSelectionStart,
+                        disorderedSelectionStart + 2);
+    const QJsonObject repairedOrderedOnly = execute(
+        QStringLiteral("convertToOrderedList"));
+    const QJsonObject repairedOrderedOnlyUndo = request(QStringLiteral("testUndo"));
+    addCheck(checks, details, QStringLiteral("convertOrderedOnlyRepairsInOneUndoBlock"),
+             repairedOrderedOnly.value(QStringLiteral("text")).toString()
+                    == QStringLiteral("7. one\n8. two\n9. three")
+                 && repairedOrderedOnly.value(QStringLiteral("selectionStart")).toInt() == 0
+                 && repairedOrderedOnly.value(QStringLiteral("selectionEnd")).toInt()
+                    == QStringLiteral("7. one\n8. two\n9. three").size()
+                 && repairedOrderedOnlyUndo.value(QStringLiteral("text")).toString()
+                    == disorderedOnly
+                 && repairedOrderedOnlyUndo.value(QStringLiteral("selectionStart")).toInt()
+                    == disorderedSelectionStart
+                 && repairedOrderedOnlyUndo.value(QStringLiteral("selectionEnd")).toInt()
+                    == disorderedSelectionStart + 2,
+             QJsonObject{{QStringLiteral("repaired"), repairedOrderedOnly},
+                         {QStringLiteral("undo"), repairedOrderedOnlyUndo}});
+
+    const QString unselectedBoundary = QStringLiteral(
+        "5. before\n- keep\n7. selected\n- 加😀");
+    const int boundarySelectionStart = unselectedBoundary.indexOf(
+        QStringLiteral("7. selected"));
+    setTextAndSelection(unselectedBoundary, boundarySelectionStart,
+                        unselectedBoundary.size());
+    const QJsonObject convertedAfterBoundary = execute(
+        QStringLiteral("convertToOrderedList"));
+    const QString expectedAfterBoundary = QStringLiteral(
+        "5. before\n- keep\n7. selected\n8. 加😀");
+    addCheck(checks, details, QStringLiteral("convertListStopsAtUnselectedBulletUtf16"),
+             convertedAfterBoundary.value(QStringLiteral("text")).toString()
+                    == expectedAfterBoundary
+                 && convertedAfterBoundary.value(QStringLiteral("selectionStart")).toInt()
+                    == expectedAfterBoundary.indexOf(QStringLiteral("7. selected"))
+                 && convertedAfterBoundary.value(QStringLiteral("selectionEnd")).toInt()
+                    == expectedAfterBoundary.size(),
+             QJsonObject{{QStringLiteral("actual"), convertedAfterBoundary},
+                         {QStringLiteral("expected"), expectedAfterBoundary}});
+
+    QStringList largeConversionLines;
+    largeConversionLines.reserve(1000);
+    largeConversionLines.append(QStringLiteral("10. item 0"));
+    for (int index = 1; index < 1000; ++index) {
+        largeConversionLines.append(QStringLiteral("- item %1").arg(index));
+    }
+    const QString largeConversionSource = largeConversionLines.join(QLatin1Char('\n'));
+    setTextAndSelection(largeConversionSource, 0, largeConversionSource.size());
+    QElapsedTimer conversionTimer;
+    conversionTimer.start();
+    const QJsonObject convertedLargeList = execute(
+        QStringLiteral("convertToOrderedList"));
+    const qint64 conversionElapsedMs = conversionTimer.elapsed();
+    const QString convertedLargeText = convertedLargeList.value(
+        QStringLiteral("text")).toString();
+    addCheck(checks, details, QStringLiteral("convertListScalesLinearly"),
+             conversionElapsedMs < 2000
+                 && convertedLargeText.startsWith(QStringLiteral("10. item 0\n11. item 1"))
+                 && convertedLargeText.endsWith(QStringLiteral("1009. item 999")),
+             QJsonObject{{QStringLiteral("elapsedMs"), conversionElapsedMs},
+                         {QStringLiteral("length"), convertedLargeText.size()}});
+
     setTextAndSelection(QStringLiteral("one\ntwo"), 0, 7);
     execute(QStringLiteral("toggleTask"));
     const bool taskOn = editorText() == QStringLiteral("- [ ] one\n- [ ] two");

@@ -871,6 +871,209 @@ QString repairedAffectedOrderedLists(QTextDocument *document, const QString &bef
     return repairedText;
 }
 
+struct OrderedListConversionLine {
+    int start = 0;
+    int end = 0;
+    int previousSameLevel = -1;
+    int nextSameLevel = -1;
+    MarkdownListItem item;
+    bool selected = false;
+    bool fenced = false;
+};
+
+struct OrderedListConversionPlan {
+    QVector<TextReplacement> replacements;
+    int selectionStart = -1;
+    int selectionEnd = -1;
+    bool handled = false;
+};
+
+OrderedListConversionPlan orderedListConversionPlan(const QString &text,
+                                                    int selectionStart,
+                                                    int selectionEnd)
+{
+    OrderedListConversionPlan plan;
+    if (selectionStart < 0 || selectionEnd < selectionStart
+        || selectionEnd > text.size()) {
+        return plan;
+    }
+
+    const bool hasSelection = selectionStart != selectionEnd;
+    const LineRange firstSelectedLine = lineRangeAt(text, selectionStart);
+    const LineRange lastSelectedLine = lineRangeAt(
+        text, hasSelection ? selectionEnd - 1 : selectionEnd);
+    const CjkText::DocumentAnalysis analysis = CjkText::analyzeDocument(text);
+
+    QVector<OrderedListConversionLine> lines;
+    int blockIndex = 0;
+    int lineStart = 0;
+    while (lineStart <= text.size()) {
+        const LineRange range = lineRangeAt(text, lineStart);
+        while (blockIndex < analysis.blockSpans.size()
+               && analysis.blockSpans.at(blockIndex).outerEnd < range.start) {
+            ++blockIndex;
+        }
+        bool fenced = false;
+        if (blockIndex < analysis.blockSpans.size()) {
+            const CjkText::ProtectedSpan &span = analysis.blockSpans.at(blockIndex);
+            fenced = span.kind == CjkText::ProtectedKind::FencedCode
+                && span.outerStart <= range.end && range.start <= span.outerEnd;
+        }
+        const bool selected = range.start >= firstSelectedLine.start
+            && range.start <= lastSelectedLine.start;
+        lines.append({range.start, range.end, -1, -1,
+                      parseMarkdownListItem(
+                          text.mid(range.start, range.end - range.start)),
+                      selected, fenced});
+        if (range.end >= text.size()) {
+            break;
+        }
+        lineStart = range.end + 1;
+    }
+
+    // 每个活动层级只保留最近的同层列表项。进入更深层时父级保持活动，
+    // 回到浅层时弹出子级，因此每行只会入栈、出栈各一次。
+    QVector<std::pair<int, int>> activeLevels;
+    int activeQuoteDepth = -1;
+    for (int index = 0; index < lines.size(); ++index) {
+        OrderedListConversionLine &line = lines[index];
+        if (line.fenced || !line.item.valid || line.item.task) {
+            activeLevels.clear();
+            activeQuoteDepth = -1;
+            continue;
+        }
+        if (activeQuoteDepth >= 0 && activeQuoteDepth != line.item.quoteDepth) {
+            activeLevels.clear();
+        }
+        activeQuoteDepth = line.item.quoteDepth;
+        while (!activeLevels.isEmpty()
+               && activeLevels.back().first > line.item.indentColumns) {
+            activeLevels.pop_back();
+        }
+        if (!activeLevels.isEmpty()
+            && activeLevels.back().first == line.item.indentColumns) {
+            line.previousSameLevel = activeLevels.back().second;
+            lines[line.previousSameLevel].nextSameLevel = index;
+            activeLevels.back().second = index;
+        } else {
+            activeLevels.append({line.item.indentColumns, index});
+        }
+    }
+
+    const auto includeGroup = [&plan, &lines](const QVector<int> &chain,
+                                              int first, int last,
+                                              qlonglong startNumber,
+                                              QChar delimiter) {
+        for (int position = first; position <= last; ++position) {
+            const OrderedListConversionLine &line = lines.at(chain.at(position));
+            plan.selectionStart = plan.selectionStart < 0
+                ? line.start : qMin(plan.selectionStart, line.start);
+            plan.selectionEnd = qMax(plan.selectionEnd, line.end);
+        }
+
+        qlonglong number = startNumber;
+        for (int position = first; position <= last; ++position) {
+            const OrderedListConversionLine &line = lines.at(chain.at(position));
+            const QString marker = QString::number(number) + delimiter;
+            if (line.item.marker != marker) {
+                plan.replacements.append({line.start + line.item.markerStart,
+                                          static_cast<int>(line.item.marker.size()),
+                                          marker});
+            }
+            if (number == std::numeric_limits<qlonglong>::max()) {
+                break;
+            }
+            ++number;
+        }
+    };
+
+    for (int head = 0; head < lines.size(); ++head) {
+        const OrderedListConversionLine &headLine = lines.at(head);
+        if (headLine.fenced || !headLine.item.valid || headLine.item.task
+            || headLine.previousSameLevel >= 0) {
+            continue;
+        }
+
+        QVector<int> chain;
+        for (int index = head; index >= 0; index = lines.at(index).nextSameLevel) {
+            chain.append(index);
+        }
+        int segmentStart = 0;
+        while (segmentStart < chain.size()) {
+            const OrderedListConversionLine &firstLine = lines.at(chain.at(segmentStart));
+            if (!firstLine.item.ordered && !firstLine.selected) {
+                ++segmentStart;
+                continue;
+            }
+            int segmentEnd = segmentStart;
+            while (segmentEnd + 1 < chain.size()) {
+                const OrderedListConversionLine &next = lines.at(chain.at(segmentEnd + 1));
+                if (!next.item.ordered && !next.selected) {
+                    break;
+                }
+                ++segmentEnd;
+            }
+
+            bool selectedOrdered = false;
+            bool selectedUnordered = false;
+            for (int position = segmentStart; position <= segmentEnd; ++position) {
+                const OrderedListConversionLine &line = lines.at(chain.at(position));
+                selectedOrdered = selectedOrdered
+                    || (line.selected && line.item.ordered);
+                selectedUnordered = selectedUnordered
+                    || (line.selected && !line.item.ordered);
+            }
+            plan.handled = plan.handled || selectedOrdered || selectedUnordered;
+
+            if (selectedOrdered && selectedUnordered) {
+                int anchor = segmentStart;
+                while (anchor <= segmentEnd
+                       && !lines.at(chain.at(anchor)).item.ordered) {
+                    ++anchor;
+                }
+                const MarkdownListItem &anchorItem = lines.at(chain.at(anchor)).item;
+                includeGroup(chain, segmentStart, segmentEnd,
+                             anchorItem.number, anchorItem.delimiter);
+            } else if (selectedUnordered) {
+                int position = segmentStart;
+                while (position <= segmentEnd) {
+                    if (lines.at(chain.at(position)).item.ordered) {
+                        ++position;
+                        continue;
+                    }
+                    const int first = position;
+                    while (position + 1 <= segmentEnd
+                           && !lines.at(chain.at(position + 1)).item.ordered) {
+                        ++position;
+                    }
+                    includeGroup(chain, first, position, 1, QLatin1Char('.'));
+                    ++position;
+                }
+            } else if (selectedOrdered) {
+                int first = segmentStart;
+                while (first <= segmentEnd) {
+                    const QChar delimiter = lines.at(chain.at(first)).item.delimiter;
+                    int last = first;
+                    bool groupSelected = lines.at(chain.at(first)).selected;
+                    while (last + 1 <= segmentEnd
+                           && lines.at(chain.at(last + 1)).item.delimiter == delimiter) {
+                        ++last;
+                        groupSelected = groupSelected || lines.at(chain.at(last)).selected;
+                    }
+                    if (groupSelected) {
+                        includeGroup(chain, first, last,
+                                     lines.at(chain.at(first)).item.number, delimiter);
+                    }
+                    first = last + 1;
+                }
+            }
+            segmentStart = segmentEnd + 1;
+        }
+    }
+
+    return plan;
+}
+
 bool orderedListStructureAffected(const QString &text, int start, int end)
 {
     const int rangeStart = qBound(0, qMin(start, end), text.size());
@@ -1351,6 +1554,8 @@ EditorCommandRegistry::EditorCommandRegistry(AppSettings *settings,
          QStringLiteral("编辑"), QString(), {}, false},
         {QStringLiteral("toggleList"), QStringLiteral("切换项目列表"),
          QStringLiteral("Markdown"), QString(), {}, false},
+        {QStringLiteral("convertToOrderedList"), QStringLiteral("转换为有序列表"),
+         QStringLiteral("Markdown"), QString(), {}, false},
         {QStringLiteral("toggleTask"), QStringLiteral("切换任务项"),
          QStringLiteral("Markdown"), QStringLiteral("Ctrl+Alt+T"), {}, false},
         {QStringLiteral("toggleCheckbox"), QStringLiteral("切换本行复选框"),
@@ -1403,6 +1608,8 @@ EditorCommandRegistry::EditorCommandRegistry(AppSettings *settings,
         {QStringLiteral("cutLine"), [this] { return cutLine(); }},
         {QStringLiteral("pasteClipboard"), [this] { return pasteClipboard(); }},
         {QStringLiteral("toggleCheckbox"), [this] { return toggleCurrentCheckbox(); }},
+        {QStringLiteral("convertToOrderedList"),
+         [this] { return convertToOrderedList(); }},
         {QStringLiteral("foldAllHeadings"), [this] { return m_headingFolds->foldAll(); }},
         {QStringLiteral("unfoldAllHeadings"), [this] { return m_headingFolds->unfoldAll(); }},
         {QStringLiteral("foldCurrentHeading"),
@@ -3369,6 +3576,58 @@ bool EditorCommandRegistry::transformSelectedLines(const QString &commandId)
         repairOrderedLists(documentText, m_document->toPlainText(), true);
     }
     cursor.endEditBlock();
+    focusEditor();
+    return true;
+}
+
+bool EditorCommandRegistry::convertToOrderedList()
+{
+    if (!m_editor || !m_document || m_editor->property("readOnly").toBool()) {
+        return false;
+    }
+
+    const QString beforeText = m_documentTextSnapshot;
+    const int originalStart = m_editor->property("selectionStart").toInt();
+    const int originalEnd = m_editor->property("selectionEnd").toInt();
+    const int originalCursor = m_editor->property("cursorPosition").toInt();
+    OrderedListConversionPlan plan = orderedListConversionPlan(
+        beforeText, originalStart, originalEnd);
+    if (!plan.handled || plan.selectionStart < 0 || plan.selectionEnd < plan.selectionStart) {
+        focusEditor();
+        return true;
+    }
+
+    std::sort(plan.replacements.begin(), plan.replacements.end(),
+              [](const TextReplacement &left, const TextReplacement &right) {
+                  return left.start < right.start;
+              });
+    int transformedSelectionEnd = plan.selectionEnd;
+    for (const TextReplacement &replacement : plan.replacements) {
+        if (replacement.start < plan.selectionEnd) {
+            transformedSelectionEnd += replacement.replacement.size() - replacement.length;
+        }
+    }
+
+    if (plan.replacements.isEmpty()) {
+        selectRange(plan.selectionStart, transformedSelectionEnd);
+        focusEditor();
+        return true;
+    }
+
+    QTextCursor editCursor(m_document);
+    editCursor.beginEditBlock();
+    for (auto replacement = plan.replacements.crbegin();
+         replacement != plan.replacements.crend(); ++replacement) {
+        QTextCursor cursor(m_document);
+        cursor.setPosition(replacement->start);
+        cursor.setPosition(replacement->start + replacement->length,
+                           QTextCursor::KeepAnchor);
+        cursor.insertText(replacement->replacement);
+    }
+    editCursor.endEditBlock();
+    selectRange(plan.selectionStart, transformedSelectionEnd);
+    m_selectionUndoSnapshot = SelectionUndoSnapshot{
+        beforeText, m_documentTextSnapshot, originalStart, originalEnd, originalCursor};
     focusEditor();
     return true;
 }
