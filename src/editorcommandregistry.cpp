@@ -207,7 +207,7 @@ std::optional<MidlineQuotePlan> buildMidlineQuotePlan(const QString &text,
                                                       const QChar &typed)
 {
     const int lineStart = lineRangeAt(text, position).start;
-    if (position <= lineStart) {
+    if (position < lineStart) {
         return std::nullopt;
     }
     const QuotePair *pair = quotePairFor(typed);
@@ -217,6 +217,11 @@ std::optional<MidlineQuotePlan> buildMidlineQuotePlan(const QString &text,
         pair = closingPair;
     }
     if (!pair) {
+        return std::nullopt;
+    }
+    // 行首正文前的单双引号与行中一致，只插入开符号；反引号仍交给普通
+    // 补全路径，保留在正文前连续输入三个反引号生成围栏的既有行为。
+    if (position == lineStart && typed == u'`') {
         return std::nullopt;
     }
 
@@ -305,7 +310,8 @@ std::optional<MidlineQuotePlan> buildMidlineQuotePlan(const QString &text,
         if (!hasNonBlankCharacterAfter(text, position)) {
             return std::nullopt;
         }
-        const bool leftTouches = isCjkOrAsciiAlnumOrUnderscore(text.at(position - 1));
+        const bool leftTouches = position > lineStart
+            && isCjkOrAsciiAlnumOrUnderscore(text.at(position - 1));
         const bool rightTouches = position < text.size()
             && text.at(position) != QLatin1Char('\n')
             && isCjkOrAsciiAlnumOrUnderscore(text.at(position));
@@ -793,7 +799,8 @@ QVector<OrderedListSequence> orderedSequences(
 }
 
 QString repairedAffectedOrderedLists(QTextDocument *document, const QString &beforeText,
-                                     const QString &afterText, bool preservePreviousStart)
+                                     const QString &afterText, bool preservePreviousStart,
+                                     bool resetNewSequenceStart)
 {
     if (!document) {
         return afterText;
@@ -841,6 +848,9 @@ QString repairedAffectedOrderedLists(QTextDocument *document, const QString &bef
         if (candidateIndex < candidates.size()) {
             expectedNumber = candidates.at(candidateIndex);
             usedStarts[sequence.signature] = candidateIndex + 1;
+        } else if (resetNewSequenceStart) {
+            // Tab 新建的缩进层没有可继承的旧同层序列时，从 Markdown 常规起点 1 开始。
+            expectedNumber = 1;
         }
         for (const int lineIndex : sequence.lineIndexes) {
             const ParsedListLine &line = afterArea.lines.at(lineIndex);
@@ -2125,15 +2135,18 @@ bool EditorCommandRegistry::handleEditorEvent(QEvent *event)
             return false;
         }
         beginInputAutoScrollTracking(QStringLiteral("ime"));
+        const int start = m_editor->property("selectionStart").toInt();
+        const int end = m_editor->property("selectionEnd").toInt();
         const bool relevant = committedText == QStringLiteral("```")
             || committedText == QStringLiteral("`")
             || committedText == QStringLiteral("·")
+            || (committedText == QStringLiteral("。") && start == end
+                && start >= 2
+                && m_documentTextSnapshot.mid(start - 2, 2) == QStringLiteral("。。"))
             || committedText == QStringLiteral(">")
             || committedText == QStringLiteral("》")
             || pairForOpening(committedText)
             || isClosingDelimiter(committedText);
-        const int start = m_editor->property("selectionStart").toInt();
-        const int end = m_editor->property("selectionEnd").toInt();
         const QString beforeText = m_documentTextSnapshot;
         QString expectedText = beforeText;
         expectedText.replace(start, end - start, committedText);
@@ -3715,6 +3728,9 @@ bool EditorCommandRegistry::cutLine()
 
     // 非末行删除整行含换行，后续行补位；末行只删行文本。
     QTextCursor editCursor(m_document);
+    // QTextCursor(document) 默认位于文档开头；事务须锚定剪切前的真实光标，
+    // 否则撤销整行剪切会把可见光标错误恢复到位置 0。
+    editCursor.setPosition(cursor);
     editCursor.beginEditBlock();
     editCursor.setPosition(line.start);
     editCursor.setPosition(lastLine ? line.end : line.end + 1, QTextCursor::KeepAnchor);
@@ -4321,10 +4337,12 @@ EditorCommandRegistry::CompletionResult EditorCommandRegistry::finishMidlineQuot
 
 void EditorCommandRegistry::repairOrderedLists(const QString &beforeText,
                                                const QString &afterText,
-                                               bool preservePreviousStart)
+                                               bool preservePreviousStart,
+                                               bool resetNewSequenceStart)
 {
     m_documentTextSnapshot = repairedAffectedOrderedLists(
-        m_document, beforeText, afterText, preservePreviousStart);
+        m_document, beforeText, afterText, preservePreviousStart,
+        resetNewSequenceStart);
     m_documentTextSnapshotPrepared = true;
 }
 
@@ -4970,7 +4988,7 @@ bool EditorCommandRegistry::changeIndent(bool outdent)
     } else {
         selectRange(lineStart, lineStart + transformed.size());
     }
-    repairOrderedLists(text, m_document->toPlainText(), true);
+    repairOrderedLists(text, m_document->toPlainText(), true, true);
     cursor.endEditBlock();
     focusEditor();
     return true;
@@ -5033,6 +5051,24 @@ EditorCommandRegistry::completeInputMethodCommit(const QString &committedText,
     expectedText.replace(selectionStart, selectionEnd - selectionStart, committedText);
     if (m_document->toPlainText() != expectedText) {
         return std::nullopt;
+    }
+
+    // 键盘路径会在第三个全角句号插入前完成转换；IME 路径到达这里时
+    // commitString 已由 TextEdit 插入，因此把三个字符整体替换为中文省略号。
+    if (selectionStart == selectionEnd && committedText == QStringLiteral("。")
+        && selectionStart >= 2
+        && beforeText.mid(selectionStart - 2, 2) == QStringLiteral("。。")) {
+        const CjkText::DocumentAnalysis analysis = CjkText::analyzeDocument(beforeText);
+        if (!CjkText::isPositionProtected(analysis, selectionStart)) {
+            QTextCursor cursor(m_document);
+            cursor.setPosition(selectionStart - 2);
+            cursor.setPosition(selectionStart + 1, QTextCursor::KeepAnchor);
+            cursor.insertText(QStringLiteral("……"));
+            m_editor->setProperty("cursorPosition", selectionStart);
+            focusEditor();
+            return CompletionResult{{selectionStart - 2, selectionStart},
+                                    /*autoSpace=*/false};
+        }
     }
 
     if (selectionStart == selectionEnd

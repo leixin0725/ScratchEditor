@@ -1856,6 +1856,45 @@ int main(int argc, char *argv[])
                     == QStringLiteral("\n"),
              cutEmptyLine);
 
+    setTextAndSelection(QStringLiteral("alpha\nbeta\ngamma"), 8, 8);
+    const QJsonObject cutLineBeforeUndo = keyPress(
+        {}, QStringLiteral("X"), false, QStringLiteral("ctrl"));
+    const QJsonObject cutLineUndone = request(QStringLiteral("testUndo"));
+    const QJsonObject cutLineRedone = request(QStringLiteral("testRedo"));
+    setTextAndSelection(QStringLiteral("alpha\nbeta"), 8, 8);
+    keyPress({}, QStringLiteral("X"), false, QStringLiteral("ctrl"));
+    const QJsonObject cutLastLineUndone = request(QStringLiteral("testUndo"));
+    setTextAndSelection(QStringLiteral("1. one\n2. two\n3. three"), 10, 10);
+    const QJsonObject cutOrderedLineWithUndo = keyPress(
+        {}, QStringLiteral("X"), false, QStringLiteral("ctrl"));
+    const QJsonObject cutOrderedLineUndone = request(QStringLiteral("testUndo"));
+    addCheck(checks, details, QStringLiteral("cutLineUndoRestoresOriginalCursor"),
+             cutLineBeforeUndo.value(QStringLiteral("text")).toString()
+                    == QStringLiteral("alpha\ngamma")
+                 && cutLineUndone.value(QStringLiteral("text")).toString()
+                    == QStringLiteral("alpha\nbeta\ngamma")
+                 && cutLineUndone.value(QStringLiteral("cursorPosition")).toInt() == 8
+                 && cutLineUndone.value(QStringLiteral("selectionStart")).toInt() == 8
+                 && cutLineUndone.value(QStringLiteral("selectionEnd")).toInt() == 8
+                 && cutLineRedone.value(QStringLiteral("text")).toString()
+                    == QStringLiteral("alpha\ngamma")
+                 && cutLineRedone.value(QStringLiteral("cursorPosition")).toInt() == 6
+                 && cutLastLineUndone.value(QStringLiteral("text")).toString()
+                    == QStringLiteral("alpha\nbeta")
+                 && cutLastLineUndone.value(QStringLiteral("cursorPosition")).toInt() == 8
+                 && cutOrderedLineWithUndo.value(QStringLiteral("text")).toString()
+                    == QStringLiteral("1. one\n2. three")
+                 && cutOrderedLineUndone.value(QStringLiteral("text")).toString()
+                    == QStringLiteral("1. one\n2. two\n3. three")
+                 && cutOrderedLineUndone.value(
+                        QStringLiteral("cursorPosition")).toInt() == 10,
+             QJsonObject{{QStringLiteral("cut"), cutLineBeforeUndo},
+                         {QStringLiteral("undo"), cutLineUndone},
+                         {QStringLiteral("redo"), cutLineRedone},
+                         {QStringLiteral("lastLineUndo"), cutLastLineUndone},
+                         {QStringLiteral("orderedCut"), cutOrderedLineWithUndo},
+                         {QStringLiteral("orderedUndo"), cutOrderedLineUndone}});
+
     setClipboard(QString());
     setTextAndSelection(QStringLiteral("a\nb\nc"), 2, 2);
     keyPress({}, QStringLiteral("C"), false, QStringLiteral("ctrl"));
@@ -2092,6 +2131,51 @@ int main(int argc, char *argv[])
                     == QStringLiteral("“”")
                  && fullWidthQuote.value(QStringLiteral("cursorPosition")).toInt() == 1,
              fullWidthQuote);
+
+    setTextAndSelection(QStringLiteral("正文"), 0, 0);
+    const QJsonObject lineStartAsciiQuote = keyPress(QStringLiteral("\""));
+    setTextAndSelection(QStringLiteral("正文"), 0, 0);
+    const QJsonObject lineStartAsciiSingleQuote = keyPress(QStringLiteral("'"));
+    setTextAndSelection(QStringLiteral("正文"), 0, 0);
+    inputMethodCommit(QStringLiteral("“"));
+    QThread::msleep(30);
+    const QJsonObject lineStartImeQuote = editorStatus();
+    const QString lineStartImeQuoteText = editorText();
+    setTextAndSelection(QStringLiteral("正文"), 0, 0);
+    inputMethodCommit(QStringLiteral("‘"));
+    QThread::msleep(30);
+    const QJsonObject lineStartImeSingleQuote = editorStatus();
+    const QString lineStartImeSingleQuoteText = editorText();
+    addCheck(checks, details, QStringLiteral("lineStartQuoteBeforeTextStaysOpen"),
+             lineStartAsciiQuote.value(QStringLiteral("text")).toString()
+                    == QStringLiteral("\"正文")
+                 && lineStartAsciiQuote.value(QStringLiteral("cursorPosition")).toInt() == 1
+                 && lineStartAsciiSingleQuote.value(QStringLiteral("text")).toString()
+                    == QStringLiteral("'正文")
+                 && lineStartAsciiSingleQuote.value(
+                        QStringLiteral("cursorPosition")).toInt() == 1
+                 && lineStartImeQuoteText == QStringLiteral("“正文")
+                 && lineStartImeQuote.value(QStringLiteral("cursorPosition")).toInt() == 1
+                 && lineStartImeSingleQuoteText == QStringLiteral("‘正文")
+                 && lineStartImeSingleQuote.value(
+                        QStringLiteral("cursorPosition")).toInt() == 1,
+             QJsonObject{{QStringLiteral("key"), lineStartAsciiQuote},
+                         {QStringLiteral("keySingle"), lineStartAsciiSingleQuote},
+                         {QStringLiteral("ime"), lineStartImeQuote},
+                         {QStringLiteral("imeText"), lineStartImeQuoteText},
+                         {QStringLiteral("imeSingle"), lineStartImeSingleQuote},
+                         {QStringLiteral("imeSingleText"), lineStartImeSingleQuoteText}});
+
+    setTextAndSelection(QStringLiteral("正文"), 0, 0);
+    keyPress(QStringLiteral("`"));
+    keyPress(QStringLiteral("`"));
+    const QJsonObject lineStartFenceBeforeText = keyPress(QStringLiteral("`"));
+    addCheck(checks, details, QStringLiteral("lineStartFenceBeforeTextStillCompletes"),
+             lineStartFenceBeforeText.value(QStringLiteral("text")).toString()
+                    == QStringLiteral("```\n```\n正文")
+                 && lineStartFenceBeforeText.value(QStringLiteral("cursorPosition")).toInt()
+                    == 3,
+             lineStartFenceBeforeText);
 
     setTextAndSelection(QString(), 0, 0);
     const QJsonObject inlineCode = keyPress(QStringLiteral("`"));
@@ -2525,14 +2609,30 @@ int main(int argc, char *argv[])
 
     setTextAndSelection(QStringLiteral("1. one\n2. two\n3. three"), 7, 13);
     const QJsonObject indentedOrderedItem = keyPress({}, QStringLiteral("Tab"));
+    const QJsonObject outdentedOrderedItem = keyPress({}, QStringLiteral("Tab"), true);
+    setTextAndSelection(QStringLiteral("1. one\n2. two\n3. three\n4. four"), 7, 21);
+    const QJsonObject indentedOrderedItems = keyPress({}, QStringLiteral("Tab"));
+    setTextAndSelection(
+        QStringLiteral("1. one\n    1. child\n2. two\n3. three"), 20, 26);
+    const QJsonObject joinedExistingNestedList = keyPress({}, QStringLiteral("Tab"));
     setTextAndSelection(QStringLiteral("1. one\n2. two\n3. three"), 7, 14);
     const QJsonObject movedOrderedItem = dragSelection(7, 14, 0);
     addCheck(checks, details, QStringLiteral("orderedListMoveAndIndentRenumber"),
              indentedOrderedItem.value(QStringLiteral("text")).toString()
-                    == QStringLiteral("1. one\n    2. two\n2. three")
+                    == QStringLiteral("1. one\n    1. two\n2. three")
+                 && outdentedOrderedItem.value(QStringLiteral("text")).toString()
+                    == QStringLiteral("1. one\n2. two\n3. three")
+                 && indentedOrderedItems.value(QStringLiteral("text")).toString()
+                    == QStringLiteral("1. one\n    1. two\n    2. three\n2. four")
+                 && joinedExistingNestedList.value(QStringLiteral("text")).toString()
+                    == QStringLiteral(
+                        "1. one\n    1. child\n    2. two\n2. three")
                  && movedOrderedItem.value(QStringLiteral("text")).toString()
                     == QStringLiteral("1. two\n2. one\n3. three"),
              QJsonObject{{QStringLiteral("indent"), indentedOrderedItem},
+                         {QStringLiteral("outdent"), outdentedOrderedItem},
+                         {QStringLiteral("multiIndent"), indentedOrderedItems},
+                         {QStringLiteral("joinNested"), joinedExistingNestedList},
                          {QStringLiteral("move"), movedOrderedItem}});
 
     QStringList largeOrderedLines;
@@ -3305,6 +3405,26 @@ int main(int argc, char *argv[])
     cjkExpect(checks, details, QStringLiteral("cjkKeyEllipsisFullFull"),
               QStringLiteral("中文。。"), 4, 4, QStringLiteral("key 。"),
               keyAction(QStringLiteral("。")), QStringLiteral("中文……"), 4);
+    cjkExpect(checks, details, QStringLiteral("cjkImeEllipsisFullFull"),
+              QStringLiteral("中文。。"), 4, 4, QStringLiteral("IME commit 。"),
+              [] { return inputMethodCommit(QStringLiteral("。")); },
+              QStringLiteral("中文……"), 4);
+    const QJsonObject imeEllipsisUndone = request(QStringLiteral("testUndo"));
+    const QJsonObject imeEllipsisRedone = request(QStringLiteral("testRedo"));
+    addCheck(checks, details, QStringLiteral("cjkImeEllipsisUndoRedo"),
+             imeEllipsisUndone.value(QStringLiteral("text")).toString()
+                    == QStringLiteral("中文。。")
+                 && imeEllipsisUndone.value(QStringLiteral("cursorPosition")).toInt() == 4
+                 && imeEllipsisRedone.value(QStringLiteral("text")).toString()
+                    == QStringLiteral("中文……")
+                 && imeEllipsisRedone.value(QStringLiteral("cursorPosition")).toInt() == 4,
+             QJsonObject{{QStringLiteral("undo"), imeEllipsisUndone},
+                         {QStringLiteral("redo"), imeEllipsisRedone}});
+    cjkExpect(checks, details, QStringLiteral("protectImeEllipsisFullFull"),
+              QStringLiteral("```\n。。\n```"), 6, 6,
+              QStringLiteral("IME commit 。 in fenced code"),
+              [] { return inputMethodCommit(QStringLiteral("。")); },
+              QStringLiteral("```\n。。。\n```"), 7);
     cjkExpect(checks, details, QStringLiteral("cjkKeyEllipsisMixedDotFullNegative"),
               QStringLiteral("中文.。"), 4, 4, QStringLiteral("key ."),
               keyAction(QStringLiteral(".")), QStringLiteral("中文.。."), 5);

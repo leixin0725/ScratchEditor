@@ -139,7 +139,8 @@ private:
     bool handleListEnter(bool insideFencedBlock);
     bool handleQuoteEnter(bool preserveEmptyQuote, bool insideFencedBlock);
     void repairOrderedLists(const QString &beforeText, const QString &afterText,
-                            bool preservePreviousStart);
+                            bool preservePreviousStart,
+                            bool resetNewSequenceStart = false);
     bool jumpOutOfPair();
     bool changeIndent(bool outdent);
     bool formatSpacing();
