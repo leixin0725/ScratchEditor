@@ -2682,6 +2682,102 @@ int main(int argc, char *argv[])
                          {QStringLiteral("backspaceOrdered"), backspaceEmptyOrdered},
                          {QStringLiteral("backspaceFirst"), backspaceFirstEmptyItem}});
 
+    const QString nestedEmptyBulletSource = QStringLiteral("- parent\n        - ");
+    setTextAndSelection(nestedEmptyBulletSource, nestedEmptyBulletSource.size(),
+                        nestedEmptyBulletSource.size());
+    const QJsonObject nestedEmptyBulletFirstOutdent = keyPress({}, QStringLiteral("Enter"));
+    const QJsonObject nestedEmptyBulletSecondOutdent = keyPress({}, QStringLiteral("Enter"));
+    const QJsonObject nestedEmptyBulletExit = keyPress({}, QStringLiteral("Enter"));
+    addCheck(checks, details, QStringLiteral("nestedEmptyListEnterOutdentsOneLevel"),
+             nestedEmptyBulletFirstOutdent.value(QStringLiteral("text")).toString()
+                    == QStringLiteral("- parent\n    - ")
+                 && nestedEmptyBulletFirstOutdent.value(
+                        QStringLiteral("cursorPosition")).toInt() == 15
+                 && nestedEmptyBulletSecondOutdent.value(QStringLiteral("text")).toString()
+                    == QStringLiteral("- parent\n- ")
+                 && nestedEmptyBulletSecondOutdent.value(
+                        QStringLiteral("cursorPosition")).toInt() == 11
+                 && nestedEmptyBulletExit.value(QStringLiteral("text")).toString()
+                    == QStringLiteral("- parent\n")
+                 && nestedEmptyBulletExit.value(QStringLiteral("cursorPosition")).toInt() == 9,
+             QJsonObject{{QStringLiteral("first"), nestedEmptyBulletFirstOutdent},
+                         {QStringLiteral("second"), nestedEmptyBulletSecondOutdent},
+                         {QStringLiteral("exit"), nestedEmptyBulletExit}});
+
+    const QString orderedEmptyOutdentSource =
+        QStringLiteral("3. parent\n    1) \n4. next");
+    const int orderedEmptyOutdentCursor = orderedEmptyOutdentSource.indexOf(
+        QStringLiteral("\n4. next"));
+    setTextAndSelection(orderedEmptyOutdentSource, orderedEmptyOutdentCursor,
+                        orderedEmptyOutdentCursor);
+    const QJsonObject orderedEmptyOutdented = keyPress({}, QStringLiteral("Enter"));
+    const QJsonObject orderedEmptyOutdentUndo = request(QStringLiteral("testUndo"));
+    const QJsonObject orderedEmptyOutdentRedo = request(QStringLiteral("testRedo"));
+    addCheck(checks, details, QStringLiteral("orderedEmptyListEnterJoinsParentSequence"),
+             orderedEmptyOutdented.value(QStringLiteral("text")).toString()
+                    == QStringLiteral("3. parent\n4. \n5. next")
+                 && orderedEmptyOutdented.value(QStringLiteral("cursorPosition")).toInt() == 13
+                 && orderedEmptyOutdentUndo.value(QStringLiteral("text")).toString()
+                    == orderedEmptyOutdentSource
+                 && orderedEmptyOutdentUndo.value(QStringLiteral("cursorPosition")).toInt()
+                    == orderedEmptyOutdentCursor
+                 && orderedEmptyOutdentRedo.value(QStringLiteral("text")).toString()
+                    == QStringLiteral("3. parent\n4. \n5. next")
+                 && orderedEmptyOutdentRedo.value(QStringLiteral("cursorPosition")).toInt()
+                    == 13,
+             QJsonObject{{QStringLiteral("outdent"), orderedEmptyOutdented},
+                         {QStringLiteral("undo"), orderedEmptyOutdentUndo},
+                         {QStringLiteral("redo"), orderedEmptyOutdentRedo}});
+
+    const QString taskEmptyOutdentSource =
+        QStringLiteral("3. parent\n    - [ ] \n4. next");
+    const int taskEmptyOutdentCursor = taskEmptyOutdentSource.indexOf(
+        QStringLiteral("\n4. next"));
+    setTextAndSelection(taskEmptyOutdentSource, taskEmptyOutdentCursor,
+                        taskEmptyOutdentCursor);
+    const QJsonObject taskEmptyOutdented = keyPress({}, QStringLiteral("Enter"));
+    addCheck(checks, details, QStringLiteral("nestedEmptyTaskFollowsParentListFormat"),
+             taskEmptyOutdented.value(QStringLiteral("text")).toString()
+                    == QStringLiteral("3. parent\n4. [ ] \n5. next")
+                 && taskEmptyOutdented.value(QStringLiteral("cursorPosition")).toInt() == 17,
+             taskEmptyOutdented);
+
+    const QString orderedUnderBulletSource = QStringLiteral("* parent\n    7) ");
+    setTextAndSelection(orderedUnderBulletSource, orderedUnderBulletSource.size(),
+                        orderedUnderBulletSource.size());
+    const QJsonObject orderedUnderBulletOutdented = keyPress({}, QStringLiteral("Enter"));
+    addCheck(checks, details, QStringLiteral("nestedOrderedEmptyFollowsBulletParentFormat"),
+             orderedUnderBulletOutdented.value(QStringLiteral("text")).toString()
+                    == QStringLiteral("* parent\n* ")
+                 && orderedUnderBulletOutdented.value(
+                        QStringLiteral("cursorPosition")).toInt() == 11,
+             orderedUnderBulletOutdented);
+
+    const QString emptyWithDescendantSource =
+        QStringLiteral("- root\n    - \n        1. grandchild");
+    const int emptyWithDescendantCursor = emptyWithDescendantSource.indexOf(
+        QStringLiteral("\n        1. grandchild"));
+    setTextAndSelection(emptyWithDescendantSource, emptyWithDescendantCursor,
+                        emptyWithDescendantCursor);
+    const QJsonObject emptyWithDescendantOutdented = keyPress({}, QStringLiteral("Enter"));
+    addCheck(checks, details, QStringLiteral("emptyListEnterLeavesDescendantsIndented"),
+             emptyWithDescendantOutdented.value(QStringLiteral("text")).toString()
+                    == QStringLiteral("- root\n- \n        1. grandchild")
+                 && emptyWithDescendantOutdented.value(
+                        QStringLiteral("cursorPosition")).toInt() == 9,
+             emptyWithDescendantOutdented);
+
+    const QString orphanEmptyListSource = QStringLiteral("\t7) ");
+    setTextAndSelection(orphanEmptyListSource, orphanEmptyListSource.size(),
+                        orphanEmptyListSource.size());
+    const QJsonObject orphanEmptyListOutdented = keyPress({}, QStringLiteral("Enter"));
+    addCheck(checks, details, QStringLiteral("orphanEmptyListStillOutdents"),
+             orphanEmptyListOutdented.value(QStringLiteral("text")).toString()
+                    == QStringLiteral("7) ")
+                 && orphanEmptyListOutdented.value(QStringLiteral("cursorPosition")).toInt()
+                    == 3,
+             orphanEmptyListOutdented);
+
     setTextAndSelection(QStringLiteral("- item"), 6, 6);
     const QJsonObject softListBreak = keyPress({}, QStringLiteral("Enter"), true);
     setTextAndSelection(QStringLiteral("```\n- code\n```"), 10, 10);

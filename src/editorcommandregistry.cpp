@@ -594,6 +594,19 @@ int indentationColumns(const QString &prefix)
     return columns;
 }
 
+int oneLevelOutdentLength(const QString &line)
+{
+    if (line.startsWith(QLatin1Char('\t'))) {
+        return 1;
+    }
+
+    int spaces = 0;
+    while (spaces < qMin(4, line.size()) && line.at(spaces) == QLatin1Char(' ')) {
+        ++spaces;
+    }
+    return spaces;
+}
+
 MarkdownListItem parseMarkdownListItem(const QString &line)
 {
     static const QRegularExpression listPattern(QStringLiteral(
@@ -625,6 +638,36 @@ MarkdownListItem parseMarkdownListItem(const QString &line)
         item.delimiter = match.captured(4).front();
     }
     return item;
+}
+
+QString childMarkerForParent(const MarkdownListItem &parent)
+{
+    return parent.ordered
+        ? QString::number(parent.number + 1) + parent.delimiter
+        : parent.marker;
+}
+
+std::optional<MarkdownListItem> parentListItemForOutdent(
+    const QString &text, int lineStart, const MarkdownListItem &item,
+    int targetIndentColumns)
+{
+    int previousStart = lineStart;
+    while (previousStart > 0) {
+        const LineRange previousRange = lineRangeAt(text, previousStart - 1);
+        const MarkdownListItem candidate = parseMarkdownListItem(
+            text.mid(previousRange.start, previousRange.end - previousRange.start));
+        if (!candidate.valid || candidate.quoteDepth != item.quoteDepth) {
+            break;
+        }
+        if (candidate.indentColumns == targetIndentColumns) {
+            return candidate;
+        }
+        if (candidate.indentColumns < targetIndentColumns) {
+            break;
+        }
+        previousStart = previousRange.start;
+    }
+    return std::nullopt;
 }
 
 struct TextReplacement {
@@ -2527,6 +2570,7 @@ bool EditorCommandRegistry::performUndo()
         selectionSnapshot = m_selectionUndoSnapshot;
     }
     m_selectionUndoSnapshot.reset();
+    m_selectionRedoSnapshot.reset();
     // 撤销视为一次普通编辑：可能是删除也可能是输入，不预设方向，
     // 撤销后光标落在哪条视口边就按哪条规则处理。
     beginInputAutoScrollTracking(QStringLiteral("undo"));
@@ -2539,6 +2583,9 @@ bool EditorCommandRegistry::performUndo()
             : selectionSnapshot->selectionStart;
         selectRangeWithActiveEnd(selectionSnapshot->selectionStart,
                                  selectionSnapshot->selectionEnd, activeEnd);
+        if (selectionSnapshot->formattedCursorPosition >= 0) {
+            m_selectionRedoSnapshot = selectionSnapshot;
+        }
         focusEditor();
     }
     queueInputAutoScrollCheck();
@@ -2591,10 +2638,27 @@ bool EditorCommandRegistry::performRedo()
     if (!m_editor) {
         return false;
     }
+    std::optional<SelectionUndoSnapshot> selectionSnapshot;
+    if (m_selectionRedoSnapshot
+        && m_documentTextSnapshot == m_selectionRedoSnapshot->originalText) {
+        selectionSnapshot = m_selectionRedoSnapshot;
+    }
+    m_selectionRedoSnapshot.reset();
     // 重做视为一次普通编辑：可能是输入也可能是删除，不预设方向，
     // 重做后光标落在哪条视口边就按哪条规则处理。
     beginInputAutoScrollTracking(QStringLiteral("redo"));
     const bool invoked = QMetaObject::invokeMethod(m_editor, "redo");
+    if (selectionSnapshot
+        && m_documentTextSnapshot == selectionSnapshot->formattedText) {
+        const int activeEnd = selectionSnapshot->formattedCursorPosition
+                == selectionSnapshot->formattedSelectionEnd
+            ? selectionSnapshot->formattedSelectionEnd
+            : selectionSnapshot->formattedSelectionStart;
+        selectRangeWithActiveEnd(selectionSnapshot->formattedSelectionStart,
+                                 selectionSnapshot->formattedSelectionEnd, activeEnd);
+        m_selectionUndoSnapshot = selectionSnapshot;
+        focusEditor();
+    }
     queueInputAutoScrollCheck();
     return invoked;
 }
@@ -4540,6 +4604,49 @@ bool EditorCommandRegistry::handleListEnter(bool insideFencedBlock)
     editCursor.setPosition(start);
     editCursor.beginEditBlock();
     if (item.isEmpty()) {
+        const QString lineText = text.mid(lineStart, lineEnd - lineStart);
+        const int outdentLength = item.indentColumns > 0
+            ? oneLevelOutdentLength(lineText)
+            : 0;
+        if (outdentLength > 0) {
+            QString transformed = lineText;
+            transformed.remove(0, outdentLength);
+            MarkdownListItem outdentedItem = parseMarkdownListItem(transformed);
+            if (outdentedItem.valid) {
+                if (const auto parent = parentListItemForOutdent(
+                        text, lineStart, item, outdentedItem.indentColumns)) {
+                    transformed.replace(outdentedItem.markerStart,
+                                        outdentedItem.marker.size(),
+                                        childMarkerForParent(*parent));
+                }
+
+                QTextCursor replacementCursor(m_document);
+                replacementCursor.setPosition(lineStart);
+                replacementCursor.setPosition(lineEnd, QTextCursor::KeepAnchor);
+                replacementCursor.insertText(transformed);
+                repairOrderedLists(text, m_document->toPlainText(), true);
+                const LineRange repairedLine = lineRangeAt(m_documentTextSnapshot, lineStart);
+                const MarkdownListItem repairedItem = parseMarkdownListItem(
+                    m_documentTextSnapshot.mid(
+                        repairedLine.start, repairedLine.end - repairedLine.start));
+                const int contentOffset = start - (lineStart + item.contentStart);
+                const int cursorPosition = repairedItem.valid
+                    ? qMin(repairedLine.end,
+                           repairedLine.start + repairedItem.contentStart + contentOffset)
+                    : start + transformed.size() - lineText.size();
+                editCursor.setPosition(cursorPosition);
+                editCursor.endEditBlock();
+                m_editor->setProperty("cursorPosition", cursorPosition);
+                // 编号修复可能让临时 QTextCursor 成为原生重做的落点；记录格式化后的
+                // 折叠选区，确保撤销/重做始终回到当前空项的内容位置。
+                m_selectionUndoSnapshot = SelectionUndoSnapshot{
+                    text, m_documentTextSnapshot, start, start, start,
+                    cursorPosition, cursorPosition, cursorPosition};
+                focusEditor();
+                return true;
+            }
+        }
+
         const int removeStart = lineStart + item.markerStart;
         QTextCursor removalCursor(m_document);
         removalCursor.setPosition(removeStart);
@@ -4958,16 +5065,10 @@ bool EditorCommandRegistry::changeIndent(bool outdent)
         if (!outdent) {
             line.prepend(QStringLiteral("    "));
             changed = true;
-        } else if (line.startsWith(QLatin1Char('\t'))) {
-            line.remove(0, 1);
-            changed = true;
         } else {
-            int spaces = 0;
-            while (spaces < qMin(4, line.size()) && line.at(spaces) == QLatin1Char(' ')) {
-                ++spaces;
-            }
-            if (spaces > 0) {
-                line.remove(0, spaces);
+            const int outdentLength = oneLevelOutdentLength(line);
+            if (outdentLength > 0) {
+                line.remove(0, outdentLength);
                 changed = true;
             }
         }

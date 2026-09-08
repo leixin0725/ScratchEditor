@@ -97,6 +97,9 @@ private:
         int selectionStart = 0;
         int selectionEnd = 0;
         int cursorPosition = 0;
+        int formattedSelectionStart = -1;
+        int formattedSelectionEnd = -1;
+        int formattedCursorPosition = -1;
     };
 
     struct Definition {
@@ -260,6 +263,7 @@ private:
     Qt::CursorShape m_externalDragCursorShape = Qt::ArrowCursor;
     bool m_doubleClickReplaying = false;
     std::optional<SelectionUndoSnapshot> m_selectionUndoSnapshot;
+    std::optional<SelectionUndoSnapshot> m_selectionRedoSnapshot;
     bool m_inputAutoScrollCheckQueued = false;
     bool m_inputAutoScrollTrackingActive = false;
     bool m_inputScrollHoldWasActive = false;
