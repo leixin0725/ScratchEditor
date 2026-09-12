@@ -134,11 +134,11 @@ MarkdownStyle MarkdownStyle::defaults()
         QStringLiteral("#e5b567"), QStringLiteral("#a8c373"),
         QStringLiteral("#6c99bb"), QStringLiteral("#9e86c8")};
     for (size_t index = 0; index < style.headings.size(); ++index) {
-        style.headings[index] = token(headingColors[index], QStringLiteral("normal"), 200);
+        style.headings[index] = token(headingColors[index], QStringLiteral("normal"), 300);
     }
-    style.bold = token(QStringLiteral("#FFE6B7"), QStringLiteral("normal"), 200);
+    style.bold = token(QStringLiteral("#FFE6B7"), QStringLiteral("normal"), 300);
     style.italic = token(QStringLiteral("#999999"), QStringLiteral("italic"));
-    style.boldItalic = token(QStringLiteral("#FFE6B7"), QStringLiteral("italic"), 200);
+    style.boldItalic = token(QStringLiteral("#FFE6B7"), QStringLiteral("italic"), 300);
     style.strikethrough = token(QStringLiteral("#999999"),
                                 QStringLiteral("strikethrough"));
     style.link = token(style.accentColor.name(QColor::HexRgb), QStringLiteral("normal"),

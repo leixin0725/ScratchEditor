@@ -54,7 +54,7 @@
 
 每个 Markdown token 使用 `fontWeightDelta` 配置相对正文的字重增量，取值必须是
 -800–800 之间的整百数；有效字重按“正文粗细 + 增量”计算并限制在 100–900。标题、粗体和
-粗斜体默认使用 `200`，其余 token 默认使用 `0`。`fontStyle` 只表达 `italic`、
+粗斜体默认使用 `300`，其余 token 默认使用 `0`。`fontStyle` 只表达 `italic`、
 `strikethrough` 等非字重样式，旧值中的 `bold` 不再影响字重；旧版 `fontFamilies` 字段也不再
 影响渲染。
 

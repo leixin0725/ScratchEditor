@@ -414,7 +414,7 @@ int main(int argc, char *argv[])
                  && !parsedMarkdownStyle.inlineCode.italic
                  && parsedMarkdownStyle.quote.fontWeightDelta == -200
                  && parsedMarkdownStyle.quote.italic
-                 && parsedMarkdownStyle.bold.fontWeightDelta == 200
+                 && parsedMarkdownStyle.bold.fontWeightDelta == 300
                  && parsedMarkdownStyle.strikethrough.fontWeightDelta == 0
                  && parsedMarkdownStyle.textFormat(parsedMarkdownStyle.quote, 100)
                         .fontWeight() == 100
@@ -765,8 +765,8 @@ int main(int argc, char *argv[])
     addCheck(checks, details, QStringLiteral("relativeMarkdownWeightDefaults"),
              inlineCodeStyle.value(QStringLiteral("fontWeight")).toInt() == 400
                  && quoteStyle.value(QStringLiteral("fontWeight")).toInt() == 400
-                 && boldStyle.value(QStringLiteral("fontWeight")).toInt() == 600
-                 && boldItalicStyle.value(QStringLiteral("fontWeight")).toInt() == 600,
+                 && boldStyle.value(QStringLiteral("fontWeight")).toInt() == 700
+                 && boldItalicStyle.value(QStringLiteral("fontWeight")).toInt() == 700,
              QJsonObject{{QStringLiteral("inlineCode"), inlineCodeStyle},
                          {QStringLiteral("quote"), quoteStyle},
                          {QStringLiteral("bold"), boldStyle},
@@ -791,7 +791,7 @@ int main(int argc, char *argv[])
     addCheck(checks, details, QStringLiteral("relativeMarkdownWeightTracksAppearance"),
              weight600Applied.value(QStringLiteral("applied")).toBool()
                  && codeAtWeight600.value(QStringLiteral("fontWeight")).toInt() == 600
-                 && boldAtWeight600.value(QStringLiteral("fontWeight")).toInt() == 800,
+                 && boldAtWeight600.value(QStringLiteral("fontWeight")).toInt() == 900,
              QJsonObject{{QStringLiteral("applied"), weight600Applied},
                          {QStringLiteral("code"), codeAtWeight600},
                          {QStringLiteral("bold"), boldAtWeight600}});
