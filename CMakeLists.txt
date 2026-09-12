@@ -123,6 +123,8 @@ endif()
 
 qt_add_executable(ScratchEditorEditingTests
     tests/editing_main.cpp
+    src/markdownstyle.cpp
+    src/markdownstyle.h
 )
 
 qt_add_executable(ScratchEditorWindowUiTests
@@ -145,6 +147,7 @@ target_link_options(ScratchEditorWindowUiTests PRIVATE
 target_link_libraries(ScratchEditorEditingTests PRIVATE
     ScratchEditorCjkText
     Qt6::Core
+    Qt6::Gui
     Qt6::Network
 )
 

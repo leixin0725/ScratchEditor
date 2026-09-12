@@ -12,8 +12,9 @@ class MarkdownHighlighter final : public QSyntaxHighlighter
     Q_OBJECT
 
 public:
-    MarkdownHighlighter(QTextDocument *document, const MarkdownStyle &style);
-    void setStyle(const MarkdownStyle &style);
+    MarkdownHighlighter(QTextDocument *document, const MarkdownStyle &style,
+                        int baseFontWeight);
+    void setStyle(const MarkdownStyle &style, int baseFontWeight);
 
 protected:
     void highlightBlock(const QString &text) override;
@@ -33,4 +34,6 @@ private:
     QTextCharFormat m_linkBracketsFormat;
     QTextCharFormat m_completedTaskFormat;
     QTextCharFormat m_checkboxBracketsFormat;
+    int m_boldWeightDelta = 0;
+    int m_boldItalicWeightDelta = 0;
 };

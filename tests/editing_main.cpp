@@ -11,9 +11,11 @@
 #include <QStringList>
 #include <QTemporaryDir>
 #include <QThread>
+#include <QTextCharFormat>
 #include <QUrl>
 
 #include "cjktextprocessor.h"
+#include "markdownstyle.h"
 
 #include <array>
 #include <cmath>
@@ -379,6 +381,62 @@ int main(int argc, char *argv[])
     QJsonObject checks;
     QJsonObject details;
 
+    QTemporaryDir markdownStyleDirectory(
+        QDir::tempPath() + QStringLiteral("/ScratchEditor-MarkdownStyle-XXXXXX"));
+    const QString markdownStylePath = markdownStyleDirectory.filePath(
+        QStringLiteral("markdown-style.json"));
+    QFile markdownStyleFile(markdownStylePath);
+    const bool markdownStyleFixtureWritten = markdownStyleFile.open(QIODevice::WriteOnly)
+        && markdownStyleFile.write(QJsonDocument(QJsonObject{
+               {QStringLiteral("inlineCode"),
+                QJsonObject{{QStringLiteral("fontStyle"), QStringLiteral("bold")}}},
+               {QStringLiteral("quote"),
+                QJsonObject{{QStringLiteral("fontStyle"), QStringLiteral("bold italic")},
+                            {QStringLiteral("fontWeightDelta"), -200}}},
+               {QStringLiteral("bold"),
+                QJsonObject{{QStringLiteral("fontStyle"), QStringLiteral("normal")},
+                            {QStringLiteral("fontWeightDelta"), 250}}},
+               {QStringLiteral("strikethrough"),
+                QJsonObject{{QStringLiteral("fontWeightDelta"), -900}}},
+           }).toJson(QJsonDocument::Compact)) > 0;
+    markdownStyleFile.close();
+    const QByteArray previousMarkdownStyle = qgetenv("SCRATCHEDITOR_MARKDOWN_STYLE");
+    qputenv("SCRATCHEDITOR_MARKDOWN_STYLE", QFile::encodeName(markdownStylePath));
+    const MarkdownStyle parsedMarkdownStyle = MarkdownStyle::load(true);
+    if (previousMarkdownStyle.isNull()) {
+        qunsetenv("SCRATCHEDITOR_MARKDOWN_STYLE");
+    } else {
+        qputenv("SCRATCHEDITOR_MARKDOWN_STYLE", previousMarkdownStyle);
+    }
+    addCheck(checks, details, QStringLiteral("relativeMarkdownWeightConfiguration"),
+             markdownStyleFixtureWritten && parsedMarkdownStyle.loadedFromFile()
+                 && parsedMarkdownStyle.inlineCode.fontWeightDelta == 0
+                 && !parsedMarkdownStyle.inlineCode.italic
+                 && parsedMarkdownStyle.quote.fontWeightDelta == -200
+                 && parsedMarkdownStyle.quote.italic
+                 && parsedMarkdownStyle.bold.fontWeightDelta == 200
+                 && parsedMarkdownStyle.strikethrough.fontWeightDelta == 0
+                 && parsedMarkdownStyle.textFormat(parsedMarkdownStyle.quote, 100)
+                        .fontWeight() == 100
+                 && parsedMarkdownStyle.textFormat(parsedMarkdownStyle.bold, 800)
+                        .fontWeight() == 900,
+             QJsonObject{{QStringLiteral("fixtureWritten"), markdownStyleFixtureWritten},
+                         {QStringLiteral("loaded"), parsedMarkdownStyle.loadedFromFile()},
+                         {QStringLiteral("inlineCodeDelta"),
+                          parsedMarkdownStyle.inlineCode.fontWeightDelta},
+                         {QStringLiteral("quoteDelta"),
+                          parsedMarkdownStyle.quote.fontWeightDelta},
+                         {QStringLiteral("quoteItalic"), parsedMarkdownStyle.quote.italic},
+                         {QStringLiteral("boldDelta"), parsedMarkdownStyle.bold.fontWeightDelta},
+                         {QStringLiteral("strikethroughDelta"),
+                          parsedMarkdownStyle.strikethrough.fontWeightDelta},
+                         {QStringLiteral("minimumResolvedWeight"),
+                          parsedMarkdownStyle.textFormat(parsedMarkdownStyle.quote, 100)
+                              .fontWeight()},
+                         {QStringLiteral("maximumResolvedWeight"),
+                          parsedMarkdownStyle.textFormat(parsedMarkdownStyle.bold, 800)
+                              .fontWeight()}});
+
     const QJsonObject initial = request(QStringLiteral("status"));
     // 滚动位置断言按瞬时语义编写，这里先关闭动画保证确定性；
     // 动画本身的中间态与落定行为由 window-ui 套件在窗口可见时验证。
@@ -703,6 +761,52 @@ int main(int argc, char *argv[])
                  && hasColor(strikeStyle, QStringLiteral("#999999"))
                  && strikeStyle.value(QStringLiteral("strikeThrough")).toBool(),
              boldItalicStyle);
+
+    addCheck(checks, details, QStringLiteral("relativeMarkdownWeightDefaults"),
+             inlineCodeStyle.value(QStringLiteral("fontWeight")).toInt() == 400
+                 && quoteStyle.value(QStringLiteral("fontWeight")).toInt() == 400
+                 && boldStyle.value(QStringLiteral("fontWeight")).toInt() == 600
+                 && boldItalicStyle.value(QStringLiteral("fontWeight")).toInt() == 600,
+             QJsonObject{{QStringLiteral("inlineCode"), inlineCodeStyle},
+                         {QStringLiteral("quote"), quoteStyle},
+                         {QStringLiteral("bold"), boldStyle},
+                         {QStringLiteral("boldItalic"), boldItalicStyle}});
+
+    const auto applyEditorWeight = [&initial](int fontWeight) {
+        return request(
+            QStringLiteral("testApplyAppearance"),
+            {{QStringLiteral("theme"), initial.value(QStringLiteral("theme")).toString()},
+             {QStringLiteral("fontFamily"),
+              initial.value(QStringLiteral("editorFontFamily")).toString()},
+             {QStringLiteral("fallbackFontFamily"),
+              initial.value(QStringLiteral("editorFallbackFontFamily")).toString()},
+             {QStringLiteral("fontPointSize"),
+              initial.value(QStringLiteral("editorFontPointSize")).toInt()},
+             {QStringLiteral("fontWeight"), fontWeight},
+             {QStringLiteral("animationsEnabled"), false}});
+    };
+    const QJsonObject weight600Applied = applyEditorWeight(600);
+    const QJsonObject codeAtWeight600 = formatAt(styledMarkdown, QStringLiteral("`code`"), 1);
+    const QJsonObject boldAtWeight600 = formatAt(styledMarkdown, QStringLiteral("**bold**"), 2);
+    addCheck(checks, details, QStringLiteral("relativeMarkdownWeightTracksAppearance"),
+             weight600Applied.value(QStringLiteral("applied")).toBool()
+                 && codeAtWeight600.value(QStringLiteral("fontWeight")).toInt() == 600
+                 && boldAtWeight600.value(QStringLiteral("fontWeight")).toInt() == 800,
+             QJsonObject{{QStringLiteral("applied"), weight600Applied},
+                         {QStringLiteral("code"), codeAtWeight600},
+                         {QStringLiteral("bold"), boldAtWeight600}});
+
+    const QJsonObject weight800Applied = applyEditorWeight(800);
+    const QJsonObject codeAtWeight800 = formatAt(styledMarkdown, QStringLiteral("`code`"), 1);
+    const QJsonObject boldAtWeight800 = formatAt(styledMarkdown, QStringLiteral("**bold**"), 2);
+    addCheck(checks, details, QStringLiteral("relativeMarkdownWeightClampsAtMaximum"),
+             weight800Applied.value(QStringLiteral("applied")).toBool()
+                 && codeAtWeight800.value(QStringLiteral("fontWeight")).toInt() == 800
+                 && boldAtWeight800.value(QStringLiteral("fontWeight")).toInt() == 900,
+             QJsonObject{{QStringLiteral("applied"), weight800Applied},
+                         {QStringLiteral("code"), codeAtWeight800},
+                         {QStringLiteral("bold"), boldAtWeight800}});
+    applyEditorWeight(initial.value(QStringLiteral("editorFontWeight")).toInt());
 
     const QString pathMarkdown = QStringLiteral(
         "左侧文字 `D:\\_Dev\\ScratchEditor` 示例文字 `D:\\_Dev\\ScratchEditor` 右侧文字");

@@ -5,69 +5,83 @@
   },
   "baseText": {
     "color": "#C2C0B6",
-    "fontStyle": "normal"
+    "fontStyle": "normal",
+    "fontWeightDelta": 0
   },
   "inlineCode": {
     "color": "#ffffff",
     "backgroundColor": "#303030",
-    "fontStyle": "normal"
+    "fontStyle": "normal",
+    "fontWeightDelta": 0
   },
   "codeBlock": {
     "color": "#C2C0B6",
     "backgroundColor": "#303030",
-    "fontStyle": "normal"
+    "fontStyle": "normal",
+    "fontWeightDelta": 0
   },
   "codeFence": {
     "color": "#C2C0B6",
     "backgroundColor": "#303030",
-    "fontStyle": "normal"
+    "fontStyle": "normal",
+    "fontWeightDelta": 0
   },
   "listMarker": {
     "color": "#ffffff",
-    "fontStyle": "normal"
+    "fontStyle": "normal",
+    "fontWeightDelta": 0
   },
   "quote": {
     "color": "#999999",
-    "fontStyle": "italic"
+    "fontStyle": "italic",
+    "fontWeightDelta": 0
   },
   "headings": [
-    { "level": 1, "color": "#d04255", "fontStyle": "bold" },
-    { "level": 2, "color": "#d5763f", "fontStyle": "bold" },
-    { "level": 3, "color": "#e5b567", "fontStyle": "bold" },
-    { "level": 4, "color": "#a8c373", "fontStyle": "bold" },
-    { "level": 5, "color": "#6c99bb", "fontStyle": "bold" },
-    { "level": 6, "color": "#9e86c8", "fontStyle": "bold" }
+    { "level": 1, "color": "#d04255", "fontStyle": "normal", "fontWeightDelta": 200 },
+    { "level": 2, "color": "#d5763f", "fontStyle": "normal", "fontWeightDelta": 200 },
+    { "level": 3, "color": "#e5b567", "fontStyle": "normal", "fontWeightDelta": 200 },
+    { "level": 4, "color": "#a8c373", "fontStyle": "normal", "fontWeightDelta": 200 },
+    { "level": 5, "color": "#6c99bb", "fontStyle": "normal", "fontWeightDelta": 200 },
+    { "level": 6, "color": "#9e86c8", "fontStyle": "normal", "fontWeightDelta": 200 }
   ],
   "bold": {
     "color": "#FFE6B7",
-    "fontStyle": "bold"
+    "fontStyle": "normal",
+    "fontWeightDelta": 200
   },
   "italic": {
     "color": "#999999",
-    "fontStyle": "italic"
+    "fontStyle": "italic",
+    "fontWeightDelta": 0
   },
   "boldItalic": {
     "color": "#FFE6B7",
-    "fontStyle": "bold italic"
+    "fontStyle": "italic",
+    "fontWeightDelta": 200
   },
   "strikethrough": {
     "color": "#999999",
-    "fontStyle": "strikethrough"
+    "fontStyle": "strikethrough",
+    "fontWeightDelta": 0
   },
   "link": {
     "fontStyle": "normal",
+    "fontWeightDelta": 0,
     "underline": true
   },
   "linkBrackets": {
     "color": "#999999",
-    "fontStyle": "normal"
+    "fontStyle": "normal",
+    "fontWeightDelta": 0
   },
   "completedTask": {
     "color": "#999999",
-    "fontStyle": "strikethrough"
+    "fontStyle": "strikethrough",
+    "fontWeightDelta": 0
   },
   "checkboxBrackets": {
     "color": "#4a4a4a",
-    "fontStyle": "normal"
+    "fontStyle": "normal",
+    "fontWeightDelta": 0
   }
 }

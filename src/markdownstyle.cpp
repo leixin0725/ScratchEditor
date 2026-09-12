@@ -14,14 +14,23 @@
 
 namespace {
 
+constexpr int minimumFontWeight = 100;
+constexpr int maximumFontWeight = 900;
+
+bool validFontWeightDelta(int value)
+{
+    return value >= -800 && value <= 800 && value % 100 == 0;
+}
+
 MarkdownStyle::TokenStyle token(const QString &foreground, const QString &fontStyle,
-                                const QString &background = {}, bool underline = false)
+                                int fontWeightDelta = 0, const QString &background = {},
+                                bool underline = false)
 {
     MarkdownStyle::TokenStyle result;
     result.foreground = QColor(foreground);
     result.background = QColor(background);
+    result.fontWeightDelta = fontWeightDelta;
     const QString normalized = fontStyle.toLower();
-    result.bold = normalized.contains(QStringLiteral("bold"));
     result.italic = normalized.contains(QStringLiteral("italic"));
     result.strikeThrough = normalized.contains(QStringLiteral("strikethrough"));
     result.underline = underline;
@@ -45,9 +54,16 @@ void applyToken(const QJsonObject &root, const QString &key,
     }
     if (object.contains(QStringLiteral("fontStyle"))) {
         const QString fontStyle = object.value(QStringLiteral("fontStyle")).toString().toLower();
-        target->bold = fontStyle.contains(QStringLiteral("bold"));
         target->italic = fontStyle.contains(QStringLiteral("italic"));
         target->strikeThrough = fontStyle.contains(QStringLiteral("strikethrough"));
+    }
+    const QJsonValue fontWeightDelta = object.value(QStringLiteral("fontWeightDelta"));
+    if (fontWeightDelta.isDouble()) {
+        const double numericValue = fontWeightDelta.toDouble();
+        const int value = fontWeightDelta.toInt();
+        if (numericValue == value && validFontWeightDelta(value)) {
+            target->fontWeightDelta = value;
+        }
     }
     if (object.contains(QStringLiteral("underline"))) {
         target->underline = object.value(QStringLiteral("underline")).toBool();
@@ -106,9 +122,9 @@ MarkdownStyle MarkdownStyle::defaults()
     style.accentColor = QColor(QStringLiteral("#85c7c0"));
     style.accentTextColor = QColor(QStringLiteral("#183331"));
     style.baseText = token(QStringLiteral("#C2C0B6"), QStringLiteral("normal"));
-    style.inlineCode = token(QStringLiteral("#ffffff"), QStringLiteral("normal"),
+    style.inlineCode = token(QStringLiteral("#ffffff"), QStringLiteral("normal"), 0,
                              QStringLiteral("#303030"));
-    style.codeBlock = token(QStringLiteral("#C2C0B6"), QStringLiteral("normal"),
+    style.codeBlock = token(QStringLiteral("#C2C0B6"), QStringLiteral("normal"), 0,
                             QStringLiteral("#303030"));
     style.codeFence = style.codeBlock;
     style.listMarker = token(QStringLiteral("#ffffff"), QStringLiteral("normal"));
@@ -118,15 +134,15 @@ MarkdownStyle MarkdownStyle::defaults()
         QStringLiteral("#e5b567"), QStringLiteral("#a8c373"),
         QStringLiteral("#6c99bb"), QStringLiteral("#9e86c8")};
     for (size_t index = 0; index < style.headings.size(); ++index) {
-        style.headings[index] = token(headingColors[index], QStringLiteral("bold"));
+        style.headings[index] = token(headingColors[index], QStringLiteral("normal"), 200);
     }
-    style.bold = token(QStringLiteral("#FFE6B7"), QStringLiteral("bold"));
+    style.bold = token(QStringLiteral("#FFE6B7"), QStringLiteral("normal"), 200);
     style.italic = token(QStringLiteral("#999999"), QStringLiteral("italic"));
-    style.boldItalic = token(QStringLiteral("#FFE6B7"), QStringLiteral("bold italic"));
+    style.boldItalic = token(QStringLiteral("#FFE6B7"), QStringLiteral("italic"), 200);
     style.strikethrough = token(QStringLiteral("#999999"),
                                 QStringLiteral("strikethrough"));
     style.link = token(style.accentColor.name(QColor::HexRgb), QStringLiteral("normal"),
-                       {}, true);
+                       0, {}, true);
     style.linkBrackets = token(QStringLiteral("#999999"), QStringLiteral("normal"));
     style.completedTask = token(QStringLiteral("#999999"),
                                 QStringLiteral("strikethrough"));
@@ -187,7 +203,8 @@ MarkdownStyle MarkdownStyle::load(bool isolatedTestMode)
     return style;
 }
 
-QTextCharFormat MarkdownStyle::textFormat(const TokenStyle &tokenStyle) const
+QTextCharFormat MarkdownStyle::textFormat(const TokenStyle &tokenStyle,
+                                          int baseFontWeight) const
 {
     QTextCharFormat format;
     if (tokenStyle.foreground.isValid()) {
@@ -196,7 +213,9 @@ QTextCharFormat MarkdownStyle::textFormat(const TokenStyle &tokenStyle) const
     if (tokenStyle.background.isValid()) {
         format.setBackground(tokenStyle.background);
     }
-    format.setFontWeight(tokenStyle.bold ? QFont::Bold : QFont::Normal);
+    format.setFontWeight(qBound(minimumFontWeight,
+                                baseFontWeight + tokenStyle.fontWeightDelta,
+                                maximumFontWeight));
     format.setFontItalic(tokenStyle.italic);
     format.setFontStrikeOut(tokenStyle.strikeThrough);
     format.setFontUnderline(tokenStyle.underline);

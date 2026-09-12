@@ -14,7 +14,7 @@ public:
     struct TokenStyle {
         QColor foreground;
         QColor background;
-        bool bold = false;
+        int fontWeightDelta = 0;
         bool italic = false;
         bool strikeThrough = false;
         bool underline = false;
@@ -22,7 +22,7 @@ public:
 
     static MarkdownStyle load(bool isolatedTestMode = false);
 
-    QTextCharFormat textFormat(const TokenStyle &token) const;
+    QTextCharFormat textFormat(const TokenStyle &token, int baseFontWeight) const;
     QString filePath() const;
     bool loadedFromFile() const;
 

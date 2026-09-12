@@ -265,30 +265,33 @@ QVector<quint8> emphasisFlags(int textLength, const QVector<EmphasisSpan> &spans
 
 } // namespace
 
-MarkdownHighlighter::MarkdownHighlighter(QTextDocument *document, const MarkdownStyle &style)
+MarkdownHighlighter::MarkdownHighlighter(QTextDocument *document, const MarkdownStyle &style,
+                                         int baseFontWeight)
     : QSyntaxHighlighter(document)
 {
-    setStyle(style);
+    setStyle(style, baseFontWeight);
 }
 
-void MarkdownHighlighter::setStyle(const MarkdownStyle &style)
+void MarkdownHighlighter::setStyle(const MarkdownStyle &style, int baseFontWeight)
 {
     for (size_t index = 0; index < m_headingFormats.size(); ++index) {
-        m_headingFormats[index] = style.textFormat(style.headings[index]);
+        m_headingFormats[index] = style.textFormat(style.headings[index], baseFontWeight);
     }
-    m_quoteFormat = style.textFormat(style.quote);
-    m_listMarkerFormat = style.textFormat(style.listMarker);
-    m_boldFormat = style.textFormat(style.bold);
-    m_italicFormat = style.textFormat(style.italic);
-    m_boldItalicFormat = style.textFormat(style.boldItalic);
-    m_strikethroughFormat = style.textFormat(style.strikethrough);
-    m_inlineCodeFormat = style.textFormat(style.inlineCode);
-    m_codeBlockFormat = style.textFormat(style.codeBlock);
-    m_codeFenceFormat = style.textFormat(style.codeFence);
-    m_linkFormat = style.textFormat(style.link);
-    m_linkBracketsFormat = style.textFormat(style.linkBrackets);
-    m_completedTaskFormat = style.textFormat(style.completedTask);
-    m_checkboxBracketsFormat = style.textFormat(style.checkboxBrackets);
+    m_quoteFormat = style.textFormat(style.quote, baseFontWeight);
+    m_listMarkerFormat = style.textFormat(style.listMarker, baseFontWeight);
+    m_boldFormat = style.textFormat(style.bold, baseFontWeight);
+    m_italicFormat = style.textFormat(style.italic, baseFontWeight);
+    m_boldItalicFormat = style.textFormat(style.boldItalic, baseFontWeight);
+    m_strikethroughFormat = style.textFormat(style.strikethrough, baseFontWeight);
+    m_inlineCodeFormat = style.textFormat(style.inlineCode, baseFontWeight);
+    m_codeBlockFormat = style.textFormat(style.codeBlock, baseFontWeight);
+    m_codeFenceFormat = style.textFormat(style.codeFence, baseFontWeight);
+    m_linkFormat = style.textFormat(style.link, baseFontWeight);
+    m_linkBracketsFormat = style.textFormat(style.linkBrackets, baseFontWeight);
+    m_completedTaskFormat = style.textFormat(style.completedTask, baseFontWeight);
+    m_checkboxBracketsFormat = style.textFormat(style.checkboxBrackets, baseFontWeight);
+    m_boldWeightDelta = style.bold.fontWeightDelta;
+    m_boldItalicWeightDelta = style.boldItalic.fontWeightDelta;
     rehighlight();
 }
 
@@ -423,7 +426,9 @@ void MarkdownHighlighter::highlightBlock(const QString &text)
             }
             QTextCharFormat format = base;
             if ((flags & BoldEmphasis) != 0) {
-                format.setFontWeight(QFont::Bold);
+                const int delta = (flags & ItalicEmphasis) != 0
+                    ? m_boldItalicWeightDelta : m_boldWeightDelta;
+                format.setFontWeight(qBound(100, base.fontWeight() + delta, 900));
             }
             if ((flags & ItalicEmphasis) != 0) {
                 format.setFontItalic(true);

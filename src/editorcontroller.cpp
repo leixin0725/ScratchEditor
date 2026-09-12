@@ -838,7 +838,8 @@ void EditorController::registerEditor(QObject *editor)
         }
     }
     if (document && m_markdownStyle) {
-        m_markdownHighlighter = new MarkdownHighlighter(document, *m_markdownStyle);
+        m_markdownHighlighter = new MarkdownHighlighter(
+            document, *m_markdownStyle, m_editorFontWeight);
     }
     if (m_commands) {
         m_commands->setEditor(m_editor, document);
@@ -980,6 +981,7 @@ void EditorController::reloadAppearance()
         return;
     }
     const AppSettings::Appearance appearance = m_settings->appearance();
+    const bool fontWeightChanged = m_editorFontWeight != appearance.fontWeight;
     const bool changed = m_theme != appearance.theme
         || m_editorFontFamily != appearance.fontFamily
         || m_editorFallbackFontFamily != appearance.fallbackFontFamily
@@ -992,6 +994,9 @@ void EditorController::reloadAppearance()
     m_editorFontPointSize = appearance.fontPointSize;
     m_editorFontWeight = appearance.fontWeight;
     m_animationsEnabled = appearance.animationsEnabled;
+    if (fontWeightChanged && m_markdownHighlighter && m_markdownStyle) {
+        m_markdownHighlighter->setStyle(*m_markdownStyle, m_editorFontWeight);
+    }
     if (m_window) {
         applyNativeWindowStyle();
     }
@@ -1036,7 +1041,7 @@ void EditorController::reloadMarkdownStyle()
     m_markdownStyle = std::make_unique<MarkdownStyle>(std::move(reloaded));
     configureMarkdownStyleWatcher();
     if (m_markdownHighlighter) {
-        m_markdownHighlighter->setStyle(*m_markdownStyle);
+        m_markdownHighlighter->setStyle(*m_markdownStyle, m_editorFontWeight);
     }
     emit markdownStyleChanged();
 }
@@ -2037,7 +2042,8 @@ void EditorController::buildCommandHandlers()
                         response.insert(QStringLiteral("background"),
                                         format.background().color().name(QColor::HexRgb));
                         response.insert(QStringLiteral("bold"),
-                                        format.fontWeight() >= QFont::Bold);
+                                        format.fontWeight() > m_editorFontWeight);
+                        response.insert(QStringLiteral("fontWeight"), format.fontWeight());
                         response.insert(QStringLiteral("italic"), format.fontItalic());
                         response.insert(QStringLiteral("strikeThrough"),
                                         format.fontStrikeOut());

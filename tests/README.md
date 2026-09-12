@@ -7,7 +7,8 @@
   `run-system-tests.ps1` 仅为其启动的 test-mode 子进程设置
   `SCRATCHEDITOR_TEST_CLIPBOARD_BACKEND=native`，以验证真实 Win32 剪贴板锁定、写回与恢复；
   其他 test-mode 进程继续使用隔离的内存后端。
-- `editing_main.cpp`：编辑行为验证，覆盖 Markdown 高亮、编辑命令、标题层级折叠/导航、
+- `editing_main.cpp`：编辑行为验证，覆盖 Markdown 高亮、相对字重配置、正文粗细联动与
+  100–900 边界钳制、编辑命令、标题层级折叠/导航、
   折叠光标恢复、标题导航高亮范围、文件/目录 URL 拖入后的路径格式、UTF-16 光标与选区、
   原子拒绝、输入法标点与引号边界、整行剪切撤销、无序列表转有序列表、嵌套列表修复和
   自动滚动，以及撤销/删除造成内容收缩时

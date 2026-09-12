@@ -50,7 +50,13 @@
 纯 JSON，不允许注释，键名即功能。保存用户副本后，运行中的编辑器监听并
 热更新 Markdown 高亮与强调色；测试可用 `SCRATCHEDITOR_MARKDOWN_STYLE`
 指定隔离配置。Markdown 代码区域只在这里配置颜色、背景与字形样式；字体族统一继承
-设置页中的编辑区主字体与 fallback 字体。旧版 `fontFamilies` 字段可保留，但不再影响渲染。
+设置页中的编辑区主字体与 fallback 字体，字号也始终继承编辑区设置。
+
+每个 Markdown token 使用 `fontWeightDelta` 配置相对正文的字重增量，取值必须是
+-800–800 之间的整百数；有效字重按“正文粗细 + 增量”计算并限制在 100–900。标题、粗体和
+粗斜体默认使用 `200`，其余 token 默认使用 `0`。`fontStyle` 只表达 `italic`、
+`strikethrough` 等非字重样式，旧值中的 `bold` 不再影响字重；旧版 `fontFamilies` 字段也不再
+影响渲染。
 
 ## settings.ini
 
