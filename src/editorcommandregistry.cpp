@@ -1924,6 +1924,9 @@ bool EditorCommandRegistry::handleEditorEvent(QEvent *event)
             && !modifiers.testFlag(Qt::AltModifier)
             && !modifiers.testFlag(Qt::MetaModifier);
         if (pageKey) {
+            if (m_window) {
+                QMetaObject::invokeMethod(m_window, "cancelFindNavigation");
+            }
             if (QQuickItem *viewport = editorViewport()) {
                 const qreal viewportHeight = viewport->height();
                 const qreal currentY = viewport->property("contentY").toReal();
@@ -3318,8 +3321,27 @@ void EditorCommandRegistry::scrollTextDragViewport(const QPointF &scenePosition)
     }
 }
 
+void EditorCommandRegistry::beginFindNavigation()
+{
+    m_headingScrollTimer.stop();
+    if (m_window) {
+        QMetaObject::invokeMethod(m_window, "beginFindNavigation");
+    }
+}
+
+void EditorCommandRegistry::finishFindNavigation()
+{
+    if (m_window) {
+        QMetaObject::invokeMethod(m_window, "finishFindNavigation",
+                                  Q_ARG(QVariant, layoutSettleDelayMs));
+    }
+}
+
 bool EditorCommandRegistry::findNext(const QString &query, bool caseSensitive, bool backwards)
 {
+    if (m_window) {
+        QMetaObject::invokeMethod(m_window, "cancelFindNavigation");
+    }
     if (!m_editor || !m_document || query.isEmpty()) {
         return false;
     }
@@ -3337,9 +3359,10 @@ bool EditorCommandRegistry::findNext(const QString &query, bool caseSensitive, b
     if (found.isNull()) {
         return false;
     }
+    beginFindNavigation();
     m_headingFolds->revealPosition(found.selectionStart());
     selectRange(found.selectionStart(), found.selectionEnd());
-    focusEditor();
+    finishFindNavigation();
     return true;
 }
 
@@ -3364,6 +3387,7 @@ bool EditorCommandRegistry::replaceCurrent(const QString &query, const QString &
     cursor.setPosition(selectionStart);
     cursor.setPosition(selectionEnd, QTextCursor::KeepAnchor);
     const int insertedAt = cursor.selectionStart();
+    beginFindNavigation();
     cursor.beginEditBlock();
     cursor.insertText(replacement);
     selectRange(insertedAt, insertedAt + replacement.size());
@@ -3373,6 +3397,7 @@ bool EditorCommandRegistry::replaceCurrent(const QString &query, const QString &
         repairOrderedLists(beforeText, m_document->toPlainText(), structural);
     }
     cursor.endEditBlock();
+    finishFindNavigation();
     return true;
 }
 
@@ -3411,6 +3436,9 @@ int EditorCommandRegistry::replaceAll(const QString &query, const QString &repla
             break;
         }
         const int nextPosition = found.selectionStart() + replacement.size();
+        if (replacements == 0) {
+            beginFindNavigation();
+        }
         found.insertText(replacement);
         ++replacements;
         searchFrom.setPosition(std::min(nextPosition, m_document->characterCount() - 1));
@@ -3419,7 +3447,9 @@ int EditorCommandRegistry::replaceAll(const QString &query, const QString &repla
         repairOrderedLists(beforeText, m_document->toPlainText(), structural);
     }
     editCursor.endEditBlock();
-    focusEditor();
+    if (replacements > 0) {
+        finishFindNavigation();
+    }
     return replacements;
 }
 

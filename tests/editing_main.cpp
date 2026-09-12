@@ -2915,6 +2915,77 @@ int main(int argc, char *argv[])
              !noPreview.value(QStringLiteral("executed")).toBool(), noPreview);
     request(QStringLiteral("testCloseOverlays"));
 
+    // 同一命中在手动滚走后仍应显式定位，不能依赖光标变化通知。
+    setTextAndSelection(headingScrollText, 0, 0);
+    execute(QStringLiteral("find"));
+    QThread::msleep(80);
+    const auto findB = [] {
+        return request(QStringLiteral("testFindNext"),
+                       {{QStringLiteral("query"), QStringLiteral("# B")}});
+    };
+    findB();
+    QThread::msleep(240);
+    const QJsonObject searchLocated = editorStatus();
+    addCheck(checks, details, QStringLiteral("findPanelReservesViewportSpace"),
+             searchLocated.value(QStringLiteral("scrollViewportY")).toDouble()
+                 > searchLocated.value(QStringLiteral("findPanelBottom")).toDouble(),
+             searchLocated);
+    setScrollY(0);
+    findB();
+    QThread::msleep(240);
+    const QJsonObject searchRelocated = editorStatus();
+    addCheck(checks, details, QStringLiteral("findSameMatchRestoresVisibility"),
+             searchRelocated.value(QStringLiteral("scrollContentY")).toDouble() > 0
+                 && std::abs(searchLocated.value(QStringLiteral("scrollContentY")).toDouble()
+                             - searchRelocated.value(QStringLiteral("scrollContentY")).toDouble()) < 3,
+             QJsonObject{{QStringLiteral("expected"), searchLocated},
+                         {QStringLiteral("actual"), searchRelocated}});
+    addCheck(checks, details, QStringLiteral("findPreservesPanelFocus"),
+             !searchLocated.value(QStringLiteral("editorHasFocus")).toBool(true),
+             searchLocated);
+    findB();
+    QThread::msleep(240);
+    const QJsonObject searchVisible = editorStatus();
+    addCheck(checks, details, QStringLiteral("findVisibleMatchKeepsViewport"),
+             std::abs(searchVisible.value(QStringLiteral("scrollContentY")).toDouble()
+                      - searchRelocated.value(QStringLiteral("scrollContentY")).toDouble()) < 1,
+             QJsonObject{{QStringLiteral("expected"), searchRelocated},
+                         {QStringLiteral("actual"), searchVisible}});
+    request(QStringLiteral("testCloseOverlays"));
+
+    setTextAndSelection(QStringLiteral("中文😀 match\n正文\nmatch"), 0, 0);
+    execute(QStringLiteral("find"));
+    QThread::msleep(80);
+    const auto panelKey = [](const QString &text, const QString &key, bool shift = false) {
+        return request(QStringLiteral("testKeyPress"),
+                       {{QStringLiteral("text"), text}, {QStringLiteral("key"), key},
+                        {QStringLiteral("shift"), shift}, {QStringLiteral("activeFocus"), true}});
+    };
+    panelKey(QStringLiteral("match"), {});
+    panelKey({}, QStringLiteral("Enter"));
+    const QJsonObject panelFirst = editorStatus();
+    panelKey({}, QStringLiteral("Enter"));
+    const QJsonObject panelSecond = editorStatus();
+    panelKey({}, QStringLiteral("Enter"), true);
+    const QJsonObject panelPrevious = editorStatus();
+    addCheck(checks, details, QStringLiteral("findPanelEnterNavigatesWithoutEditing"),
+             panelFirst.value(QStringLiteral("selectionStart")).toInt() == 5
+                 && panelSecond.value(QStringLiteral("selectionStart")).toInt() == 14
+                 && panelPrevious.value(QStringLiteral("selectionStart")).toInt() == 5
+                 && !panelPrevious.value(QStringLiteral("editorHasFocus")).toBool()
+                 && editorText() == QStringLiteral("中文😀 match\n正文\nmatch"),
+             QJsonObject{{QStringLiteral("expectedStarts"), QJsonArray{5, 14, 5}},
+                         {QStringLiteral("first"), panelFirst},
+                         {QStringLiteral("second"), panelSecond},
+                         {QStringLiteral("previous"), panelPrevious}});
+    panelKey({}, QStringLiteral("Escape"));
+    const QJsonObject panelClosed = editorStatus();
+    addCheck(checks, details, QStringLiteral("findPanelEscapeRestoresEditorFocus"),
+             !panelClosed.value(QStringLiteral("findPanelVisible")).toBool()
+                 && panelClosed.value(QStringLiteral("editorHasFocus")).toBool()
+                 && panelClosed.value(QStringLiteral("selectionStart")).toInt() == 5,
+             panelClosed);
+
     const QJsonObject deleteLineShortcut = request(
         QStringLiteral("testShortcut"),
         {{QStringLiteral("commandId"), QStringLiteral("deleteLine")}});

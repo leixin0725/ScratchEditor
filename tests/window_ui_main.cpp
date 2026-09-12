@@ -871,6 +871,125 @@ int main(int argc, char *argv[])
                          {QStringLiteral("mid"), headingAnimMid},
                          {QStringLiteral("settled"), headingAnimSettled}});
 
+    execute(QStringLiteral("find"));
+    QThread::msleep(80);
+    request(QStringLiteral("testSetSelection"),
+            {{QStringLiteral("start"), 0}, {QStringLiteral("end"), 0}});
+    request(QStringLiteral("testSetScrollY"), {{QStringLiteral("contentY"), 0}});
+    const QJsonObject findAnimFirst = request(QStringLiteral("testFindNext"),
+                                            {{QStringLiteral("query"), QStringLiteral("# B")}});
+    QThread::msleep(100);
+    const QJsonObject findAnimMid = request(QStringLiteral("status"));
+    QThread::msleep(300);
+    const QJsonObject findAnimSettled = request(QStringLiteral("status"));
+    const double findAnchor = findAnimSettled.value(QStringLiteral("editorContentOffsetY")).toDouble()
+        + findAnimSettled.value(QStringLiteral("cursorRectY")).toDouble()
+        - findAnimSettled.value(QStringLiteral("scrollViewportHeight")).toDouble() / 3;
+    addCheck(checks, details, QStringLiteral("findNavigationAnimatesWithoutInitialJump"),
+             std::abs(findAnimFirst.value(QStringLiteral("scrollContentY")).toDouble()) < 1
+                 && findAnimMid.value(QStringLiteral("scrollContentY")).toDouble() > 0
+                 && findAnimMid.value(QStringLiteral("scrollContentY")).toDouble() < findAnchor - 5
+                 && std::abs(findAnimSettled.value(QStringLiteral("scrollContentY")).toDouble()
+                             - findAnchor) < 3,
+             QJsonObject{{QStringLiteral("expectedAnchor"), findAnchor},
+                         {QStringLiteral("first"), findAnimFirst},
+                         {QStringLiteral("mid"), findAnimMid},
+                         {QStringLiteral("settled"), findAnimSettled}});
+    execute(QStringLiteral("replace"));
+    QThread::msleep(100);
+    const QJsonObject replaceLayout = request(QStringLiteral("status"));
+    request(QStringLiteral("testFindNext"), {{QStringLiteral("query"), QStringLiteral("# A")}});
+    QThread::msleep(300);
+    const QJsonObject firstLineFound = request(QStringLiteral("status"));
+    addCheck(checks, details, QStringLiteral("replacePanelKeepsFirstLineVisible"),
+             replaceLayout.value(QStringLiteral("scrollViewportY")).toDouble()
+                 > replaceLayout.value(QStringLiteral("findPanelBottom")).toDouble()
+                 && replaceLayout.value(QStringLiteral("scrollViewportHeight")).toDouble()
+                    < findAnimSettled.value(QStringLiteral("scrollViewportHeight")).toDouble()
+                 && std::abs(firstLineFound.value(QStringLiteral("scrollContentY")).toDouble()) < 1,
+             QJsonObject{{QStringLiteral("expectedScrollY"), 0},
+                         {QStringLiteral("layout"), replaceLayout},
+                         {QStringLiteral("actual"), firstLineFound}});
+    request(QStringLiteral("testFindNext"), {{QStringLiteral("query"), QStringLiteral("# B")}});
+    keyPress({}, QStringLiteral("PageUp"));
+    QThread::msleep(300);
+    const QJsonObject cancelledFind = request(QStringLiteral("status"));
+    addCheck(checks, details, QStringLiteral("findNavigationCancelledByManualPaging"),
+             std::abs(cancelledFind.value(QStringLiteral("scrollContentY")).toDouble()) < 1,
+             QJsonObject{{QStringLiteral("expectedScrollY"), 0},
+                         {QStringLiteral("actual"), cancelledFind}});
+    request(QStringLiteral("testFindNext"), {{QStringLiteral("query"), QStringLiteral("# B")}});
+    request(QStringLiteral("testFindNext"), {{QStringLiteral("query"), QStringLiteral("absent")}});
+    QThread::msleep(300);
+    const QJsonObject missingFind = request(QStringLiteral("status"));
+    addCheck(checks, details, QStringLiteral("findNoMatchCancelsPendingNavigation"),
+             std::abs(missingFind.value(QStringLiteral("scrollContentY")).toDouble()) < 1,
+             QJsonObject{{QStringLiteral("expectedScrollY"), 0},
+                         {QStringLiteral("actual"), missingFind}});
+    request(QStringLiteral("testFindNext"), {{QStringLiteral("query"), QStringLiteral("# B")}});
+    request(QStringLiteral("testFindNext"), {{QStringLiteral("query"), QStringLiteral("# C")}});
+    QThread::msleep(300);
+    const QJsonObject latestFind = request(QStringLiteral("status"));
+    const auto cursorVisible = [](const QJsonObject &status) {
+        const double top = status.value(QStringLiteral("editorContentOffsetY")).toDouble()
+            + status.value(QStringLiteral("cursorRectY")).toDouble()
+            - status.value(QStringLiteral("scrollContentY")).toDouble();
+        return top >= -1 && top + status.value(QStringLiteral("cursorRectHeight")).toDouble()
+            <= status.value(QStringLiteral("scrollViewportHeight")).toDouble() + 1;
+    };
+    addCheck(checks, details, QStringLiteral("findRapidNavigationKeepsLatestMatch"),
+             latestFind.value(QStringLiteral("selectionStart")).toInt()
+                 == headingAnimText.indexOf(QStringLiteral("# C")) && cursorVisible(latestFind),
+             QJsonObject{{QStringLiteral("expectedStart"), headingAnimText.indexOf(QStringLiteral("# C"))},
+                         {QStringLiteral("actual"), latestFind}});
+    request(QStringLiteral("testSetScrollY"), {{QStringLiteral("contentY"), 0}});
+    request(QStringLiteral("testReplaceCurrent"),
+            {{QStringLiteral("query"), QStringLiteral("# C")},
+             {QStringLiteral("replacement"), QStringLiteral("中文😀\n替换结果")}});
+    QThread::msleep(300);
+    const QJsonObject replacedFind = request(QStringLiteral("status"));
+    addCheck(checks, details, QStringLiteral("replaceCurrentRevealsFinalRange"),
+             cursorVisible(replacedFind)
+                 && replacedFind.value(QStringLiteral("scrollContentY")).toDouble() > 0,
+             replacedFind);
+    request(QStringLiteral("testUndo"));
+    const QString findPrefix = QStringLiteral("普通正文\n").repeated(60);
+    const QString foldedFindText = findPrefix + QStringLiteral("# Hidden\nneedle\n");
+    request(QStringLiteral("testSetText"), {{QStringLiteral("text"), foldedFindText}});
+    execute(QStringLiteral("foldAllHeadings"));
+    request(QStringLiteral("testSetScrollY"), {{QStringLiteral("contentY"), 0}});
+    request(QStringLiteral("testFindNext"), {{QStringLiteral("query"), QStringLiteral("needle")}});
+    QThread::msleep(300);
+    const QJsonObject revealedFind = request(QStringLiteral("status"));
+    addCheck(checks, details, QStringLiteral("findFoldedBodyScrollsAfterLayout"),
+             revealedFind.value(QStringLiteral("selectionStart")).toInt()
+                 == foldedFindText.indexOf(QStringLiteral("needle"))
+                 && cursorVisible(revealedFind)
+                 && revealedFind.value(QStringLiteral("scrollContentY")).toDouble() > 0,
+             QJsonObject{{QStringLiteral("expectedStart"), foldedFindText.indexOf(QStringLiteral("needle"))},
+                         {QStringLiteral("actual"), revealedFind}});
+    const QString longQuery(3000, QLatin1Char('x'));
+    request(QStringLiteral("testSetText"), {{QStringLiteral("text"), findPrefix + longQuery}});
+    request(QStringLiteral("testSetSelection"),
+            {{QStringLiteral("start"), findPrefix.size()}, {QStringLiteral("end"), findPrefix.size()}});
+    QThread::msleep(80);
+    const QJsonObject longStart = request(QStringLiteral("status"));
+    const double longStartY = longStart.value(QStringLiteral("editorContentOffsetY")).toDouble()
+        + longStart.value(QStringLiteral("cursorRectY")).toDouble();
+    request(QStringLiteral("testSetScrollY"), {{QStringLiteral("contentY"), 0}});
+    request(QStringLiteral("testFindNext"), {{QStringLiteral("query"), longQuery}});
+    QThread::msleep(300);
+    const QJsonObject longFound = request(QStringLiteral("status"));
+    const double longVisibleTop = longStartY - longFound.value(QStringLiteral("scrollContentY")).toDouble();
+    addCheck(checks, details, QStringLiteral("findOversizedWrappedMatchShowsStart"),
+             longFound.value(QStringLiteral("selectionEnd")).toInt() == findPrefix.size() + longQuery.size()
+                 && longVisibleTop >= 0
+                 && longVisibleTop + longStart.value(QStringLiteral("cursorRectHeight")).toDouble()
+                    <= longFound.value(QStringLiteral("scrollViewportHeight")).toDouble(),
+             QJsonObject{{QStringLiteral("expectedStartY"), longStartY},
+                         {QStringLiteral("visibleTop"), longVisibleTop},
+                         {QStringLiteral("actual"), longFound}});
+    request(QStringLiteral("testCloseOverlays"));
     const QJsonObject animOffApplied = request(
         QStringLiteral("testApplyAppearance"),
         {{QStringLiteral("theme"), QStringLiteral("light")},

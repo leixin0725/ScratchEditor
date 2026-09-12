@@ -1795,6 +1795,8 @@ void EditorController::buildCommandHandlers()
                 key = Qt::Key_Delete;
             } else if (keyName == QStringLiteral("Enter")) {
                 key = Qt::Key_Return;
+            } else if (keyName == QStringLiteral("Escape")) {
+                key = Qt::Key_Escape;
             } else if (keyName.size() == 1) {
                 key = keyName.front().unicode();
             } else if (!text.isEmpty()) {
@@ -1816,7 +1818,9 @@ void EditorController::buildCommandHandlers()
                 }
             }
             QKeyEvent keyEvent(QEvent::KeyPress, key, modifiers, text);
-            const bool accepted = QCoreApplication::sendEvent(m_editor, &keyEvent);
+            QObject *keyTarget = r.request.value(QStringLiteral("activeFocus")).toBool()
+                && m_window ? m_window->activeFocusItem() : m_editor.data();
+            const bool accepted = keyTarget && QCoreApplication::sendEvent(keyTarget, &keyEvent);
             QJsonObject response = statusObject();
             response.insert(QStringLiteral("command"), r.command);
             response.insert(QStringLiteral("accepted"), accepted);
@@ -3568,11 +3572,14 @@ QJsonObject EditorController::statusObject() const
             status.insert(QStringLiteral("scrollContentHeight"),
                           viewport->property("contentHeight").toDouble());
             status.insert(QStringLiteral("scrollViewportHeight"), viewport->height());
+            status.insert(QStringLiteral("scrollViewportY"), viewport->y());
         }
         status.insert(QStringLiteral("commandPaletteLoaded"),
                       m_window->property("commandPaletteLoaded").toBool());
         status.insert(QStringLiteral("findPanelVisible"),
                       m_window->property("findPanelVisible").toBool());
+        status.insert(QStringLiteral("findPanelBottom"),
+                      m_window->property("findPanelBottom").toDouble());
         status.insert(QStringLiteral("settingsPageLoaded"),
                       m_window->property("settingsPageLoaded").toBool());
         status.insert(QStringLiteral("settingsPageVisible"),
@@ -3779,6 +3786,8 @@ QJsonObject EditorController::statusObject() const
                       m_editor->property("contentHeight").toDouble());
         status.insert(QStringLiteral("cursorRectY"),
                       m_editor->property("cursorRectangle").toRectF().y());
+        status.insert(QStringLiteral("cursorRectHeight"),
+                      m_editor->property("cursorRectangle").toRectF().height());
     }
     return status;
 }

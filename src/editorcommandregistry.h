@@ -183,6 +183,8 @@ private:
     bool navigateToHeading(bool backwards);
     void scheduleHeadingScroll(int position);
     void scrollViewportToHeading(int position);
+    void beginFindNavigation();
+    void finishFindNavigation();
 
     struct InputScrollDiagnostics {
         QString lastKind;

@@ -26,6 +26,7 @@ Rectangle {
     property string searchStatus: ""
 
     signal closeRequested()
+    signal searchChanged()
 
     function open(withReplace) {
         replaceMode = withReplace
@@ -84,6 +85,7 @@ Rectangle {
 
         TextInput {
             id: findInput
+            onTextChanged: root.searchChanged()
             anchors.fill: parent
             anchors.leftMargin: uiConfig.layout.spacingInput
             anchors.rightMargin: uiConfig.layout.spacingInput
@@ -96,8 +98,12 @@ Rectangle {
             selectByMouse: true
             clip: true
 
-            Keys.onReturnPressed: root.findInDocument(false)
-            Keys.onEnterPressed: root.findInDocument(false)
+            Keys.onReturnPressed: function(event) {
+                root.findInDocument((event.modifiers & Qt.ShiftModifier) !== 0)
+            }
+            Keys.onEnterPressed: function(event) {
+                root.findInDocument((event.modifiers & Qt.ShiftModifier) !== 0)
+            }
             Keys.onEscapePressed: root.closeRequested()
         }
     }
@@ -105,6 +111,7 @@ Rectangle {
     Rectangle {
         id: caseSensitiveToggle
         property bool enabledValue: false
+        onEnabledValueChanged: root.searchChanged()
         x: findFieldFrame.x + findFieldFrame.width + uiConfig.panels.find.gap
         y: uiConfig.panels.find.paddingY
         width: uiConfig.panels.find.caseSensitiveWidth

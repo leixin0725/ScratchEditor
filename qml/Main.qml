@@ -115,11 +115,14 @@ Window {
     readonly property real headerTitleCenterY:
         resizeMargin + (dragZoneHeight - resizeMargin) / 2
     readonly property real editorContentTop: dragZoneHeight
+    readonly property real editorViewportTop: findPanel.visible
+        ? findPanel.y + findPanel.height + uiConfig.panels.find.gap : editorContentTop
     readonly property bool cornerResizeEnabled: true
     readonly property bool edgeDragEnabled: true
     readonly property bool verticalScrollBarVisible: scrollThumb.visible
     readonly property bool commandPaletteLoaded: commandPaletteLoader.active
     readonly property bool findPanelVisible: findPanel.visible
+    readonly property real findPanelBottom: findPanel.y + findPanel.height
     readonly property bool settingsPageLoaded: settingsLoader.active
     readonly property bool settingsPageVisible: settingsLoader.active
     readonly property bool fileDropEnabled: fileDropArea.enabled
@@ -292,6 +295,84 @@ Window {
     // 跟随，让整段跳转由统一的轻量滚动动画完成（跳转后标题锚定到视口上 1/3）。
     property bool suppressHeadingCursorFollow: false
 
+    property bool findNavigationChanging: false
+    property bool findNavigationFollowing: false
+    property int findTargetStart: -1
+    property int findTargetEnd: -1
+
+    function cancelFindNavigation() {
+        findNavigationTimer.stop()
+        if (findNavigationFollowing) {
+            scrollAnimation.stop()
+            releaseInputScrollHoldAfterAnimation = false
+            inputScrollHoldBottom = false
+        }
+        findNavigationFollowing = false
+        findTargetStart = -1
+        findTargetEnd = -1
+    }
+
+    function beginFindNavigation() {
+        cancelFindNavigation()
+        scrollAnimation.stop()
+        findNavigationChanging = true
+        findNavigationFollowing = true
+        // 替换收缩期间沿用输入编辑的视口保持，待最终范围定位后释放。
+        inputScrollHoldBottom = true
+    }
+
+    function finishFindNavigation(delay) {
+        findTargetStart = editor.selectionStart
+        findTargetEnd = editor.selectionEnd
+        findNavigationChanging = false
+        findNavigationTimer.interval = delay
+        findNavigationTimer.restart()
+    }
+
+    function invalidateFindTarget() {
+        if (!findNavigationChanging)
+            cancelFindNavigation()
+    }
+
+    function refreshFindNavigation() {
+        if (findTargetStart >= 0) {
+            findNavigationFollowing = true
+            findNavigationTimer.restart()
+        }
+    }
+
+    function revealFindTarget() {
+        if (findTargetStart < 0 || editor.selectionStart !== findTargetStart
+                || editor.selectionEnd !== findTargetEnd) {
+            cancelFindNavigation()
+            return
+        }
+        const first = editor.positionToRectangle(findTargetStart)
+        const last = editor.positionToRectangle(Math.max(findTargetStart, findTargetEnd - 1))
+        const top = editor.y + first.y
+        const bottom = editor.y + last.y + last.height
+        const viewportHeight = editorViewport.height
+        let target = editorViewport.contentY
+        // 超过一屏时只要求起始行可见；短范围则保证首尾可视行完整显示。
+        const visibleBottom = bottom - top > viewportHeight ? top + first.height : bottom
+        if (top < target || visibleBottom > target + viewportHeight) {
+            target = top - viewportHeight / 3
+            if (bottom - top <= viewportHeight)
+                target = Math.max(target, bottom - viewportHeight)
+        }
+        requestedScrollY = target
+        releaseInputScrollHoldAfterAnimation = true
+        animateScrollTo()
+        if (!scrollAnimation.running)
+            findNavigationFollowing = false
+    }
+
+    Timer {
+        id: findNavigationTimer
+        repeat: false
+        onTriggered: root.revealFindTarget()
+    }
+
     function scrollToBottom() {
         editorViewport.contentY = Math.max(0, editorViewport.contentHeight - editorViewport.height)
     }
@@ -302,6 +383,7 @@ Window {
     // 延迟自动滚动检查前把 contentY 钳到新的自然上限。若上一次输入
     // 滚动动画仍在进行，则停在当前帧，由本次编辑重新决定后续滚动。
     function prepareInputScrollTracking() {
+        cancelFindNavigation()
         releaseInputScrollHoldAfterAnimation = false
         scrollAnimation.stop()
         inputScrollHoldBottom = true
@@ -646,6 +728,8 @@ Window {
     }
 
     onVisibleChanged: {
+        if (!visible)
+            cancelFindNavigation()
         if (!visible && historyPanelOpen) {
             closeClipboardHistory()
         }
@@ -947,14 +1031,19 @@ Window {
         uiFontFamily: root.uiFontFamily
         monospaceFontFamily: root.uiMonospaceFontFamily
         onCloseRequested: root.hideFindPanel()
+        onSearchChanged: root.cancelFindNavigation()
+        onVisibleChanged: {
+            if (!visible)
+                root.cancelFindNavigation()
+        }
     }
 
     Rectangle {
         id: editorSurface
         x: root.marginSize + root.editorHorizontalShift
-        y: root.editorContentTop
+        y: root.editorViewportTop
         width: root.editorVisibleWidth
-        height: root.height - root.dragZoneHeight - root.marginSize
+        height: root.height - y - root.marginSize
         color: root.themeEditorSurfaceColor
 
         Behavior on color {
@@ -966,9 +1055,11 @@ Window {
         id: editorViewport
         objectName: "editorViewport"
         x: root.marginSize + root.editorHorizontalShift
-        y: root.editorContentTop
+        y: root.editorViewportTop
         width: root.editorVisibleWidth
-        height: root.height - root.dragZoneHeight - root.marginSize
+        height: root.height - y - root.marginSize
+        onHeightChanged: root.refreshFindNavigation()
+        onWidthChanged: root.refreshFindNavigation()
         clip: true
         boundsBehavior: Flickable.StopAtBounds
         contentWidth: width
@@ -994,6 +1085,7 @@ Window {
             duration: root.scrollAnimationDurationMs
             easing.type: Easing.OutCubic
             onFinished: {
+                root.findNavigationFollowing = false
                 if (root.releaseInputScrollHoldAfterAnimation) {
                     root.releaseInputScrollHoldAfterAnimation = false
                     root.inputScrollHoldBottom = false
@@ -1004,11 +1096,13 @@ Window {
         // 用户拖动/甩动时立即停止动画，避免与手势互相打架；
         // 同时释放删除/撤销保持期间的弹性底部缓冲，手动滚动后由下一次检查重新判定。
         onDragStarted: {
+            root.cancelFindNavigation()
             root.releaseInputScrollHoldAfterAnimation = false
             scrollAnimation.stop()
             root.inputScrollHoldBottom = false
         }
         onFlickStarted: {
+            root.cancelFindNavigation()
             root.releaseInputScrollHoldAfterAnimation = false
             scrollAnimation.stop()
             root.inputScrollHoldBottom = false
@@ -1020,6 +1114,7 @@ Window {
             target: null
             blocking: false
             onWheel: {
+                root.cancelFindNavigation()
                 root.releaseInputScrollHoldAfterAnimation = false
                 root.inputScrollHoldBottom = false
             }
@@ -1134,11 +1229,15 @@ Window {
 
             onWidthChanged: root.refreshHeadingNavigationHighlightGeometry()
             onContentHeightChanged: root.refreshHeadingNavigationHighlightGeometry()
+            onSelectionStartChanged: root.invalidateFindTarget()
+            onSelectionEndChanged: root.invalidateFindTarget()
+            onTextChanged: root.invalidateFindTarget()
 
             onCursorRectangleChanged: {
                 // 标题跳转期间抑制瞬时贴边跟随，跳转的对齐滚动稍后由统一的
                 // 轻量动画入口执行。
-                if (root.suppressHeadingCursorFollow) {
+                if (root.suppressHeadingCursorFollow || root.findNavigationFollowing
+                        || (findPanel.visible && !editor.activeFocus)) {
                     return
                 }
                 // 文档变更期间 QML 会短暂给出过期/无效的光标矩形（如落在
@@ -1495,6 +1594,7 @@ Window {
             property real grabOffset: 0
 
             onPressed: function(mouse) {
+                root.cancelFindNavigation()
                 root.releaseInputScrollHoldAfterAnimation = false
                 scrollAnimation.stop()
                 root.inputScrollHoldBottom = false
