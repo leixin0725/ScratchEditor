@@ -7,6 +7,8 @@ Rectangle {
     required property var uiConfig
     required property int dragZoneHeight
     required property int transitionDuration
+    required property real availableX
+    required property real availableWidth
     required property color panelColor
     required property color borderColor
     required property color fieldColor
@@ -53,10 +55,10 @@ Rectangle {
 
     z: 60
     visible: false
-    anchors.horizontalCenter: parent.horizontalCenter
+    x: availableX + (availableWidth - width) / 2
     y: dragZoneHeight + uiConfig.panels.find.gap
     width: Math.min(uiConfig.panels.find.maxWidth,
-                    parent.width - uiConfig.panels.find.widthInset)
+                    availableWidth - uiConfig.panels.find.widthInset)
     height: replaceMode ? uiConfig.panels.find.heightReplace
                         : uiConfig.panels.find.heightSingle
     radius: uiConfig.layout.radiusNormal

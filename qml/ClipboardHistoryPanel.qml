@@ -107,11 +107,10 @@ Loader {
             id: historyPanel
             objectName: "clipboardHistoryPanel"
             // 闭合时右边缘正好压在 loader 左边界（左边框与编辑区域交界）。
-            // 滑动进度只在开/合切换时变化并带动画；x 直接由宽度与进度绑定，
+            // 与编辑区、查找面板共用主窗口布局进度；x 直接由宽度与进度绑定，
             // 窗口缩放期间宽度变化会让闭合 x 即时跟随，避免 Behavior 逐帧
             // 重启动画造成右边缘短暂探入可见裁剪区（唤出窗口时闪现）。
-            property real slideProgress: host.historyPanelOpen ? 1 : 0
-            x: -historyPanel.width + historyPanel.width * slideProgress
+            x: -historyPanel.width + historyPanel.width * host.historyLayoutProgress
             width: host.historyPanelWidth
             height: parent.height
             // 左侧使用历史面板专用内部圆角；右侧与编辑区拼接，保持直角。
@@ -122,13 +121,6 @@ Loader {
             color: host.themePanelColor
             border.color: host.themeBorderColor
             border.width: uiConfig.layout.borderWidth
-
-            Behavior on slideProgress {
-                NumberAnimation {
-                    duration: host.transitionDuration
-                    easing.type: Easing.OutCubic
-                }
-            }
 
             HoverHandler {
                 onHoveredChanged: {

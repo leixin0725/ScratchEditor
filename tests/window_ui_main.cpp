@@ -910,6 +910,57 @@ int main(int argc, char *argv[])
              QJsonObject{{QStringLiteral("expectedScrollY"), 0},
                          {QStringLiteral("layout"), replaceLayout},
                          {QStringLiteral("actual"), firstLineFound}});
+
+    const auto findHistoryGeometryMatches = [](const QJsonObject &status) {
+        const double progress = status.value(QStringLiteral("historyLayoutProgress")).toDouble();
+        const double historyWidth = status.value(QStringLiteral("historyPanelWidth")).toDouble();
+        const double availableX = progress * historyWidth;
+        const double availableWidth = status.value(QStringLiteral("width")).toDouble() - availableX;
+        const double expectedWidth = qMin(760.0, availableWidth - 48.0);
+        const double expectedX = availableX + (availableWidth - expectedWidth) / 2.0;
+        return qAbs(status.value(QStringLiteral("findPanelX")).toDouble() - expectedX) <= 1.0
+            && qAbs(status.value(QStringLiteral("findPanelWidth")).toDouble()
+                    - expectedWidth) <= 1.0;
+    };
+    const QJsonObject findHistoryOpeningFirst = historyAction(QStringLiteral("historyOpen"));
+    QThread::msleep(60);
+    const QJsonObject findHistoryOpeningMid = request(QStringLiteral("status"));
+    QThread::msleep(100);
+    const QJsonObject findHistoryOpened = request(QStringLiteral("status"));
+    addCheck(checks, details, QStringLiteral("findPanelFollowsHistoryOpeningAnimation"),
+             findHistoryOpeningFirst.value(QStringLiteral("findPanelVisible")).toBool()
+                 && findHistoryOpeningMid.value(
+                        QStringLiteral("historyLayoutProgress")).toDouble() > 0.0
+                 && findHistoryOpeningMid.value(
+                        QStringLiteral("historyLayoutProgress")).toDouble() < 1.0
+                 && findHistoryGeometryMatches(findHistoryOpeningMid)
+                 && findHistoryGeometryMatches(findHistoryOpened)
+                 && findHistoryOpened.value(QStringLiteral("findPanelX")).toDouble()
+                    >= findHistoryOpened.value(QStringLiteral("historyPanelWidth")).toDouble()
+                       + 18.0,
+             QJsonObject{{QStringLiteral("first"), findHistoryOpeningFirst},
+                         {QStringLiteral("mid"), findHistoryOpeningMid},
+                         {QStringLiteral("settled"), findHistoryOpened}});
+    const QJsonObject findHistoryClosingFirst = historyAction(QStringLiteral("historyClose"));
+    QThread::msleep(60);
+    const QJsonObject findHistoryClosingMid = request(QStringLiteral("status"));
+    QThread::msleep(100);
+    const QJsonObject findHistoryClosed = request(QStringLiteral("status"));
+    addCheck(checks, details, QStringLiteral("findPanelFollowsHistoryClosingAnimation"),
+             findHistoryClosingFirst.value(QStringLiteral("findPanelVisible")).toBool()
+                 && findHistoryClosingMid.value(
+                        QStringLiteral("historyLayoutProgress")).toDouble() > 0.0
+                 && findHistoryClosingMid.value(
+                        QStringLiteral("historyLayoutProgress")).toDouble() < 1.0
+                 && findHistoryGeometryMatches(findHistoryClosingMid)
+                 && findHistoryGeometryMatches(findHistoryClosed)
+                 && qAbs(findHistoryClosed.value(QStringLiteral("findPanelX")).toDouble()
+                         - replaceLayout.value(QStringLiteral("findPanelX")).toDouble()) <= 1.0
+                 && qAbs(findHistoryClosed.value(QStringLiteral("findPanelWidth")).toDouble()
+                         - replaceLayout.value(QStringLiteral("findPanelWidth")).toDouble()) <= 1.0,
+             QJsonObject{{QStringLiteral("first"), findHistoryClosingFirst},
+                         {QStringLiteral("mid"), findHistoryClosingMid},
+                         {QStringLiteral("settled"), findHistoryClosed}});
     request(QStringLiteral("testFindNext"), {{QStringLiteral("query"), QStringLiteral("# B")}});
     keyPress({}, QStringLiteral("PageUp"));
     QThread::msleep(300);
@@ -1318,6 +1369,17 @@ int main(int argc, char *argv[])
                          - 920.0 / 3.0) < 1.0
                  && wideHistory.value(QStringLiteral("editorVisibleWidth")).toDouble() >= 320.0,
              wideHistory);
+    execute(QStringLiteral("replace"));
+    const QJsonObject wideHistoryWithFind = request(QStringLiteral("status"));
+    addCheck(checks, details, QStringLiteral("findPanelHistoryLayoutIsImmediateWithoutAnimation"),
+             !wideHistoryWithFind.value(QStringLiteral("animationsEnabled")).toBool()
+                 && wideHistoryWithFind.value(QStringLiteral("historyPanelOpen")).toBool()
+                 && wideHistoryWithFind.value(QStringLiteral("findPanelVisible")).toBool()
+                 && qAbs(wideHistoryWithFind.value(
+                            QStringLiteral("historyLayoutProgress")).toDouble() - 1.0) <= 0.001
+                 && findHistoryGeometryMatches(wideHistoryWithFind),
+             wideHistoryWithFind);
+    request(QStringLiteral("testCloseOverlays"));
     addCheck(checks, details, QStringLiteral("historyPanelCornerShapeOpen"),
              hasHistoryPanelCornerShape(wideHistory),
              historyPanelCornerDetails(wideHistory));
@@ -1742,6 +1804,17 @@ int main(int argc, char *argv[])
                          - 200.0) < 1.0
                  && narrowHistory.value(QStringLiteral("editorVisibleWidth")).toDouble() >= 320.0,
              narrowHistory);
+    execute(QStringLiteral("find"));
+    const QJsonObject narrowHistoryWithFind = request(QStringLiteral("status"));
+    addCheck(checks, details, QStringLiteral("findPanelKeepsOverlayGeometryInNarrowWindow"),
+             narrowHistoryWithFind.value(QStringLiteral("historyPanelOverlay")).toBool()
+                 && narrowHistoryWithFind.value(QStringLiteral("findPanelVisible")).toBool()
+                 && qAbs(narrowHistoryWithFind.value(
+                            QStringLiteral("findPanelX")).toDouble() - 24.0) <= 1.0
+                 && qAbs(narrowHistoryWithFind.value(
+                            QStringLiteral("findPanelWidth")).toDouble() - 452.0) <= 1.0,
+             narrowHistoryWithFind);
+    request(QStringLiteral("testCloseOverlays"));
     request(QStringLiteral("testSetText"),
             {{QStringLiteral("text"), QStringLiteral("overlay-drop-target")}});
     const QJsonObject historyOverlayCoveredDrop = dragHistoryUi(selectedHistoryId, 0);

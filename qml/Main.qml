@@ -122,6 +122,8 @@ Window {
     readonly property bool verticalScrollBarVisible: scrollThumb.visible
     readonly property bool commandPaletteLoaded: commandPaletteLoader.active
     readonly property bool findPanelVisible: findPanel.visible
+    readonly property real findPanelX: findPanel.x
+    readonly property real findPanelWidth: findPanel.width
     readonly property real findPanelBottom: findPanel.y + findPanel.height
     readonly property bool settingsPageLoaded: settingsLoader.active
     readonly property bool settingsPageVisible: settingsLoader.active
@@ -266,6 +268,8 @@ Window {
         historyPanelOverlay ? 0 : historyLayoutProgress * historyPanelWidth
     readonly property real editorVisibleWidth:
         root.width - root.marginSize * 2 - editorHorizontalShift
+    readonly property real findPanelAvailableX: editorHorizontalShift
+    readonly property real findPanelAvailableWidth: root.width - findPanelAvailableX
     readonly property real editorViewportWidth: editorViewport.width
     readonly property bool historyPanelLoaded:
         historyPanelLoader.active && historyPanelLoader.item !== null
@@ -1016,6 +1020,8 @@ Window {
         uiConfig: root.uiConfig
         dragZoneHeight: root.dragZoneHeight
         transitionDuration: root.transitionDuration
+        availableX: root.findPanelAvailableX
+        availableWidth: root.findPanelAvailableWidth
         panelColor: root.themePanelColor
         borderColor: root.themeBorderColor
         fieldColor: root.themeFieldColor

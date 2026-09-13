@@ -3584,6 +3584,12 @@ QJsonObject EditorController::statusObject() const
                       m_window->property("commandPaletteLoaded").toBool());
         status.insert(QStringLiteral("findPanelVisible"),
                       m_window->property("findPanelVisible").toBool());
+        if (m_testMode) {
+            status.insert(QStringLiteral("findPanelX"),
+                          m_window->property("findPanelX").toDouble());
+            status.insert(QStringLiteral("findPanelWidth"),
+                          m_window->property("findPanelWidth").toDouble());
+        }
         status.insert(QStringLiteral("findPanelBottom"),
                       m_window->property("findPanelBottom").toDouble());
         status.insert(QStringLiteral("settingsPageLoaded"),
@@ -3629,6 +3635,10 @@ QJsonObject EditorController::statusObject() const
                       m_window->property("historyPanelOverlay").toBool());
         status.insert(QStringLiteral("historyPanelWidth"),
                       m_window->property("historyPanelWidth").toDouble());
+        if (m_testMode) {
+            status.insert(QStringLiteral("historyLayoutProgress"),
+                          m_window->property("historyLayoutProgress").toDouble());
+        }
         status.insert(QStringLiteral("historyPanelEdgeIntrusion"),
                       m_window->property("historyPanelEdgeIntrusion").toDouble());
         if (m_testMode) {
