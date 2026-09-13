@@ -1154,6 +1154,19 @@ int main(int argc, char *argv[])
                  && opened.value(QStringLiteral("settingsPageLoaded")).toBool()
                  && opened.value(QStringLiteral("settingsPageVisible")).toBool(),
              opened);
+    const double settingsLastControlBottom =
+        opened.value(QStringLiteral("settingsPageLastControlBottom")).toDouble();
+    const double settingsConfigCaptionY =
+        opened.value(QStringLiteral("settingsPageConfigCaptionY")).toDouble();
+    addCheck(checks, details, QStringLiteral("settingsPageContentDoesNotOverlap"),
+             settingsConfigCaptionY > settingsLastControlBottom,
+             QJsonObject{
+                 {QStringLiteral("actualLastControlBottom"), settingsLastControlBottom},
+                 {QStringLiteral("actualConfigCaptionY"), settingsConfigCaptionY},
+                 {QStringLiteral("actualContentHeight"),
+                  opened.value(QStringLiteral("settingsPageContentHeight")).toDouble()},
+                 {QStringLiteral("expected"),
+                  QStringLiteral("configCaptionY > lastControlBottom")}});
     addCheck(checks, details, QStringLiteral("fileDropDisabledBySettings"),
              !opened.value(QStringLiteral("fileDropEnabled")).toBool(), opened);
     const QJsonObject closed = request(QStringLiteral("testCloseOverlays"));

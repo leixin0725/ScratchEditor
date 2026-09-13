@@ -3620,6 +3620,14 @@ QJsonObject EditorController::statusObject() const
                       m_window->property("settingsPageLoaded").toBool());
         status.insert(QStringLiteral("settingsPageVisible"),
                       m_window->property("settingsPageVisible").toBool());
+        if (m_testMode) {
+            status.insert(QStringLiteral("settingsPageContentHeight"),
+                          m_window->property("settingsPageContentHeight").toDouble());
+            status.insert(QStringLiteral("settingsPageLastControlBottom"),
+                          m_window->property("settingsPageLastControlBottom").toDouble());
+            status.insert(QStringLiteral("settingsPageConfigCaptionY"),
+                          m_window->property("settingsPageConfigCaptionY").toDouble());
+        }
         status.insert(QStringLiteral("fileDropEnabled"),
                       m_window->property("fileDropEnabled").toBool());
         status.insert(QStringLiteral("themeBackgroundColor"),

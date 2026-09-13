@@ -128,6 +128,12 @@ Window {
     readonly property real findPanelBottom: findPanel.y + findPanel.height
     readonly property bool settingsPageLoaded: settingsLoader.active
     readonly property bool settingsPageVisible: settingsLoader.active
+    readonly property real settingsPageContentHeight:
+        settingsLoader.effectiveContentHeight
+    readonly property real settingsPageLastControlBottom:
+        settingsLoader.lastControlBottom
+    readonly property real settingsPageConfigCaptionY:
+        settingsLoader.configCaptionY
     readonly property bool fileDropEnabled: fileDropArea.enabled
     readonly property bool darkTheme: controller.theme !== "light"
     readonly property var uiThemeColors: uiConfig.palette[darkTheme ? "dark" : "light"]

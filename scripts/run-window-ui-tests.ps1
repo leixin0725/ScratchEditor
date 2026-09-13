@@ -3,6 +3,7 @@ param(
     [string]$BuildSubdirectory = "build\window-ui",
     [string]$ServerName = "ScratchEditor.WindowUi.Validation",
     [string]$OriginalAhkPath = "",
+    [string]$UiConfigPath = "",
     [string]$ArtifactPrefix = "window-ui-results"
 )
 
@@ -27,6 +28,18 @@ $settingsFile = Join-Path $settingsDirectory "$settingsStem.ini"
 $env:PATH = "$qtBin;$mingwBin;$env:PATH"
 $env:SCRATCHEDITOR_SERVER_NAME = $ServerName
 $env:SCRATCHEDITOR_SETTINGS_FILE = $settingsFile
+if (-not [string]::IsNullOrWhiteSpace($UiConfigPath)) {
+    $resolvedUiConfigPath = if ([System.IO.Path]::IsPathRooted($UiConfigPath)) {
+        [System.IO.Path]::GetFullPath($UiConfigPath)
+    }
+    else {
+        [System.IO.Path]::GetFullPath((Join-Path $projectRoot $UiConfigPath))
+    }
+    if (-not (Test-Path -LiteralPath $resolvedUiConfigPath -PathType Leaf)) {
+        throw "UI configuration file is missing: $resolvedUiConfigPath"
+    }
+    $env:SCRATCHEDITOR_UI_CONFIG = $resolvedUiConfigPath
+}
 
 function Send-IpcRequest {
     param([Parameter(Mandatory)] [hashtable]$Request, [int]$TimeoutMs = 3000)

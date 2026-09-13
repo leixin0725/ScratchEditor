@@ -9,6 +9,12 @@ Item {
     readonly property var uiConfig: host.uiConfig
     property alias active: settingsLoader.active
     readonly property var item: settingsLoader.item
+    readonly property real effectiveContentHeight:
+        item ? item.effectiveContentHeight : 0
+    readonly property real lastControlBottom:
+        item ? item.lastControlBottom : 0
+    readonly property real configCaptionY:
+        item ? item.configCaptionY : 0
 
     Loader {
         id: settingsLoader
@@ -51,6 +57,14 @@ Item {
             property int draftStatusPanelMaxWidth:
                 uiConfig.panels.statusPanel.defaultMaxWidth
             property string saveStatus: ""
+            readonly property real effectiveContentHeight: settingsContent.contentHeight
+            readonly property real lastControlBottom:
+                statusPanelMaxWidthField.y + statusPanelMaxWidthField.height
+            readonly property real configCaptionY: configCaption.y
+            readonly property real minimumContentHeight:
+                statusPanelMaxWidthField.y
+                + uiConfig.panels.settingsPage.rowHeight
+                + uiConfig.panels.settingsPage.captionTopGap
 
             function fontWeightLabel(weight) {
                 for (let index = 0; index < fontWeightOptions.length; ++index) {
@@ -191,7 +205,8 @@ Item {
                     width: parent.width - uiConfig.panels.settingsPage.paddingX * 2
                     height: parent.height - uiConfig.panels.settingsPage.contentBottomInset
                     contentWidth: width
-                    contentHeight: uiConfig.panels.settingsPage.contentHeight
+                    contentHeight: Math.max(uiConfig.panels.settingsPage.contentHeight,
+                                            settingsRoot.minimumContentHeight)
                     clip: true
                     boundsBehavior: Flickable.StopAtBounds
                     onMovementStarted: settingsRoot.fontWeightMenuOpen = false
@@ -577,6 +592,7 @@ Item {
                         }
 
                         Rectangle {
+                            id: statusPanelMaxWidthField
                             x: uiConfig.panels.settingsPage.columnX
                             y: uiConfig.panels.settingsPage.rowHeight * 9
                             width: uiConfig.panels.settingsPage.controlWidthWide
@@ -603,8 +619,9 @@ Item {
                         }
 
                         Text {
+                            id: configCaption
                             x: 0
-                            y: uiConfig.panels.settingsPage.contentHeight
+                            y: settingsContent.contentHeight
                                - uiConfig.panels.settingsPage.captionTopGap
                             text: "集中配置文件"
                             color: host.themeMutedTextColor
@@ -614,7 +631,7 @@ Item {
 
                         Text {
                             x: 0
-                            y: uiConfig.panels.settingsPage.contentHeight
+                            y: settingsContent.contentHeight
                                - uiConfig.panels.settingsPage.captionBottomGap
                             width: parent.width
                             text: root.appController.settingsFile

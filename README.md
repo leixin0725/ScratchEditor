@@ -391,7 +391,9 @@ UTF-16 code unit 精确去重；再次复制完全相同的文本会保留稳定
 `config/ui.json`。文件为 JSONC 格式，可写 `//` 与 `/* */` 注释；改动后重启
 应用生效。稳定安装首次构建时把模板初始化到
 `%LOCALAPPDATA%\ScratchEditor\ScratchEditor\ui.json`，后续构建不覆盖用户副本；
-测试模式读取构建目录中的模板，也可用 `SCRATCHEDITOR_UI_CONFIG` 指定隔离配置。
+设置页会按当前控件布局保证必要的最小内容高度，因此新增设置项后旧版 `contentHeight`
+不会造成底部内容重叠；用户配置的更大高度仍然保留。测试模式读取构建目录中的模板，
+也可用 `SCRATCHEDITOR_UI_CONFIG` 指定隔离配置。
 
 配置模板集中保存在 `config/markdown-style.json`。其中 `theme.accentColor` 是界面强调色的单一事实
 来源：设置页、命令面板、焦点边框、文本选区、拖动选区的落点光标和 Markdown 链接都使用该颜色；
