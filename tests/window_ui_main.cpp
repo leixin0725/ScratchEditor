@@ -860,6 +860,8 @@ int main(int argc, char *argv[])
         - headingAnimMid.value(QStringLiteral("scrollViewportHeight")).toDouble();
     QThread::msleep(300);
     const QJsonObject headingAnimSettled = request(QStringLiteral("status"));
+    const double closedEditorTop = headingAnimSettled.value(
+        QStringLiteral("editorViewportY")).toDouble();
     const double headingAnimAnchorY =
         headingAnimSettled.value(QStringLiteral("editorContentOffsetY")).toDouble()
         + headingAnimSettled.value(QStringLiteral("cursorRectY")).toDouble()
@@ -881,6 +883,15 @@ int main(int argc, char *argv[])
     execute(QStringLiteral("find"));
     QThread::msleep(80);
     const QJsonObject findButtonsResting = request(QStringLiteral("status"));
+    const double findTopDiff = qAbs(
+        findButtonsResting.value(QStringLiteral("findPanelY")).toDouble()
+        - closedEditorTop);
+    addCheck(checks, details, QStringLiteral("findPanelTopMatchesClosedEditorTop"),
+             findTopDiff <= 0.5,
+             QJsonObject{{QStringLiteral("actual"),
+                          findButtonsResting.value(QStringLiteral("findPanelY"))},
+                         {QStringLiteral("expected"), closedEditorTop},
+                         {QStringLiteral("diff"), findTopDiff}});
     const QJsonObject findNextHovered = findPanelAction(
         QStringLiteral("hoverEnter"), QStringLiteral("next"));
     const QJsonObject findNextUnhovered = findPanelAction(QStringLiteral("hoverLeave"));
@@ -938,6 +949,15 @@ int main(int argc, char *argv[])
     execute(QStringLiteral("replace"));
     QThread::msleep(100);
     const QJsonObject replaceLayout = request(QStringLiteral("status"));
+    const double replaceTopDiff = qAbs(
+        replaceLayout.value(QStringLiteral("findPanelY")).toDouble()
+        - closedEditorTop);
+    addCheck(checks, details, QStringLiteral("replacePanelTopMatchesClosedEditorTop"),
+             replaceTopDiff <= 0.5,
+             QJsonObject{{QStringLiteral("actual"),
+                          replaceLayout.value(QStringLiteral("findPanelY"))},
+                         {QStringLiteral("expected"), closedEditorTop},
+                         {QStringLiteral("diff"), replaceTopDiff}});
     request(QStringLiteral("testFindNext"), {{QStringLiteral("query"), QStringLiteral("# A")}});
     QThread::msleep(300);
     const QJsonObject firstLineFound = request(QStringLiteral("status"));

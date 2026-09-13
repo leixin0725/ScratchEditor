@@ -5,7 +5,7 @@ Rectangle {
 
     required property var appController
     required property var uiConfig
-    required property int dragZoneHeight
+    required property real editorContentTop
     required property int transitionDuration
     required property real availableX
     required property real availableWidth
@@ -75,7 +75,7 @@ Rectangle {
     z: 60
     visible: false
     x: availableX
-    y: dragZoneHeight + uiConfig.panels.find.gap
+    y: editorContentTop
     width: availableWidth
     height: replaceMode ? uiConfig.panels.find.heightReplace
                         : uiConfig.panels.find.heightSingle

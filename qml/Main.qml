@@ -123,6 +123,7 @@ Window {
     readonly property bool commandPaletteLoaded: commandPaletteLoader.active
     readonly property bool findPanelVisible: findPanel.visible
     readonly property real findPanelX: findPanel.x
+    readonly property real findPanelY: findPanel.y
     readonly property real findPanelWidth: findPanel.width
     readonly property real findPanelBottom: findPanel.y + findPanel.height
     readonly property bool settingsPageLoaded: settingsLoader.active
@@ -1057,7 +1058,7 @@ Window {
         id: findPanel
         appController: controller
         uiConfig: root.uiConfig
-        dragZoneHeight: root.dragZoneHeight
+        editorContentTop: root.editorContentTop
         transitionDuration: root.transitionDuration
         availableX: root.findPanelAvailableX
         availableWidth: root.findPanelAvailableWidth

@@ -3609,6 +3609,8 @@ QJsonObject EditorController::statusObject() const
                           m_window->property("findCaseSensitiveButtonColor").toString());
             status.insert(QStringLiteral("findPanelX"),
                           m_window->property("findPanelX").toDouble());
+            status.insert(QStringLiteral("findPanelY"),
+                          m_window->property("findPanelY").toDouble());
             status.insert(QStringLiteral("findPanelWidth"),
                           m_window->property("findPanelWidth").toDouble());
         }
