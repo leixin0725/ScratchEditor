@@ -2417,10 +2417,9 @@ void EditorCommandRegistry::checkInputAutoScroll()
             m_inputScrollDiag.didScroll = didScroll;
             event.didScroll = didScroll;
         } else if (cursorTouchesTopEdge) {
-            // 删除触顶的严格镜像：只在光标碰到/越过视口顶边时触发一次，
-            // 触发后光标行落到视口距顶 2/3 处（下 1/3），继续删除再次
-            // 触顶才再次触发；光标位于文档开头时滚到顶部（与段尾触底
-            // 滚到底对称）。
+            // 删除触顶：只在光标碰到/越过视口顶边时触发一次。通常让光标行
+            // 落到视口距顶 2/3 处（下 1/3）；若该目标距文档顶部不足 1/3 屏，
+            // 则直接滚到顶部。继续删除再次触顶才再次触发。
             triggered = true;
             ++m_inputScrollDiag.triggerCount;
             qreal targetY = currentY;
@@ -2432,6 +2431,9 @@ void EditorCommandRegistry::checkInputAutoScroll()
                 targetY = qBound<qreal>(
                     0.0, editorY + cursorRect.y() - viewportHeight * 2.0 / 3.0,
                     maximumY);
+                if (targetY < viewportHeight / 3.0) {
+                    targetY = 0.0;
+                }
             }
             if (!qFuzzyCompare(targetY + 1.0, currentY + 1.0)) {
                 animateViewportScrollTo(viewport, targetY, true);

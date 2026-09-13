@@ -6035,9 +6035,39 @@ int main(int argc, char *argv[])
     // --- 删除触顶自动滚动（严格镜像）与撤销/重做统一检查 ---
     const QString scrollLine =
         QStringLiteral("line-40 abcdefghij klmnopqrstuvwxyz\n");
+    const int scrollNearTopCursor = scrollText.indexOf(QStringLiteral("line-24"));
     const int scrollTopCursor = scrollText.indexOf(QStringLiteral("line-40"));
     const int scrollSelectionStart = scrollText.indexOf(QStringLiteral("line-40"));
     const int scrollSelectionEnd = scrollText.indexOf(QStringLiteral("line-50"));
+
+    // 下三分点锚定目标距第一行不足 1/3 屏时直接吸附到文档顶部，
+    // 避免在接近开头的位置留下不足一屏的零碎回滚距离。
+    request(QStringLiteral("testSetText"), {{QStringLiteral("text"), scrollText}});
+    request(QStringLiteral("testSetSelection"),
+            {{QStringLiteral("start"), scrollNearTopCursor},
+             {QStringLiteral("end"), scrollNearTopCursor}});
+    setScrollY(pageMaxY);
+    QThread::msleep(30);
+    keyPress({}, QStringLiteral("Backspace"));
+    QThread::msleep(80);
+    const QJsonObject deleteNearTopStatus = editorStatus();
+    const double deleteNearTopAnchorY =
+        deleteNearTopStatus.value(QStringLiteral("editorContentOffsetY")).toDouble()
+        + deleteNearTopStatus.value(QStringLiteral("cursorRectY")).toDouble()
+        - deleteNearTopStatus.value(QStringLiteral("scrollViewportHeight")).toDouble()
+            * 2.0 / 3.0;
+    const double deleteNearTopThreshold =
+        deleteNearTopStatus.value(QStringLiteral("scrollViewportHeight")).toDouble() / 3.0;
+    addCheck(checks, details, QStringLiteral("deleteNearTopSnapsToDocumentTop"),
+             deleteNearTopStatus.value(QStringLiteral("cursorPosition")).toInt()
+                    == scrollNearTopCursor - 1
+                 && deleteNearTopAnchorY > 1.5
+                 && deleteNearTopAnchorY < deleteNearTopThreshold
+                 && std::abs(deleteNearTopStatus.value(QStringLiteral("scrollContentY"))
+                                 .toDouble()) < 1.5,
+             QJsonObject{{QStringLiteral("anchorY"), deleteNearTopAnchorY},
+                         {QStringLiteral("threshold"), deleteNearTopThreshold},
+                         {QStringLiteral("status"), deleteNearTopStatus}});
 
     // 退格使光标位于视口顶边之上：先由 QML 最小跟随滚到顶边，
     // 再由统一检查把光标行锚定到视口距顶 2/3 处（下 1/3）。
