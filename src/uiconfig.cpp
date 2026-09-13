@@ -267,8 +267,6 @@ UiConfig UiConfig::defaults()
     put({"panels", "statusPanel", "defaultMaxWidth"}, 360);
     put({"panels", "statusPanel", "maxWidthMin"}, 200);
     put({"panels", "statusPanel", "maxWidthMax"}, 800);
-    put({"panels", "find", "maxWidth"}, 760);
-    put({"panels", "find", "widthInset"}, 48);
     put({"panels", "find", "heightSingle"}, 66);
     put({"panels", "find", "heightReplace"}, 104);
     put({"panels", "find", "paddingX"}, 12);
@@ -498,8 +496,6 @@ QVariantMap UiConfig::sanitize(const QVariantMap &input)
     fixInt({"panels", "statusPanel", "hideDelayMaxMs"}, 0, 10000);
     fixInt({"panels", "statusPanel", "maxWidthMin"}, 100, 2000);
     fixInt({"panels", "statusPanel", "maxWidthMax"}, 100, 4000);
-    fixInt({"panels", "find", "maxWidth"}, 200, 4000);
-    fixInt({"panels", "find", "widthInset"}, 0, 1000);
     fixInt({"panels", "find", "heightSingle"}, 24, 400);
     fixInt({"panels", "find", "heightReplace"}, 24, 600);
     fixInt({"panels", "find", "paddingX"}, 0, 200);

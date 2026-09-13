@@ -269,8 +269,8 @@ Window {
         historyPanelOverlay ? 0 : historyLayoutProgress * historyPanelWidth
     readonly property real editorVisibleWidth:
         root.width - root.marginSize * 2 - editorHorizontalShift
-    readonly property real findPanelAvailableX: editorHorizontalShift
-    readonly property real findPanelAvailableWidth: root.width - findPanelAvailableX
+    readonly property real findPanelAvailableX: root.marginSize + editorHorizontalShift
+    readonly property real findPanelAvailableWidth: editorVisibleWidth
     readonly property real editorViewportWidth: editorViewport.width
     readonly property bool historyPanelLoaded:
         historyPanelLoader.active && historyPanelLoader.item !== null

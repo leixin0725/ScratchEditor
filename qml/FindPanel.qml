@@ -74,10 +74,9 @@ Rectangle {
 
     z: 60
     visible: false
-    x: availableX + (availableWidth - width) / 2
+    x: availableX
     y: dragZoneHeight + uiConfig.panels.find.gap
-    width: Math.min(uiConfig.panels.find.maxWidth,
-                    availableWidth - uiConfig.panels.find.widthInset)
+    width: availableWidth
     height: replaceMode ? uiConfig.panels.find.heightReplace
                         : uiConfig.panels.find.heightSingle
     radius: uiConfig.layout.radiusNormal

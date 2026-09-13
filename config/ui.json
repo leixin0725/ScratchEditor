@@ -110,8 +110,6 @@
       "maxWidthMax": 800
     },
     "find": {
-      "maxWidth": 760,
-      "widthInset": 48,
       "heightSingle": 66,
       "heightReplace": 104,
       "paddingX": 12,

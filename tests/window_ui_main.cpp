@@ -951,17 +951,14 @@ int main(int argc, char *argv[])
                          {QStringLiteral("layout"), replaceLayout},
                          {QStringLiteral("actual"), firstLineFound}});
 
-    const auto findHistoryGeometryMatches = [](const QJsonObject &status) {
-        const double progress = status.value(QStringLiteral("historyLayoutProgress")).toDouble();
-        const double historyWidth = status.value(QStringLiteral("historyPanelWidth")).toDouble();
-        const double availableX = progress * historyWidth;
-        const double availableWidth = status.value(QStringLiteral("width")).toDouble() - availableX;
-        const double expectedWidth = qMin(760.0, availableWidth - 48.0);
-        const double expectedX = availableX + (availableWidth - expectedWidth) / 2.0;
-        return qAbs(status.value(QStringLiteral("findPanelX")).toDouble() - expectedX) <= 1.0
+    const auto findPanelMatchesEditor = [](const QJsonObject &status) {
+        return qAbs(status.value(QStringLiteral("findPanelX")).toDouble()
+                    - status.value(QStringLiteral("editorViewportX")).toDouble()) <= 1.0
             && qAbs(status.value(QStringLiteral("findPanelWidth")).toDouble()
-                    - expectedWidth) <= 1.0;
+                    - status.value(QStringLiteral("editorViewportWidth")).toDouble()) <= 1.0;
     };
+    addCheck(checks, details, QStringLiteral("findPanelMatchesEditorViewport"),
+             findPanelMatchesEditor(replaceLayout), replaceLayout);
     const QJsonObject findHistoryOpeningFirst = historyAction(QStringLiteral("historyOpen"));
     QThread::msleep(60);
     const QJsonObject findHistoryOpeningMid = request(QStringLiteral("status"));
@@ -973,8 +970,8 @@ int main(int argc, char *argv[])
                         QStringLiteral("historyLayoutProgress")).toDouble() > 0.0
                  && findHistoryOpeningMid.value(
                         QStringLiteral("historyLayoutProgress")).toDouble() < 1.0
-                 && findHistoryGeometryMatches(findHistoryOpeningMid)
-                 && findHistoryGeometryMatches(findHistoryOpened)
+                 && findPanelMatchesEditor(findHistoryOpeningMid)
+                 && findPanelMatchesEditor(findHistoryOpened)
                  && findHistoryOpened.value(QStringLiteral("findPanelX")).toDouble()
                     >= findHistoryOpened.value(QStringLiteral("historyPanelWidth")).toDouble()
                        + 18.0,
@@ -992,8 +989,8 @@ int main(int argc, char *argv[])
                         QStringLiteral("historyLayoutProgress")).toDouble() > 0.0
                  && findHistoryClosingMid.value(
                         QStringLiteral("historyLayoutProgress")).toDouble() < 1.0
-                 && findHistoryGeometryMatches(findHistoryClosingMid)
-                 && findHistoryGeometryMatches(findHistoryClosed)
+                 && findPanelMatchesEditor(findHistoryClosingMid)
+                 && findPanelMatchesEditor(findHistoryClosed)
                  && qAbs(findHistoryClosed.value(QStringLiteral("findPanelX")).toDouble()
                          - replaceLayout.value(QStringLiteral("findPanelX")).toDouble()) <= 1.0
                  && qAbs(findHistoryClosed.value(QStringLiteral("findPanelWidth")).toDouble()
@@ -1417,7 +1414,7 @@ int main(int argc, char *argv[])
                  && wideHistoryWithFind.value(QStringLiteral("findPanelVisible")).toBool()
                  && qAbs(wideHistoryWithFind.value(
                             QStringLiteral("historyLayoutProgress")).toDouble() - 1.0) <= 0.001
-                 && findHistoryGeometryMatches(wideHistoryWithFind),
+                 && findPanelMatchesEditor(wideHistoryWithFind),
              wideHistoryWithFind);
     request(QStringLiteral("testCloseOverlays"));
     addCheck(checks, details, QStringLiteral("historyPanelCornerShapeOpen"),
@@ -1494,6 +1491,7 @@ int main(int argc, char *argv[])
 
     // 动画开启、历史面板打开（推挤模式）时缩放：编辑区必须即时跟随窗口边缘，
     // 不允许 x/width 的 Behavior 逐帧重启动画造成滞后追赶（修复前 30ms 处差值约 20px）。
+    execute(QStringLiteral("find"));
     request(QStringLiteral("testSetGeometry"),
             {{QStringLiteral("x"), 100}, {QStringLiteral("y"), 100},
              {QStringLiteral("width"), 960}, {QStringLiteral("height"), 660}});
@@ -1516,6 +1514,11 @@ int main(int argc, char *argv[])
                           resizedOpenHistory.value(
                               QStringLiteral("editorVisibleWidth")).toDouble()},
                          {QStringLiteral("diff"), openWidthDiff}});
+    addCheck(checks, details, QStringLiteral("findPanelMatchesEditorDuringOpenResize"),
+             resizedOpenHistory.value(QStringLiteral("findPanelVisible")).toBool()
+                 && findPanelMatchesEditor(resizedOpenHistory),
+             resizedOpenHistory);
+    request(QStringLiteral("testCloseOverlays"));
     addCheck(checks, details, QStringLiteral("historyPanelCornerShapeAfterResize"),
              hasHistoryPanelCornerShape(resizedOpenHistory),
              historyPanelCornerDetails(resizedOpenHistory));
@@ -1560,6 +1563,7 @@ int main(int argc, char *argv[])
                             QStringLiteral("expectedY")).toDouble()) <= 1.0,
              historyHeadingReclosedMarker);
     // 动画开启、历史面板闭合时缩放：宽度同样必须即时跟随（修复前 30ms 处差值约 30px）。
+    execute(QStringLiteral("replace"));
     request(QStringLiteral("testSetGeometry"),
             {{QStringLiteral("x"), 100}, {QStringLiteral("y"), 100},
              {QStringLiteral("width"), 960}, {QStringLiteral("height"), 660}});
@@ -1578,6 +1582,11 @@ int main(int argc, char *argv[])
                           resizedClosedHistory.value(
                               QStringLiteral("editorVisibleWidth")).toDouble()},
                          {QStringLiteral("diff"), closedWidthDiff}});
+    addCheck(checks, details, QStringLiteral("findPanelMatchesEditorDuringClosedResize"),
+             resizedClosedHistory.value(QStringLiteral("findPanelVisible")).toBool()
+                 && findPanelMatchesEditor(resizedClosedHistory),
+             resizedClosedHistory);
+    request(QStringLiteral("testCloseOverlays"));
     request(QStringLiteral("testSetGeometry"),
             {{QStringLiteral("x"), 100}, {QStringLiteral("y"), 100},
              {QStringLiteral("width"), 920}, {QStringLiteral("height"), 640}});
@@ -1862,10 +1871,7 @@ int main(int argc, char *argv[])
     addCheck(checks, details, QStringLiteral("findPanelKeepsOverlayGeometryInNarrowWindow"),
              narrowHistoryWithFind.value(QStringLiteral("historyPanelOverlay")).toBool()
                  && narrowHistoryWithFind.value(QStringLiteral("findPanelVisible")).toBool()
-                 && qAbs(narrowHistoryWithFind.value(
-                            QStringLiteral("findPanelX")).toDouble() - 24.0) <= 1.0
-                 && qAbs(narrowHistoryWithFind.value(
-                            QStringLiteral("findPanelWidth")).toDouble() - 452.0) <= 1.0,
+                 && findPanelMatchesEditor(narrowHistoryWithFind),
              narrowHistoryWithFind);
     request(QStringLiteral("testCloseOverlays"));
     request(QStringLiteral("testSetText"),
