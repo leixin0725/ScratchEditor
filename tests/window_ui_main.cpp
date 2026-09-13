@@ -78,6 +78,13 @@ QJsonObject historyAction(const QString &action, const QString &value = {})
                     {QStringLiteral("value"), value}}, 5000);
 }
 
+QJsonObject findPanelAction(const QString &action, const QString &value = {})
+{
+    return request(QStringLiteral("testFindPanelUiAction"),
+                   {{QStringLiteral("action"), action},
+                    {QStringLiteral("value"), value}});
+}
+
 QJsonObject dragHistoryUi(const QString &id, int dropPosition,
                           bool activateDrag = true, bool outsideEditor = false,
                           bool finishDrag = true, const QString &previewText = {})
@@ -873,6 +880,39 @@ int main(int argc, char *argv[])
 
     execute(QStringLiteral("find"));
     QThread::msleep(80);
+    const QJsonObject findButtonsResting = request(QStringLiteral("status"));
+    const QJsonObject findNextHovered = findPanelAction(
+        QStringLiteral("hoverEnter"), QStringLiteral("next"));
+    const QJsonObject findNextUnhovered = findPanelAction(QStringLiteral("hoverLeave"));
+    findPanelAction(QStringLiteral("toggleCaseSensitive"));
+    const QJsonObject findCaseActive = request(QStringLiteral("status"));
+    const QJsonObject findCaseHovered = findPanelAction(
+        QStringLiteral("hoverEnter"), QStringLiteral("caseSensitive"));
+    const QJsonObject findCaseUnhovered = findPanelAction(QStringLiteral("hoverLeave"));
+    addCheck(checks, details, QStringLiteral("findButtonsShareNeutralRestingColors"),
+             findButtonsResting.value(QStringLiteral("findPreviousButtonColor"))
+                     == findButtonsResting.value(QStringLiteral("findNextButtonColor"))
+                 && findButtonsResting.value(QStringLiteral("findPreviousButtonColor"))
+                     == findButtonsResting.value(QStringLiteral("findReplaceAllButtonColor")),
+             findButtonsResting);
+    addCheck(checks, details, QStringLiteral("findButtonsShareHoverTint"),
+             findNextHovered.value(QStringLiteral("findNextButtonColor"))
+                     != findButtonsResting.value(QStringLiteral("findNextButtonColor"))
+                 && findNextUnhovered.value(QStringLiteral("findNextButtonColor"))
+                     == findButtonsResting.value(QStringLiteral("findNextButtonColor")),
+             QJsonObject{{QStringLiteral("resting"), findButtonsResting},
+                         {QStringLiteral("hovered"), findNextHovered},
+                         {QStringLiteral("restored"), findNextUnhovered}});
+    addCheck(checks, details, QStringLiteral("findActiveToggleKeepsDistinctHoverState"),
+             findCaseActive.value(QStringLiteral("findCaseSensitiveButtonColor"))
+                     != findButtonsResting.value(QStringLiteral("findCaseSensitiveButtonColor"))
+                 && findCaseHovered.value(QStringLiteral("findCaseSensitiveButtonColor"))
+                     != findCaseActive.value(QStringLiteral("findCaseSensitiveButtonColor"))
+                 && findCaseUnhovered.value(QStringLiteral("findCaseSensitiveButtonColor"))
+                     == findCaseActive.value(QStringLiteral("findCaseSensitiveButtonColor")),
+             QJsonObject{{QStringLiteral("active"), findCaseActive},
+                         {QStringLiteral("hovered"), findCaseHovered},
+                         {QStringLiteral("restored"), findCaseUnhovered}});
     request(QStringLiteral("testSetSelection"),
             {{QStringLiteral("start"), 0}, {QStringLiteral("end"), 0}});
     request(QStringLiteral("testSetScrollY"), {{QStringLiteral("contentY"), 0}});
@@ -1743,6 +1783,19 @@ int main(int argc, char *argv[])
                           unhoveredHistory.value(QStringLiteral("historyHoveredId"))},
                          {QStringLiteral("expectedHover"), hoveredHistoryId},
                          {QStringLiteral("expectedSelection"), selectedHistoryId}});
+    const QJsonObject historyButtonResting = request(QStringLiteral("status"));
+    const QJsonObject historyDeleteHovered = historyAction(
+        QStringLiteral("historyButtonHoverEnter"), QStringLiteral("delete"));
+    const QJsonObject historyDeleteUnhovered = historyAction(
+        QStringLiteral("historyButtonHoverLeave"));
+    addCheck(checks, details, QStringLiteral("historyButtonsUseSharedHoverTint"),
+             historyDeleteHovered.value(QStringLiteral("historyDeleteButtonColor"))
+                     != historyButtonResting.value(QStringLiteral("historyDeleteButtonColor"))
+                 && historyDeleteUnhovered.value(QStringLiteral("historyDeleteButtonColor"))
+                     == historyButtonResting.value(QStringLiteral("historyDeleteButtonColor")),
+             QJsonObject{{QStringLiteral("resting"), historyButtonResting},
+                         {QStringLiteral("hovered"), historyDeleteHovered},
+                         {QStringLiteral("restored"), historyDeleteUnhovered}});
     historyAction(QStringLiteral("historySetQuery"), QStringLiteral("ALPHA"));
     const QJsonObject filteredHistory = request(QStringLiteral("testClipboardHistoryState"));
     addCheck(checks, details, QStringLiteral("historySearchIsCaseInsensitiveFullText"),

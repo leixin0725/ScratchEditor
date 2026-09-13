@@ -3090,6 +3090,52 @@ int main(int argc, char *argv[])
                  && panelClosed.value(QStringLiteral("selectionStart")).toInt() == 5,
              panelClosed);
 
+    const QString selectedQuery = QStringLiteral("单行😀 query");
+    const QString selectionPrefillText = selectedQuery + QStringLiteral("\n第二行");
+    setTextAndSelection(selectionPrefillText, 0, selectedQuery.size());
+    const QJsonObject selectedFindPanel = execute(QStringLiteral("find"));
+    addCheck(checks, details, QStringLiteral("findPanelPrefillsSingleLineSelection"),
+             selectedFindPanel.value(QStringLiteral("findQueryText")).toString()
+                 == selectedQuery,
+             QJsonObject{{QStringLiteral("actual"),
+                          selectedFindPanel.value(QStringLiteral("findQueryText"))},
+                         {QStringLiteral("expected"), selectedQuery}});
+    request(QStringLiteral("testCloseOverlays"));
+
+    request(QStringLiteral("testSetSelection"),
+            {{QStringLiteral("start"), 0},
+             {QStringLiteral("end"), selectedQuery.size() + 1}});
+    const QJsonObject multilineReplacePanel = execute(QStringLiteral("replace"));
+    addCheck(checks, details, QStringLiteral("findPanelRejectsMultilineSelectionPrefill"),
+             multilineReplacePanel.value(QStringLiteral("findQueryText")).toString()
+                 == selectedQuery,
+             QJsonObject{{QStringLiteral("actual"),
+                          multilineReplacePanel.value(QStringLiteral("findQueryText"))},
+                         {QStringLiteral("expected"), selectedQuery}});
+    request(QStringLiteral("testCloseOverlays"));
+
+    request(QStringLiteral("testSetSelection"),
+            {{QStringLiteral("start"), 0},
+             {QStringLiteral("end"), selectedQuery.size()},
+             {QStringLiteral("cursor"), 0}});
+    const QJsonObject reverseSelectionReplacePanel = execute(QStringLiteral("replace"));
+    addCheck(checks, details, QStringLiteral("findPanelPrefillsReverseSelection"),
+             reverseSelectionReplacePanel.value(QStringLiteral("findQueryText")).toString()
+                 == selectedQuery,
+             reverseSelectionReplacePanel);
+    request(QStringLiteral("testFindPanelUiAction"),
+            {{QStringLiteral("action"), QStringLiteral("focusEditor")}});
+    const QJsonObject editorFocusedWithFind = editorStatus();
+    panelKey({}, QStringLiteral("Escape"));
+    const QJsonObject editorFocusEscape = editorStatus();
+    addCheck(checks, details, QStringLiteral("findPanelEscapeWorksFromEditorFocus"),
+             editorFocusedWithFind.value(QStringLiteral("findPanelVisible")).toBool()
+                 && editorFocusedWithFind.value(QStringLiteral("editorHasFocus")).toBool()
+                 && !editorFocusEscape.value(QStringLiteral("findPanelVisible")).toBool()
+                 && editorFocusEscape.value(QStringLiteral("editorHasFocus")).toBool(),
+             QJsonObject{{QStringLiteral("before"), editorFocusedWithFind},
+                         {QStringLiteral("after"), editorFocusEscape}});
+
     const QJsonObject deleteLineShortcut = request(
         QStringLiteral("testShortcut"),
         {{QStringLiteral("commandId"), QStringLiteral("deleteLine")}});

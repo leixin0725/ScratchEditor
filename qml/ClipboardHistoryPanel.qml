@@ -17,6 +17,7 @@ Loader {
     sourceComponent: Item {
         id: historyRoot
         readonly property bool queryFocused: historyQuery.activeFocus
+        readonly property color deleteButtonColor: historyDeleteButton.color
         readonly property real edgeIntrusion:
             host.historyPanelOpen ? 0
                                   : Math.max(0, historyPanel.x + historyPanel.width)
@@ -356,6 +357,7 @@ Loader {
             }
 
             Rectangle {
+                id: historyDeleteButton
                 objectName: "historyDeleteButton"
                 x: uiConfig.panels.history.footerMarginX
                 anchors.bottom: parent.bottom
@@ -363,7 +365,11 @@ Loader {
                 width: uiConfig.panels.history.footerButtonWidth
                 height: uiConfig.layout.controlHeightCompact
                 radius: uiConfig.layout.radiusNormal
-                color: host.themeButtonColor
+                color: (historyDeletePointer.enabled
+                        && (historyDeletePointer.containsMouse
+                            || host.historyHoveredButton === "delete"))
+                       ? Qt.tint(host.themeButtonColor, host.themeButtonHoverTintColor)
+                       : host.themeButtonColor
                 Text {
                     anchors.centerIn: parent
                     text: "删除"
@@ -371,12 +377,15 @@ Loader {
                     font.pointSize: uiConfig.fonts.small
                 }
                 MouseArea {
+                    id: historyDeletePointer
                     anchors.fill: parent
                     enabled: host.historySelectedId.length > 0
+                    hoverEnabled: true
                     onClicked: root.appController.deleteClipboardHistoryItem(host.historySelectedId)
                 }
             }
             Rectangle {
+                id: historyClearButton
                 anchors.right: parent.right
                 anchors.rightMargin: uiConfig.panels.history.footerMarginX
                 anchors.bottom: parent.bottom
@@ -384,14 +393,22 @@ Loader {
                 width: uiConfig.panels.history.footerButtonWidth
                 height: uiConfig.layout.controlHeightCompact
                 radius: uiConfig.layout.radiusNormal
-                color: host.themeButtonColor
+                color: (historyClearPointer.containsMouse
+                        || host.historyHoveredButton === "clear")
+                       ? Qt.tint(host.themeButtonColor, host.themeButtonHoverTintColor)
+                       : host.themeButtonColor
                 Text {
                     anchors.centerIn: parent
                     text: "清空"
                     color: host.themeDangerColor
                     font.pointSize: uiConfig.fonts.small
                 }
-                MouseArea { anchors.fill: parent; onClicked: root.appController.requestClearClipboardHistory() }
+                MouseArea {
+                    id: historyClearPointer
+                    anchors.fill: parent
+                    hoverEnabled: true
+                    onClicked: root.appController.requestClearClipboardHistory()
+                }
             }
         }
 

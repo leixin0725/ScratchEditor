@@ -371,6 +371,7 @@ UiConfig UiConfig::defaults()
     put({"palette", "dark", "mutedText"}, QStringLiteral("#9a9a9a"));
     put({"palette", "dark", "border"}, QStringLiteral("#505050"));
     put({"palette", "dark", "button"}, QStringLiteral("#393939"));
+    put({"palette", "dark", "buttonHoverTint"}, QStringLiteral("#18FFFFFF"));
     put({"palette", "dark", "buttonAccentText"}, QStringLiteral("#ffffff"));
     put({"palette", "dark", "danger"}, QStringLiteral("#ff8a80"));
     put({"palette", "dark", "dangerText"}, QStringLiteral("#ffffff"));
@@ -386,6 +387,7 @@ UiConfig UiConfig::defaults()
     put({"palette", "light", "mutedText"}, QStringLiteral("#57606a"));
     put({"palette", "light", "border"}, QStringLiteral("#d0d7de"));
     put({"palette", "light", "button"}, QStringLiteral("#eaeef2"));
+    put({"palette", "light", "buttonHoverTint"}, QStringLiteral("#18FFFFFF"));
     put({"palette", "light", "buttonAccentText"}, QStringLiteral("#ffffff"));
     put({"palette", "light", "danger"}, QStringLiteral("#cf222e"));
     put({"palette", "light", "dangerText"}, QStringLiteral("#ffffff"));
@@ -599,6 +601,7 @@ QVariantMap UiConfig::sanitize(const QVariantMap &input)
     fixString({"palette", "dark", "mutedText"});
     fixString({"palette", "dark", "border"});
     fixString({"palette", "dark", "button"});
+    fixString({"palette", "dark", "buttonHoverTint"});
     fixString({"palette", "dark", "buttonAccentText"});
     fixString({"palette", "dark", "danger"});
     fixString({"palette", "dark", "dangerText"});
@@ -614,6 +617,7 @@ QVariantMap UiConfig::sanitize(const QVariantMap &input)
     fixString({"palette", "light", "mutedText"});
     fixString({"palette", "light", "border"});
     fixString({"palette", "light", "button"});
+    fixString({"palette", "light", "buttonHoverTint"});
     fixString({"palette", "light", "buttonAccentText"});
     fixString({"palette", "light", "danger"});
     fixString({"palette", "light", "dangerText"});

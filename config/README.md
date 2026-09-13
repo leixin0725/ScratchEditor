@@ -39,7 +39,8 @@
 - `panels`：状态文字、状态面板、查找面板、历史面板、确认对话框、
   命令面板与设置页的尺寸和布局参数；历史拖拽摘要宽度和透明度分别由
   `history.dragPreviewWidth`、`history.dragPreviewOpacity` 控制。
-- `palette`：dark / light 两套界面基础色角色。
+- `palette`：dark / light 两套界面基础色角色；`buttonHoverTint` 是叠加到按钮原背景上的
+  半透明悬停提亮色，不改变历史记录卡片自身的悬停配色。
 - `placement`：窗口唤起时的锚定间距。
 - `preferences`：主题与动画开关的默认值（可被设置页覆盖）。
 

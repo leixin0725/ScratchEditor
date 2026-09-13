@@ -140,6 +140,7 @@ Window {
     readonly property color themeMutedTextColor: uiThemeColors.mutedText
     readonly property color themeBorderColor: uiThemeColors.border
     readonly property color themeButtonColor: uiThemeColors.button
+    readonly property color themeButtonHoverTintColor: uiThemeColors.buttonHoverTint
     readonly property color themeAccentColor: controller.themeAccentColor
     readonly property color themeAccentTextColor: controller.themeAccentTextColor
     readonly property color themeFocusColor: themeAccentColor
@@ -283,6 +284,14 @@ Window {
         historyPanelLoader.item ? historyPanelLoader.item.queryFocused : false
     property string historySelectedId: ""
     property string historyHoveredId: ""
+    property string historyHoveredButton: ""
+    readonly property string findQueryText: findPanel.queryText
+    readonly property color findPreviousButtonColor: findPanel.previousButtonColor
+    readonly property color findNextButtonColor: findPanel.nextButtonColor
+    readonly property color findReplaceAllButtonColor: findPanel.replaceAllButtonColor
+    readonly property color findCaseSensitiveButtonColor: findPanel.caseSensitiveButtonColor
+    readonly property color historyDeleteButtonColor:
+        historyPanelLoader.item ? historyPanelLoader.item.deleteButtonColor : "transparent"
     // 内容高度防抖快照：仅驱动滚动条滑块尺寸（60ms 合并更新）；滑块可见性
     // 直接依赖实时 editorViewport.contentHeight，避免缩放/关闭动画期间快照
     // 滞后导致滚动条闪现。
@@ -437,7 +446,10 @@ Window {
     function showFindPanel(withReplace) {
         commandPaletteLoader.active = false
         settingsLoader.active = false
-        findPanel.open(withReplace)
+        const selected = editor.selectedText
+        const initialQuery = selected.length > 0 && !/[\r\n\u2028\u2029]/.test(selected)
+                           ? selected : undefined
+        findPanel.open(withReplace, initialQuery)
     }
 
     function hideFindPanel() {
@@ -509,6 +521,7 @@ Window {
         historyPanelOpenedByCommand = false
         historySelectedId = ""
         historyHoveredId = ""
+        historyHoveredButton = ""
         controller.setClipboardHistoryFilter("")
         if (historyPanelLoader.item) {
             historyPanelLoader.item.clearQuery()
@@ -603,6 +616,10 @@ Window {
             historyPanelLoader.item.setHoveredId(value)
         } else if (action === "historyItemHoverLeave") {
             historyPanelLoader.item.clearHoveredId(value)
+        } else if (action === "historyButtonHoverEnter") {
+            historyHoveredButton = value
+        } else if (action === "historyButtonHoverLeave") {
+            historyHoveredButton = ""
         } else if (action === "historyActivateSelected") {
             historyPanelLoader.item.activateSelected()
         } else if (action === "historyDoubleClick") {
@@ -622,6 +639,21 @@ Window {
             controller.cancelClearClipboardHistory()
         } else if (action === "historyEscape") {
             handleEscapeAction()
+        } else {
+            return false
+        }
+        return true
+    }
+
+    function dispatchFindTestAction(action, value) {
+        if (action === "hoverEnter") {
+            findPanel.testHoveredButton = value
+        } else if (action === "hoverLeave") {
+            findPanel.testHoveredButton = ""
+        } else if (action === "toggleCaseSensitive") {
+            findPanel.toggleCaseSensitiveForTest()
+        } else if (action === "focusEditor") {
+            editor.forceActiveFocus()
         } else {
             return false
         }
@@ -737,6 +769,13 @@ Window {
         if (!visible && historyPanelOpen) {
             closeClipboardHistory()
         }
+    }
+
+    Shortcut {
+        sequence: "Escape"
+        context: Qt.WindowShortcut
+        enabled: root.visible && findPanel.visible
+        onActivated: root.hideFindPanel()
     }
 
     Shortcut {
@@ -1033,6 +1072,7 @@ Window {
         selectedTextColor: root.themeSelectedTextColor
         accentColor: root.themeAccentColor
         buttonColor: root.themeButtonColor
+        buttonHoverTintColor: root.themeButtonHoverTintColor
         buttonAccentTextColor: root.themeButtonAccentTextColor
         uiFontFamily: root.uiFontFamily
         monospaceFontFamily: root.uiMonospaceFontFamily
@@ -1232,6 +1272,15 @@ Window {
             persistentSelection: true
             activeFocusOnPress: true
             inputMethodHints: Qt.ImhMultiLine
+
+            Keys.onEscapePressed: function(event) {
+                if (findPanel.visible) {
+                    root.hideFindPanel()
+                    event.accepted = true
+                } else {
+                    event.accepted = false
+                }
+            }
 
             onWidthChanged: root.refreshHeadingNavigationHighlightGeometry()
             onContentHeightChanged: root.refreshHeadingNavigationHighlightGeometry()

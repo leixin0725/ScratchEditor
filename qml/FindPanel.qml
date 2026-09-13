@@ -20,18 +20,32 @@ Rectangle {
     required property color selectedTextColor
     required property color accentColor
     required property color buttonColor
+    required property color buttonHoverTintColor
     required property color buttonAccentTextColor
     required property string uiFontFamily
     required property string monospaceFontFamily
 
     property bool replaceMode: false
     property string searchStatus: ""
+    property string testHoveredButton: ""
+    readonly property string queryText: findInput.text
+    readonly property color previousButtonColor: findPrevButton.color
+    readonly property color nextButtonColor: findNextButton.color
+    readonly property color replaceAllButtonColor: replaceAllButton.color
+    readonly property color caseSensitiveButtonColor: caseSensitiveToggle.color
 
     signal closeRequested()
     signal searchChanged()
 
-    function open(withReplace) {
+    function buttonVisualColor(baseColor, buttonName, hovered, enabled) {
+        return enabled && (hovered || testHoveredButton === buttonName)
+                ? Qt.tint(baseColor, buttonHoverTintColor) : baseColor
+    }
+
+    function open(withReplace, initialQuery) {
         replaceMode = withReplace
+        if (initialQuery !== undefined && initialQuery !== null)
+            findInput.text = initialQuery
         visible = true
         searchStatus = ""
         Qt.callLater(function() {
@@ -42,6 +56,11 @@ Rectangle {
 
     function close() {
         visible = false
+        testHoveredButton = ""
+    }
+
+    function toggleCaseSensitiveForTest() {
+        caseSensitiveToggle.enabledValue = !caseSensitiveToggle.enabledValue
     }
 
     function findInDocument(backwards) {
@@ -119,7 +138,8 @@ Rectangle {
         width: uiConfig.panels.find.caseSensitiveWidth
         height: uiConfig.layout.controlHeightSmall
         radius: uiConfig.layout.radiusSmall
-        color: enabledValue ? root.accentColor : root.buttonColor
+        color: root.buttonVisualColor(enabledValue ? root.accentColor : root.buttonColor,
+                                      "caseSensitive", caseSensitivePointer.containsMouse, true)
 
         Text {
             anchors.centerIn: parent
@@ -130,7 +150,9 @@ Rectangle {
         }
 
         MouseArea {
+            id: caseSensitivePointer
             anchors.fill: parent
+            hoverEnabled: true
             cursorShape: Qt.PointingHandCursor
             onClicked: caseSensitiveToggle.enabledValue = !caseSensitiveToggle.enabledValue
         }
@@ -143,7 +165,8 @@ Rectangle {
         width: uiConfig.panels.find.prevWidth
         height: uiConfig.layout.controlHeightSmall
         radius: uiConfig.layout.radiusSmall
-        color: root.buttonColor
+        color: root.buttonVisualColor(root.buttonColor, "previous",
+                                      findPrevPointer.containsMouse, true)
         Text {
             anchors.centerIn: parent
             text: "上一个"
@@ -151,7 +174,9 @@ Rectangle {
             font.pointSize: uiConfig.fonts.small
         }
         MouseArea {
+            id: findPrevPointer
             anchors.fill: parent
+            hoverEnabled: true
             cursorShape: Qt.PointingHandCursor
             onClicked: root.findInDocument(true)
         }
@@ -164,27 +189,32 @@ Rectangle {
         width: uiConfig.panels.find.nextWidth
         height: uiConfig.layout.controlHeightSmall
         radius: uiConfig.layout.radiusSmall
-        color: root.accentColor
+        color: root.buttonVisualColor(root.buttonColor, "next",
+                                      findNextPointer.containsMouse, true)
         Text {
             anchors.centerIn: parent
             text: "下一个"
-            color: root.buttonAccentTextColor
+            color: root.textColor
             font.pointSize: uiConfig.fonts.small
         }
         MouseArea {
+            id: findNextPointer
             anchors.fill: parent
+            hoverEnabled: true
             cursorShape: Qt.PointingHandCursor
             onClicked: root.findInDocument(false)
         }
     }
 
     Rectangle {
+        id: closeButton
         x: root.width - uiConfig.panels.find.rightInset
         y: uiConfig.panels.find.paddingY
         width: uiConfig.panels.find.closeWidth
         height: uiConfig.layout.controlHeightSmall
         radius: uiConfig.layout.radiusSmall
-        color: root.buttonColor
+        color: root.buttonVisualColor(root.buttonColor, "close",
+                                      closePointer.containsMouse, true)
         Text {
             anchors.centerIn: parent
             text: "×"
@@ -192,7 +222,9 @@ Rectangle {
             font.pointSize: uiConfig.fonts.title
         }
         MouseArea {
+            id: closePointer
             anchors.fill: parent
+            hoverEnabled: true
             cursorShape: Qt.PointingHandCursor
             onClicked: root.closeRequested()
         }
@@ -235,7 +267,8 @@ Rectangle {
         width: uiConfig.panels.find.actionWidth
         height: uiConfig.layout.controlHeightSmall
         radius: uiConfig.layout.radiusSmall
-        color: root.buttonColor
+        color: root.buttonVisualColor(root.buttonColor, "replaceCurrent",
+                                      replaceCurrentPointer.containsMouse, true)
         Text {
             anchors.centerIn: parent
             text: "替换当前"
@@ -243,7 +276,9 @@ Rectangle {
             font.pointSize: uiConfig.fonts.small
         }
         MouseArea {
+            id: replaceCurrentPointer
             anchors.fill: parent
+            hoverEnabled: true
             cursorShape: Qt.PointingHandCursor
             onClicked: {
                 root.searchStatus = root.appController.replaceCurrent(
@@ -254,21 +289,25 @@ Rectangle {
     }
 
     Rectangle {
+        id: replaceAllButton
         visible: root.replaceMode
         x: replaceCurrentButton.x + replaceCurrentButton.width + uiConfig.panels.find.gap
         y: replaceFieldFrame.y
         width: uiConfig.panels.find.actionWidth
         height: uiConfig.layout.controlHeightSmall
         radius: uiConfig.layout.radiusSmall
-        color: root.accentColor
+        color: root.buttonVisualColor(root.buttonColor, "replaceAll",
+                                      replaceAllPointer.containsMouse, true)
         Text {
             anchors.centerIn: parent
             text: "全部替换"
-            color: root.buttonAccentTextColor
+            color: root.textColor
             font.pointSize: uiConfig.fonts.small
         }
         MouseArea {
+            id: replaceAllPointer
             anchors.fill: parent
+            hoverEnabled: true
             cursorShape: Qt.PointingHandCursor
             onClicked: {
                 const count = root.appController.replaceAll(

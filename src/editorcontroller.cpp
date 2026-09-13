@@ -1535,6 +1535,18 @@ void EditorController::buildCommandHandlers()
             response.insert(QStringLiteral("invoked"), invoked && accepted.toBool());
             waitForNextFrame(r.socket, response, r.startedNs, r.requestId);
         }}},
+        {QStringLiteral("testFindPanelUiAction"), {Gate::Test, [this](const DispatchRequest &r) {
+            QVariant accepted;
+            const bool invoked = m_window && QMetaObject::invokeMethod(
+                m_window, "dispatchFindTestAction", Qt::DirectConnection,
+                Q_RETURN_ARG(QVariant, accepted),
+                Q_ARG(QVariant, r.request.value(QStringLiteral("action")).toVariant()),
+                Q_ARG(QVariant, r.request.value(QStringLiteral("value")).toVariant()));
+            QJsonObject response = statusObject();
+            response.insert(QStringLiteral("command"), r.command);
+            response.insert(QStringLiteral("invoked"), invoked && accepted.toBool());
+            waitForNextFrame(r.socket, response, r.startedNs, r.requestId);
+        }}},
         {QStringLiteral("testClipboardHistoryWindowLeave"), {Gate::Test, [this](const DispatchRequest &r) {
             const QPointF localPosition(
                 r.request.value(QStringLiteral("x")).toDouble(),
@@ -3585,6 +3597,16 @@ QJsonObject EditorController::statusObject() const
         status.insert(QStringLiteral("findPanelVisible"),
                       m_window->property("findPanelVisible").toBool());
         if (m_testMode) {
+            status.insert(QStringLiteral("findQueryText"),
+                          m_window->property("findQueryText").toString());
+            status.insert(QStringLiteral("findPreviousButtonColor"),
+                          m_window->property("findPreviousButtonColor").toString());
+            status.insert(QStringLiteral("findNextButtonColor"),
+                          m_window->property("findNextButtonColor").toString());
+            status.insert(QStringLiteral("findReplaceAllButtonColor"),
+                          m_window->property("findReplaceAllButtonColor").toString());
+            status.insert(QStringLiteral("findCaseSensitiveButtonColor"),
+                          m_window->property("findCaseSensitiveButtonColor").toString());
             status.insert(QStringLiteral("findPanelX"),
                           m_window->property("findPanelX").toDouble());
             status.insert(QStringLiteral("findPanelWidth"),
@@ -3673,6 +3695,8 @@ QJsonObject EditorController::statusObject() const
                                QStringLiteral("historyList"));
             insertItemGeometry(QStringLiteral("historyDeleteButton"),
                                QStringLiteral("historyDeleteButton"));
+            status.insert(QStringLiteral("historyDeleteButtonColor"),
+                          m_window->property("historyDeleteButtonColor").toString());
             insertItemGeometry(QStringLiteral("editorViewport"),
                                QStringLiteral("editorViewport"));
             insertItemGeometry(QStringLiteral("fileDropArea"),
