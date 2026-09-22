@@ -107,6 +107,15 @@ QJsonObject dragSelection(int start, int end, int dropPosition)
                     {QStringLiteral("dropPosition"), dropPosition}});
 }
 
+QJsonObject nativeSelectionDrag(const QString &phase, const QString &edge,
+                                int position = 0)
+{
+    return request(QStringLiteral("testNativeSelectionDrag"),
+                   {{QStringLiteral("phase"), phase},
+                    {QStringLiteral("edge"), edge},
+                    {QStringLiteral("position"), position}});
+}
+
 QJsonObject dragClipboardHistory(const QString &id, int dropPosition,
                                  bool outsideEditor = false)
 {
@@ -696,6 +705,84 @@ int main(int argc, char *argv[])
                          {QStringLiteral("backward"), movedBackward},
                          {QStringLiteral("inside"), droppedInside},
                          {QStringLiteral("multiline"), movedMultiline}});
+
+    QString nativeSelectionScrollText;
+    for (int index = 0; index < 80; ++index) {
+        nativeSelectionScrollText += QStringLiteral("line-%1\t目录文字 %2\n")
+                                         .arg(index, 2, 10, QLatin1Char('0'))
+                                         .arg(index);
+    }
+    request(QStringLiteral("show"));
+    QThread::msleep(100);
+    request(QStringLiteral("testSetText"),
+            {{QStringLiteral("text"), nativeSelectionScrollText}});
+    const int nativeSelectionAnchor =
+        nativeSelectionScrollText.indexOf(QStringLiteral("line-02"));
+    request(QStringLiteral("testSetSelection"),
+            {{QStringLiteral("start"), nativeSelectionAnchor},
+             {QStringLiteral("end"), nativeSelectionAnchor}});
+    setScrollY(0);
+    const QJsonObject nativeSelectionDragStarted = nativeSelectionDrag(
+        QStringLiteral("begin"), QStringLiteral("bottom"), nativeSelectionAnchor);
+    QThread::msleep(210);
+    const QJsonObject nativeSelectionDragging = editorStatus();
+    nativeSelectionDrag(QStringLiteral("finish"), QStringLiteral("bottom"));
+    const QJsonObject nativeSelectionReleased = editorStatus();
+    QThread::msleep(70);
+    const QJsonObject nativeSelectionSettled = editorStatus();
+    QThread::msleep(120);
+    const QJsonObject nativeSelectionStopped = editorStatus();
+    addCheck(checks, details, QStringLiteral("nativeSelectionDragAutoScrollsAndStops"),
+             nativeSelectionDragStarted.value(QStringLiteral("eventsAccepted")).toBool()
+                 && nativeSelectionDragging.value(
+                        QStringLiteral("scrollContentY")).toDouble() > 20.0
+                 && nativeSelectionDragging.value(QStringLiteral("selectionEnd")).toInt()
+                        > nativeSelectionAnchor
+                 && std::abs(nativeSelectionStopped.value(
+                                 QStringLiteral("scrollContentY")).toDouble()
+                             - nativeSelectionSettled.value(
+                                 QStringLiteral("scrollContentY")).toDouble()) < 1.5,
+             QJsonObject{{QStringLiteral("started"), nativeSelectionDragStarted},
+                         {QStringLiteral("dragging"), nativeSelectionDragging},
+                         {QStringLiteral("released"), nativeSelectionReleased},
+                         {QStringLiteral("settled"), nativeSelectionSettled},
+                         {QStringLiteral("stopped"), nativeSelectionStopped}});
+
+    const int upwardSelectionAnchor =
+        nativeSelectionScrollText.indexOf(QStringLiteral("line-70"));
+    request(QStringLiteral("testSetSelection"),
+            {{QStringLiteral("start"), upwardSelectionAnchor},
+             {QStringLiteral("end"), upwardSelectionAnchor}});
+    setScrollY(100000);
+    const QJsonObject upwardSelectionInitial = editorStatus();
+    const QJsonObject upwardSelectionStarted = nativeSelectionDrag(
+        QStringLiteral("begin"), QStringLiteral("top"), upwardSelectionAnchor);
+    QThread::msleep(210);
+    const QJsonObject upwardSelectionDragging = editorStatus();
+    nativeSelectionDrag(QStringLiteral("finish"), QStringLiteral("top"));
+    QThread::msleep(70);
+    const QJsonObject upwardSelectionSettled = editorStatus();
+    QThread::msleep(120);
+    const QJsonObject upwardSelectionStopped = editorStatus();
+    addCheck(checks, details, QStringLiteral("nativeSelectionDragAutoScrollsUpward"),
+             upwardSelectionStarted.value(QStringLiteral("eventsAccepted")).toBool()
+                 && upwardSelectionDragging.value(
+                        QStringLiteral("scrollContentY")).toDouble()
+                        < upwardSelectionInitial.value(
+                              QStringLiteral("scrollContentY")).toDouble() - 20.0
+                 && upwardSelectionDragging.value(QStringLiteral("selectionStart")).toInt()
+                        < upwardSelectionAnchor
+                 && std::abs(upwardSelectionStopped.value(
+                                 QStringLiteral("scrollContentY")).toDouble()
+                             - upwardSelectionSettled.value(
+                                 QStringLiteral("scrollContentY")).toDouble()) < 1.5,
+             QJsonObject{{QStringLiteral("initial"), upwardSelectionInitial},
+                         {QStringLiteral("started"), upwardSelectionStarted},
+                         {QStringLiteral("dragging"), upwardSelectionDragging},
+                         {QStringLiteral("settled"), upwardSelectionSettled},
+                         {QStringLiteral("stopped"), upwardSelectionStopped}});
+    request(QStringLiteral("hide"));
+    QThread::msleep(180);
 
     const QString markdown = QStringLiteral(
         "# 标题\n**粗体** 与 *斜体* 以及 `code`\n> 引用\n- 列表\n- [ ] 任务\n```cpp\nint x = 1;\n```\n[链接](https://example.invalid)");

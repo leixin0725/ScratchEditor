@@ -1614,6 +1614,55 @@ void EditorController::buildCommandHandlers()
                             m_editor ? m_editor->property("text").toString() : QString());
             waitForNextFrame(r.socket, response, r.startedNs, r.requestId);
         }}},
+        {QStringLiteral("testNativeSelectionDrag"), {Gate::Test, [this](const DispatchRequest &r) {
+            const QString phase = r.request.value(QStringLiteral("phase")).toString();
+            const QString edge = r.request.value(QStringLiteral("edge")).toString();
+            QQuickItem *item = qobject_cast<QQuickItem *>(m_editor.data());
+            QQuickItem *viewport = m_commands ? m_commands->editorViewport() : nullptr;
+            bool eventsAccepted = false;
+            if (item && viewport && (edge == QLatin1String("top")
+                                     || edge == QLatin1String("bottom"))) {
+                const QPointF viewportSceneTopLeft = viewport->mapToScene(QPointF());
+                const qreal edgeSceneY = edge == QLatin1String("top")
+                    ? viewportSceneTopLeft.y() - 16.0
+                    : viewportSceneTopLeft.y() + viewport->height() + 16.0;
+                const QPointF edgeScene(viewportSceneTopLeft.x() + viewport->width() / 2.0,
+                                        edgeSceneY);
+                const auto sendMouseEvent = [this, item](QEvent::Type type,
+                                                          const QPointF &scenePosition,
+                                                          Qt::MouseButton button,
+                                                          Qt::MouseButtons buttons) {
+                    const QPointF localPosition = item->mapFromScene(scenePosition);
+                    const QPointF globalPosition = item->mapToGlobal(localPosition);
+                    QMouseEvent mouseEvent(type, localPosition, scenePosition, globalPosition,
+                                           button, buttons, Qt::NoModifier);
+                    const bool handled = m_commands->handleEditorEvent(&mouseEvent);
+                    return handled || QCoreApplication::sendEvent(m_editor, &mouseEvent);
+                };
+                if (phase == QLatin1String("begin")) {
+                    const int position = r.request.value(QStringLiteral("position")).toInt();
+                    QRectF pressRectangle;
+                    const bool located = QMetaObject::invokeMethod(
+                        m_editor, "positionToRectangle", Qt::DirectConnection,
+                        Q_RETURN_ARG(QRectF, pressRectangle), Q_ARG(int, position));
+                    if (located) {
+                        const QPointF pressScene = item->mapToScene(pressRectangle.center());
+                        const bool pressed = sendMouseEvent(QEvent::MouseButtonPress, pressScene,
+                                                            Qt::LeftButton, Qt::LeftButton);
+                        const bool moved = sendMouseEvent(QEvent::MouseMove, edgeScene,
+                                                          Qt::NoButton, Qt::LeftButton);
+                        eventsAccepted = pressed && moved;
+                    }
+                } else if (phase == QLatin1String("finish")) {
+                    eventsAccepted = sendMouseEvent(QEvent::MouseButtonRelease, edgeScene,
+                                                    Qt::LeftButton, Qt::NoButton);
+                }
+            }
+            QJsonObject response = statusObject();
+            response.insert(QStringLiteral("command"), r.command);
+            response.insert(QStringLiteral("eventsAccepted"), eventsAccepted);
+            sendResponse(r.socket, response, r.startedNs, r.requestId);
+        }}},
         {QStringLiteral("testDragSelection"), {Gate::Test, [this](const DispatchRequest &r) {
             // 合成的拖拽按压事件视为一次全新的单击，避免与多重点击放行逻辑互相干扰。
             m_lastMouseClickElapsedMs = -1;

@@ -1679,8 +1679,10 @@ EditorCommandRegistry::EditorCommandRegistry(AppSettings *settings,
     connect(&m_selectionDragScrollTimer, &QTimer::timeout, this, [this] {
         if (m_externalDragActive) {
             updateExternalTextDrag(m_externalDragScenePosition);
-        } else {
+        } else if (m_selectionDragActive) {
             updateSelectionDrag(m_selectionDragScenePosition, true);
+        } else {
+            updateNativeSelectionDrag();
         }
     });
 
@@ -1701,12 +1703,14 @@ EditorCommandRegistry::EditorCommandRegistry(AppSettings *settings,
 
 EditorCommandRegistry::~EditorCommandRegistry()
 {
+    resetNativeSelectionDrag();
     resetExternalTextDrag();
 }
 
 void EditorCommandRegistry::setEditor(QObject *editor, QTextDocument *document)
 {
     resetSelectionDrag(true);
+    resetNativeSelectionDrag();
     resetExternalTextDrag();
     if (m_document) {
         QObject::disconnect(m_document.data(), nullptr, this, nullptr);
@@ -1893,6 +1897,7 @@ bool EditorCommandRegistry::handleEditorEvent(QEvent *event)
     if (handleSelectionDragEvent(event)) {
         return true;
     }
+    trackNativeSelectionDragEvent(event);
 
     if (event->type() == QEvent::KeyPress) {
         const auto *keyEvent = static_cast<QKeyEvent *>(event);
@@ -2876,6 +2881,7 @@ bool EditorCommandRegistry::beginExternalTextDrag(const QString &text,
     }
 
     resetSelectionDrag(true);
+    resetNativeSelectionDrag();
     resetExternalTextDrag();
     m_externalDragText = text;
     m_externalDragPressScenePosition = scenePosition;
@@ -3046,6 +3052,60 @@ bool EditorCommandRegistry::handleSelectionDragEvent(QEvent *event)
     return false;
 }
 
+void EditorCommandRegistry::trackNativeSelectionDragEvent(QEvent *event)
+{
+    if (!event) {
+        return;
+    }
+    if (event->type() == QEvent::MouseButtonPress) {
+        const auto *mouseEvent = static_cast<QMouseEvent *>(event);
+        const Qt::KeyboardModifiers unsupportedModifiers = Qt::ControlModifier
+            | Qt::AltModifier | Qt::MetaModifier;
+        resetNativeSelectionDrag();
+        if (mouseEvent->button() != Qt::LeftButton
+            || mouseEvent->modifiers().testAnyFlags(unsupportedModifiers)
+            || m_editor->property("readOnly").toBool()
+            || m_editor->property("inputMethodComposing").toBool()) {
+            return;
+        }
+        m_nativeSelectionDragPressScenePosition = mouseEvent->scenePosition();
+        m_nativeSelectionDragScenePosition = mouseEvent->scenePosition();
+        m_nativeSelectionDragModifiers = mouseEvent->modifiers();
+        m_nativeSelectionDragPending = true;
+        return;
+    }
+
+    if (!m_nativeSelectionDragPending) {
+        return;
+    }
+    if (event->type() == QEvent::MouseMove) {
+        const auto *mouseEvent = static_cast<QMouseEvent *>(event);
+        if (!mouseEvent->buttons().testFlag(Qt::LeftButton)) {
+            resetNativeSelectionDrag();
+            return;
+        }
+        m_nativeSelectionDragScenePosition = mouseEvent->scenePosition();
+        m_nativeSelectionDragModifiers = mouseEvent->modifiers();
+        if (!m_nativeSelectionDragActive) {
+            const qreal distance = (m_nativeSelectionDragScenePosition
+                                    - m_nativeSelectionDragPressScenePosition)
+                                       .manhattanLength();
+            if (distance < QGuiApplication::styleHints()->startDragDistance()) {
+                return;
+            }
+            m_nativeSelectionDragActive = true;
+            m_selectionDragScrollTimer.start();
+        }
+        return;
+    }
+
+    if (event->type() == QEvent::MouseButtonRelease
+        || event->type() == QEvent::UngrabMouse
+        || event->type() == QEvent::FocusOut) {
+        resetNativeSelectionDrag();
+    }
+}
+
 int EditorCommandRegistry::editorPositionAt(const QPointF &localPosition) const
 {
     if (!m_editor || !m_document) {
@@ -3180,6 +3240,7 @@ void EditorCommandRegistry::scrollViewportToHeading(int position)
 void EditorCommandRegistry::beginSelectionDrag(int selectionStart, int selectionEnd,
                                                 const QPointF &scenePosition)
 {
+    resetNativeSelectionDrag();
     resetExternalTextDrag();
     m_selectionDragStart = selectionStart;
     m_selectionDragEnd = selectionEnd;
@@ -3248,6 +3309,42 @@ void EditorCommandRegistry::resetSelectionDrag(bool releaseMouseGrab)
     }
 }
 
+void EditorCommandRegistry::updateNativeSelectionDrag()
+{
+    if (!m_nativeSelectionDragActive || !m_editor || !m_window) {
+        return;
+    }
+    if (!scrollTextDragViewport(m_nativeSelectionDragScenePosition)) {
+        return;
+    }
+
+    QQuickItem *item = editorItem();
+    if (!item) {
+        return;
+    }
+    // Flickable 移动后，静止指针对应的文档位置已经变化。补发一次移动事件，
+    // 让 TextEdit 沿用原生锚点和活动端语义继续扩展选区。
+    const QPointF localPosition = item->mapFromScene(m_nativeSelectionDragScenePosition);
+    const QPointF globalPosition = item->mapToGlobal(localPosition);
+    QMouseEvent moveEvent(QEvent::MouseMove, localPosition,
+                          m_nativeSelectionDragScenePosition, globalPosition,
+                          Qt::NoButton, Qt::LeftButton,
+                          m_nativeSelectionDragModifiers);
+    QCoreApplication::sendEvent(m_editor, &moveEvent);
+}
+
+void EditorCommandRegistry::resetNativeSelectionDrag()
+{
+    if (m_nativeSelectionDragPending || m_nativeSelectionDragActive) {
+        m_selectionDragScrollTimer.stop();
+    }
+    m_nativeSelectionDragPressScenePosition = {};
+    m_nativeSelectionDragScenePosition = {};
+    m_nativeSelectionDragModifiers = Qt::NoModifier;
+    m_nativeSelectionDragPending = false;
+    m_nativeSelectionDragActive = false;
+}
+
 void EditorCommandRegistry::updateExternalTextDragPosition(
     const QPointF &scenePosition, bool scrollViewport)
 {
@@ -3293,11 +3390,11 @@ void EditorCommandRegistry::resetExternalTextDrag()
     }
 }
 
-void EditorCommandRegistry::scrollTextDragViewport(const QPointF &scenePosition)
+bool EditorCommandRegistry::scrollTextDragViewport(const QPointF &scenePosition)
 {
     QQuickItem *viewport = editorViewport();
     if (!viewport) {
-        return;
+        return false;
     }
 
     const QPointF viewportPosition = viewport->mapFromScene(scenePosition);
@@ -3320,7 +3417,9 @@ void EditorCommandRegistry::scrollTextDragViewport(const QPointF &scenePosition)
     const qreal requestedY = qBound<qreal>(0.0, currentY + scrollDelta, maximumY);
     if (!qFuzzyCompare(requestedY + 1.0, currentY + 1.0)) {
         viewport->setProperty("contentY", requestedY);
+        return true;
     }
+    return false;
 }
 
 void EditorCommandRegistry::beginFindNavigation()

@@ -314,6 +314,9 @@ Window {
     // 标题跳转（Ctrl+Up/Down）期间由 C++ 置位：抑制跳转瞬间的光标瞬时贴边
     // 跟随，让整段跳转由统一的轻量滚动动画完成（跳转后标题锚定到视口上 1/3）。
     property bool suppressHeadingCursorFollow: false
+    readonly property bool minimalCursorFollowSuppressed:
+        suppressHeadingCursorFollow || findNavigationFollowing
+            || (findPanel.visible && !editor.activeFocus)
 
     property bool findNavigationChanging: false
     property bool findNavigationFollowing: false
@@ -391,6 +394,36 @@ Window {
         id: findNavigationTimer
         repeat: false
         onTriggered: root.revealFindTarget()
+    }
+
+    // cursorRectangle 在文档布局更新期间可能短暂对应旧位置。即时跟随仍保留，
+    // 失配时在布局稳定后复核一次，避免一次失配永久丢掉跟随。
+    Timer {
+        id: minimalCursorFollowTimer
+        interval: 40
+        repeat: false
+        onTriggered: {
+            if (root.minimalCursorFollowSuppressed || root.inputScrollHoldBottom
+                    || scrollAnimation.running) {
+                return
+            }
+            root.ensureMinimalCursorVisible(
+                editor.positionToRectangle(editor.cursorPosition))
+        }
+    }
+
+    function ensureMinimalCursorVisible(rectangle) {
+        // 与输入后的 1/3 屏滚动保持既有坐标约定；这里只负责贴边的最小跟随。
+        const top = rectangle.y
+        const bottom = top + rectangle.height
+        if (top < editorViewport.contentY) {
+            editorViewport.contentY = Math.max(0, top)
+        } else if (bottom > editorViewport.contentY + editorViewport.height) {
+            editorViewport.contentY = Math.min(
+                Math.max(0, editorViewport.contentHeight - editorViewport.height),
+                bottom - editorViewport.height
+            )
+        }
     }
 
     function scrollToBottom() {
@@ -1130,6 +1163,9 @@ Window {
             naturalContentHeight,
             root.inputScrollHoldBottom ? editorViewport.contentY + height : 0)
         pixelAligned: true
+        // 任意手动或其他业务滚动都取得优先权；延迟光标复核只补偿一次
+        // 被丢弃的光标变化，不能在稍后把用户主动浏览的位置拉回去。
+        onContentYChanged: minimalCursorFollowTimer.stop()
 
         NumberAnimation {
             id: scrollAnimation
@@ -1294,12 +1330,10 @@ Window {
             onSelectionStartChanged: root.invalidateFindTarget()
             onSelectionEndChanged: root.invalidateFindTarget()
             onTextChanged: root.invalidateFindTarget()
-
             onCursorRectangleChanged: {
                 // 标题跳转期间抑制瞬时贴边跟随，跳转的对齐滚动稍后由统一的
                 // 轻量动画入口执行。
-                if (root.suppressHeadingCursorFollow || root.findNavigationFollowing
-                        || (findPanel.visible && !editor.activeFocus)) {
+                if (root.minimalCursorFollowSuppressed) {
                     return
                 }
                 // 文档变更期间 QML 会短暂给出过期/无效的光标矩形（如落在
@@ -1307,18 +1341,10 @@ Window {
                 // 反查该矩形对应的位置并与当前光标位置比对，不一致则跳过。
                 const rectPosition = positionAt(cursorRectangle.x, cursorRectangle.y)
                 if (Math.abs(rectPosition - cursorPosition) > 4) {
+                    minimalCursorFollowTimer.restart()
                     return
                 }
-                const top = cursorRectangle.y
-                const bottom = cursorRectangle.y + cursorRectangle.height
-                if (top < editorViewport.contentY) {
-                    editorViewport.contentY = Math.max(0, top)
-                } else if (bottom > editorViewport.contentY + editorViewport.height) {
-                    editorViewport.contentY = Math.min(
-                        Math.max(0, editorViewport.contentHeight - editorViewport.height),
-                        bottom - editorViewport.height
-                    )
-                }
+                root.ensureMinimalCursorVisible(cursorRectangle)
             }
 
             Rectangle {

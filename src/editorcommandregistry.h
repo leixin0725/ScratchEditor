@@ -158,6 +158,7 @@ private:
     void focusEditor();
     QString selectedText() const;
     bool handleSelectionDragEvent(QEvent *event);
+    void trackNativeSelectionDragEvent(QEvent *event);
     bool moveByCjkAwareWord(bool left, bool keepSelection);
     bool deleteByCjkAwareWord(bool backwards);
     bool handleCjkDoubleClick(QMouseEvent *event);
@@ -170,11 +171,13 @@ private:
                             const QPointF &scenePosition);
     void updateSelectionDrag(const QPointF &scenePosition, bool scrollViewport);
     void resetSelectionDrag(bool releaseMouseGrab);
+    void updateNativeSelectionDrag();
+    void resetNativeSelectionDrag();
     void updateExternalTextDragPosition(const QPointF &scenePosition,
                                         bool scrollViewport);
     void updateExternalTextDragCursor(bool canDrop);
     void resetExternalTextDrag();
-    void scrollTextDragViewport(const QPointF &scenePosition);
+    bool scrollTextDragViewport(const QPointF &scenePosition);
     void beginInputAutoScrollTracking(const QString &kind);
     void queueInputAutoScrollCheck();
     void checkInputAutoScroll();
@@ -256,6 +259,11 @@ private:
     bool m_selectionDragActive = false;
     bool m_selectionDragPreviousKeepMouseGrab = false;
     QCursor m_selectionDragOriginalCursor;
+    QPointF m_nativeSelectionDragPressScenePosition;
+    QPointF m_nativeSelectionDragScenePosition;
+    Qt::KeyboardModifiers m_nativeSelectionDragModifiers = Qt::NoModifier;
+    bool m_nativeSelectionDragPending = false;
+    bool m_nativeSelectionDragActive = false;
     QString m_externalDragText;
     QPointF m_externalDragPressScenePosition;
     QPointF m_externalDragScenePosition;
