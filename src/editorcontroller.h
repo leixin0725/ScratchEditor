@@ -160,6 +160,8 @@ public:
     Q_INVOKABLE void animationBenchmarkFinished();
     Q_INVOKABLE bool executeCommand(const QString &commandId);
     Q_INVOKABLE bool insertDroppedUrls(const QList<QUrl> &urls);
+    Q_INVOKABLE bool setMarkdownLinkHoverPosition(int position);
+    Q_INVOKABLE bool openMarkdownLinkAt(int position);
     Q_INVOKABLE bool toggleHeadingFoldAt(int headingPosition);
     Q_INVOKABLE QString shortcutFor(const QString &commandId) const;
     Q_INVOKABLE bool setShortcut(const QString &commandId, const QString &sequence);

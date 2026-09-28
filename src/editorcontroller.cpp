@@ -14,6 +14,7 @@
 #include <QColor>
 #include <QCoreApplication>
 #include <QCursor>
+#include <QDesktopServices>
 #include <QDateTime>
 #include <QDir>
 #include <QEvent>
@@ -960,6 +961,26 @@ bool EditorController::applyAppearance(const QString &theme, const QString &font
     }
     reloadAppearance();
     return true;
+}
+
+bool EditorController::setMarkdownLinkHoverPosition(int position)
+{
+    if (!m_markdownHighlighter) {
+        return false;
+    }
+    return m_markdownHighlighter->setHoveredPosition(position);
+}
+
+bool EditorController::openMarkdownLinkAt(int position)
+{
+    if (!m_markdownHighlighter) {
+        return false;
+    }
+    QUrl url = m_markdownHighlighter->externalLinkAt(position);
+    if (url.isEmpty() && position > 0) {
+        url = m_markdownHighlighter->externalLinkAt(position - 1);
+    }
+    return !url.isEmpty() && QDesktopServices::openUrl(url);
 }
 
 void EditorController::resetAppearance()

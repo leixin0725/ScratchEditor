@@ -123,6 +123,8 @@ endif()
 
 qt_add_executable(ScratchEditorEditingTests
     tests/editing_main.cpp
+    src/markdownhighlighter.cpp
+    src/markdownhighlighter.h
     src/markdownstyle.cpp
     src/markdownstyle.h
 )

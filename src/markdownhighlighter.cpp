@@ -1,13 +1,23 @@
 #include "markdownhighlighter.h"
 #include "markdownstyle.h"
 
+#include <QColor>
 #include <QFont>
 #include <QHash>
 #include <QRegularExpression>
+#include <QTextBlock>
 #include <QTextDocument>
+#include <QUrl>
 #include <QVector>
 
 namespace {
+
+const QRegularExpression &inlineLinkExpression()
+{
+    static const QRegularExpression expression(
+        QStringLiteral(R"((\[)([^\]\n]+)(\])(\()([^\)\n]+)(\)))"));
+    return expression;
+}
 
 enum EmphasisFlag : quint8 {
     NoEmphasis = 0,
@@ -288,11 +298,102 @@ void MarkdownHighlighter::setStyle(const MarkdownStyle &style, int baseFontWeigh
     m_codeFenceFormat = style.textFormat(style.codeFence, baseFontWeight);
     m_linkFormat = style.textFormat(style.link, baseFontWeight);
     m_linkBracketsFormat = style.textFormat(style.linkBrackets, baseFontWeight);
+    m_linkHoverFormat = QTextCharFormat();
+    QColor hoverBackground = style.accentColor;
+    hoverBackground.setAlpha(55);
+    m_linkHoverFormat.setBackground(hoverBackground);
     m_completedTaskFormat = style.textFormat(style.completedTask, baseFontWeight);
     m_checkboxBracketsFormat = style.textFormat(style.checkboxBrackets, baseFontWeight);
     m_boldWeightDelta = style.bold.fontWeightDelta;
     m_boldItalicWeightDelta = style.boldItalic.fontWeightDelta;
     rehighlight();
+}
+
+bool MarkdownHighlighter::setHoveredPosition(int position)
+{
+    QUrl target;
+    int linkStart = -1;
+    int linkLength = 0;
+    int linkPosition = position;
+    bool foundLink = position >= 0
+        && findExternalLinkAt(linkPosition, &target, &linkStart, &linkLength);
+    if (!foundLink && position > 0) {
+        linkPosition = position - 1;
+        foundLink = findExternalLinkAt(linkPosition, &target, &linkStart, &linkLength);
+    }
+    const QTextBlock nextBlock = foundLink ? document()->findBlock(linkPosition) : QTextBlock();
+    const int nextBlockNumber = nextBlock.isValid() ? nextBlock.blockNumber() : -1;
+    if (m_hoveredBlockNumber == nextBlockNumber
+        && m_hoveredLinkStart == linkStart && m_hoveredLinkLength == linkLength) {
+        return foundLink;
+    }
+
+    const QTextBlock previousBlock = m_hoveredBlockNumber >= 0
+        ? document()->findBlockByNumber(m_hoveredBlockNumber) : QTextBlock();
+    m_hoveredBlockNumber = nextBlockNumber;
+    m_hoveredLinkStart = linkStart;
+    m_hoveredLinkLength = linkLength;
+    if (previousBlock.isValid()) {
+        rehighlightBlock(previousBlock);
+    }
+    if (nextBlock.isValid() && nextBlock != previousBlock) {
+        rehighlightBlock(nextBlock);
+    }
+    return foundLink;
+}
+
+QUrl MarkdownHighlighter::externalLinkAt(int position) const
+{
+    QUrl target;
+    return findExternalLinkAt(position, &target, nullptr, nullptr) ? target : QUrl();
+}
+
+bool MarkdownHighlighter::findExternalLinkAt(int position, QUrl *target,
+                                             int *start, int *length) const
+{
+    const QTextBlock block = document()->findBlock(position);
+    if (!block.isValid() || block.userState() == 1) {
+        return false;
+    }
+
+    const int positionInBlock = position - block.position();
+    const QString text = block.text();
+    static const QRegularExpression heading(QStringLiteral(R"(^\s{0,3}(#{1,6})\s+.*$)"));
+    static const QRegularExpression quote(QStringLiteral(R"(^\s{0,3}>\s?.*$)"));
+    if (heading.match(text).hasMatch() || quote.match(text).hasMatch()) {
+        return false;
+    }
+    for (const InlineSpan &span : findCodeSpans(text)) {
+        if (positionInBlock >= span.start && positionInBlock < span.end) {
+            return false;
+        }
+    }
+
+    QRegularExpressionMatchIterator matches = inlineLinkExpression().globalMatch(text);
+    while (matches.hasNext()) {
+        const QRegularExpressionMatch match = matches.next();
+        if (positionInBlock < match.capturedStart(0)
+            || positionInBlock >= match.capturedEnd(0)) {
+            continue;
+        }
+        const QUrl url(match.captured(5), QUrl::TolerantMode);
+        const QString scheme = url.scheme().toLower();
+        if (url.isValid() && !url.host().isEmpty()
+            && (scheme == QStringLiteral("http") || scheme == QStringLiteral("https"))) {
+            if (target) {
+                *target = url;
+            }
+            if (start) {
+                *start = match.capturedStart(0);
+            }
+            if (length) {
+                *length = match.capturedLength(0);
+            }
+            return true;
+        }
+        return false;
+    }
+    return false;
 }
 
 void MarkdownHighlighter::highlightBlock(const QString &text)
@@ -307,9 +408,6 @@ void MarkdownHighlighter::highlightBlock(const QString &text)
         QStringLiteral(R"(^\s*[-+*]\s+\[[xX]\]\s+.*$)"));
     static const QRegularExpression strikethrough(
         QStringLiteral(R"(~~(?=\S)(.+?\S)~~)"));
-    static const QRegularExpression link(
-        QStringLiteral(R"((\[)([^\]\n]+)(\])(\()([^\)\n]+)(\)))"));
-
     const auto applyMatches = [this, &text](const QRegularExpression &expression,
                                             const QTextCharFormat &format,
                                             int capture = 0) {
@@ -374,7 +472,7 @@ void MarkdownHighlighter::highlightBlock(const QString &text)
                                                        : QVector<InlineSpan>{};
     QVector<QRegularExpressionMatch> links;
     if (hasBracket) {
-        QRegularExpressionMatchIterator matches = link.globalMatch(text);
+        QRegularExpressionMatchIterator matches = inlineLinkExpression().globalMatch(text);
         while (matches.hasNext()) {
             links.append(matches.next());
         }
@@ -438,11 +536,20 @@ void MarkdownHighlighter::highlightBlock(const QString &text)
         }
     };
     for (const QRegularExpressionMatch &match : links) {
-        applyWithEmphasis(match.capturedStart(2), match.capturedLength(2), m_linkFormat);
-        applyWithEmphasis(match.capturedStart(5), match.capturedLength(5), m_linkFormat);
+        const bool isHovered = m_hoveredBlockNumber == currentBlock().blockNumber()
+            && m_hoveredLinkStart == match.capturedStart(0)
+            && m_hoveredLinkLength == match.capturedLength(0);
+        QTextCharFormat linkFormat = m_linkFormat;
+        QTextCharFormat linkBracketsFormat = m_linkBracketsFormat;
+        if (isHovered) {
+            linkFormat.setBackground(m_linkHoverFormat.background());
+            linkBracketsFormat.setBackground(m_linkHoverFormat.background());
+        }
+        applyWithEmphasis(match.capturedStart(2), match.capturedLength(2), linkFormat);
+        applyWithEmphasis(match.capturedStart(5), match.capturedLength(5), linkFormat);
         for (const int capture : {1, 3, 4, 6}) {
             applyWithEmphasis(match.capturedStart(capture), match.capturedLength(capture),
-                              m_linkBracketsFormat);
+                              linkBracketsFormat);
         }
     }
     for (const InlineSpan &span : codeSpans) {

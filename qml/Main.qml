@@ -1295,6 +1295,7 @@ Window {
             objectName: "scratchText"
             z: 1
             property int selectionDragPosition: -1
+            property bool markdownLinkHovered: false
             readonly property rect selectionDragRectangle:
                 selectionDragPosition >= 0
                     ? positionToRectangle(selectionDragPosition)
@@ -1316,6 +1317,32 @@ Window {
             activeFocusOnPress: true
             inputMethodHints: Qt.ImhMultiLine
 
+            function updateMarkdownLinkHover() {
+                const position = markdownLinkHoverHandler.hovered
+                    ? positionAt(markdownLinkHoverHandler.point.position.x,
+                                 markdownLinkHoverHandler.point.position.y)
+                    : -1
+                markdownLinkHovered = controller.setMarkdownLinkHoverPosition(position)
+            }
+
+            HoverHandler {
+                id: markdownLinkHoverHandler
+                acceptedDevices: PointerDevice.Mouse
+                cursorShape: editor.markdownLinkHovered
+                    ? Qt.PointingHandCursor : Qt.IBeamCursor
+                onPointChanged: editor.updateMarkdownLinkHover()
+                onHoveredChanged: editor.updateMarkdownLinkHover()
+            }
+
+            TapHandler {
+                acceptedButtons: Qt.LeftButton
+                acceptedModifiers: Qt.ControlModifier
+                onTapped: function(point, button) {
+                    controller.openMarkdownLinkAt(
+                        editor.positionAt(point.position.x, point.position.y))
+                }
+            }
+
             Keys.onEscapePressed: function(event) {
                 if (findPanel.visible) {
                     root.hideFindPanel()
@@ -1329,7 +1356,10 @@ Window {
             onContentHeightChanged: root.refreshHeadingNavigationHighlightGeometry()
             onSelectionStartChanged: root.invalidateFindTarget()
             onSelectionEndChanged: root.invalidateFindTarget()
-            onTextChanged: root.invalidateFindTarget()
+            onTextChanged: {
+                root.invalidateFindTarget()
+                updateMarkdownLinkHover()
+            }
             onCursorRectangleChanged: {
                 // 标题跳转期间抑制瞬时贴边跟随，跳转的对齐滚动稍后由统一的
                 // 轻量动画入口执行。

@@ -10,11 +10,16 @@
 #include <QLocalSocket>
 #include <QStringList>
 #include <QTemporaryDir>
+#include <QTextFormat>
+#include <QTextBlock>
+#include <QTextDocument>
 #include <QThread>
 #include <QTextCharFormat>
+#include <QTextLayout>
 #include <QUrl>
 
 #include "cjktextprocessor.h"
+#include "markdownhighlighter.h"
 #include "markdownstyle.h"
 
 #include <array>
@@ -1111,6 +1116,86 @@ int main(int argc, char *argv[])
                  && hasColor(completedTaskStyle, QStringLiteral("#999999"))
                  && completedTaskStyle.value(QStringLiteral("strikeThrough")).toBool(),
              completedTaskStyle);
+
+    const QString externalLink = QStringLiteral("前缀 [标题](https://example.invalid/path) 后缀");
+    const int externalLinkStart = externalLink.indexOf(QLatin1Char('['));
+    const int hoverPosition = externalLinkStart + 2;
+    QTextDocument linkDocument;
+    linkDocument.setPlainText(externalLink);
+    MarkdownHighlighter linkHighlighter(&linkDocument, MarkdownStyle::load(true), 400);
+    const auto formatAtDocumentPosition = [&linkDocument](int position) {
+        QTextCharFormat combinedFormat;
+        const QTextBlock block = linkDocument.findBlock(position);
+        if (!block.isValid() || !block.layout()) {
+            return combinedFormat;
+        }
+        const int positionInBlock = position - block.position();
+        for (const QTextLayout::FormatRange &range : block.layout()->formats()) {
+            if (positionInBlock >= range.start
+                && positionInBlock < range.start + range.length) {
+                combinedFormat.merge(range.format);
+            }
+        }
+        return combinedFormat;
+    };
+    const bool externalLinkRecognized = !linkHighlighter.externalLinkAt(hoverPosition).isEmpty();
+    linkHighlighter.setHoveredPosition(hoverPosition);
+    const int externalLinkEnd = externalLink.indexOf(QStringLiteral(")")) + 1;
+    const bool entireSyntaxHitTest = [&linkHighlighter, externalLinkStart,
+                                      externalLinkEnd, &externalLink] {
+        for (int position = externalLinkStart; position < externalLinkEnd; ++position) {
+            if (linkHighlighter.externalLinkAt(position).isEmpty()) {
+                return false;
+            }
+        }
+        return linkHighlighter.setHoveredPosition(externalLinkEnd);
+    }();
+    bool completeSyntaxHighlighted = true;
+    for (int position = externalLinkStart; position < externalLinkEnd; ++position) {
+        const QColor background = formatAtDocumentPosition(position).background().color();
+        completeSyntaxHighlighted = completeSyntaxHighlighted
+            && formatAtDocumentPosition(position).hasProperty(QTextFormat::BackgroundBrush)
+            && background.alpha() == 55;
+    }
+    const QTextCharFormat hoveredOpeningBracket = formatAtDocumentPosition(externalLinkStart);
+    const QTextCharFormat hoveredLinkText = formatAtDocumentPosition(hoverPosition);
+    const bool externalLinkHoverStyle = externalLinkRecognized && entireSyntaxHitTest
+        && completeSyntaxHighlighted
+        && hoveredOpeningBracket.foreground().color() == QColor(QStringLiteral("#999999"))
+        && hoveredLinkText.foreground().color() == QColor(QStringLiteral("#85c7c0"));
+    const bool invalidTargetRejected = linkHighlighter.externalLinkAt(
+        externalLink.indexOf(QStringLiteral("前缀"))).isEmpty();
+    const QString mailtoLink = QStringLiteral("[邮件](mailto:user@example.invalid)");
+    linkDocument.setPlainText(mailtoLink);
+    linkHighlighter.rehighlight();
+    const bool nonWebSchemeRejected = linkHighlighter.externalLinkAt(
+        mailtoLink.indexOf(QStringLiteral("mailto"))).isEmpty();
+    const QString inlineCodeLink = QStringLiteral("`[代码](https://example.invalid)`");
+    linkDocument.setPlainText(inlineCodeLink);
+    linkHighlighter.rehighlight();
+    const bool inlineCodeLinkRejected = linkHighlighter.externalLinkAt(
+        inlineCodeLink.indexOf(QStringLiteral("https"))).isEmpty();
+    const QString fencedCodeLink = QStringLiteral(
+        "```md\n[代码](https://example.invalid)\n```");
+    linkDocument.setPlainText(fencedCodeLink);
+    linkHighlighter.rehighlight();
+    const bool fencedCodeLinkRejected = linkHighlighter.externalLinkAt(
+        fencedCodeLink.indexOf(QStringLiteral("https"))).isEmpty();
+    addCheck(checks, details, QStringLiteral("externalMarkdownLinkHoverStyle"),
+             externalLinkHoverStyle && invalidTargetRejected && nonWebSchemeRejected
+                 && inlineCodeLinkRejected && fencedCodeLinkRejected,
+             QJsonObject{{QStringLiteral("externalLinkRecognized"), externalLinkRecognized},
+                         {QStringLiteral("completeSyntaxHighlighted"),
+                          completeSyntaxHighlighted},
+                         {QStringLiteral("entireSyntaxHitTest"), entireSyntaxHitTest},
+                         {QStringLiteral("openingBracketForeground"),
+                          hoveredOpeningBracket.foreground().color().name()},
+                         {QStringLiteral("linkTextForeground"),
+                          hoveredLinkText.foreground().color().name()},
+                         {QStringLiteral("invalidTargetRejected"), invalidTargetRejected},
+                         {QStringLiteral("nonWebSchemeRejected"), nonWebSchemeRejected},
+                         {QStringLiteral("inlineCodeLinkRejected"), inlineCodeLinkRejected},
+                         {QStringLiteral("fencedCodeLinkRejected"), fencedCodeLinkRejected}});
 
     setTextAndSelection(QStringLiteral("alpha"), 0, 5);
     const QJsonObject boldOn = execute(QStringLiteral("toggleBold"));
