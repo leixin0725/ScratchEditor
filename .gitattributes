@@ -1,2 +1,3 @@
 artifacts/baselines/*.diff whitespace=-trailing-space
 *.sh text eol=lf
+packaging/licenses/** text eol=lf

@@ -854,6 +854,8 @@ ScratchEditor 的公开 Windows x64 发行通过 GitHub Releases 提供便携 ZI
 及三个部署模块的许可文本；打包缺少这些材料会失败。发行包还附带 ScratchEditor MIT、Lucide/Feather、
 MinGW 运行时许可和 Qt SBOM 中的组件版权、来源及自定义许可正文。许可材料来源记录见
 `packaging/licenses/SOURCES.md`。手动打包可通过 `-QtLicenseFile <路径>` 覆盖 LGPL 正文。
+`.gitattributes` 将 `packaging/licenses/**` 固定为 LF，防止 Windows checkout 转换为 CRLF 后
+导致原始字节 SHA-256 与上游快照不一致；打包始终保留原始字节完整性校验。
 更新 Qt/MinGW 版本或部署模块时，必须重新核对组件清单和所适用许可。
 
 ### 本地验证
