@@ -21,29 +21,62 @@ ScratchEditor 不是完整的 IDE 或笔记管理工具。它不提供 Markdown 
 
 ## 安装与更新
 
-目前项目通过源码构建和本机部署脚本安装，已验证的运行环境为 Windows 11。首次使用时，
-在项目根目录打开 PowerShell；如果 `.tools/Qt` 中还没有项目工具链，先运行：
+ScratchEditor 的首次公开发行面向 Windows 11 x64，提供便携 ZIP，并在 WinGet 清单审核通过后提供命令行安装。公开发行件会发布在
+[GitHub Releases](https://github.com/leixin0725/ScratchEditor/releases/latest)。
+
+### 便携 ZIP
+
+下载 `ScratchEditor-<版本>-windows-x64.zip`，解压后运行 `ScratchEditor.exe`。Qt 运行库已随包提供，
+不需要单独安装 Qt 或开发工具。发行包没有数字签名，Windows 可能显示未知发布者提示；可用同一发行页
+提供的 SHA-256 文件核对下载内容：
+
+```powershell
+Get-FileHash .\ScratchEditor-<版本>-windows-x64.zip -Algorithm SHA256
+```
+
+用户设置和剪贴板历史继续保存在 `%LOCALAPPDATA%\ScratchEditor\ScratchEditor`（Qt `AppConfigLocation`），不随解压目录移动。
+首次运行会按现有行为生成用户配置。升级时先退出应用，将新版本解压到新目录再运行；确认正常后可删除旧目录。
+删除解压目录不会删除这些数据。便携包默认不会改动 Codex、pi、AutoHotkey、WSL、Git Bash、VS Code
+或用户环境变量。
+
+### WinGet
+
+WinGet 社区清单合并后，可安装公开版本：
+
+```powershell
+winget install --id leixin0725.ScratchEditor --exact
+winget upgrade --id leixin0725.ScratchEditor --exact
+winget uninstall --id leixin0725.ScratchEditor --exact
+```
+
+WinGet 自身管理命令入口，必要时将其 Links 目录加入用户 PATH；这是经允许的安装行为。
+应用及发行脚本不配置外部工具。卸载 WinGet 包应保留用户设置和剪贴板历史，发行前需在干净环境验证。
+
+### 源码构建
+
+开发者可从源码构建并部署本机集成。首次使用时，在项目根目录打开 PowerShell；如果 `.tools/Qt` 中还没有项目工具链，先运行：
 
 ```powershell
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\restore-toolchain.ps1
 ```
 
-然后构建并安装稳定版：
+然后构建并部署开发者本机使用的稳定副本：
 
 ```powershell
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\build.ps1 -Preset release
 ```
 
-成功后会生成并同步两个用途隔离的本机副本：
+该命令会生成并同步两个用途隔离的本机副本：
 
 - `%LOCALAPPDATA%\ScratchEditor\AhkEditor`：供 AutoHotkey 全局快捷键调用的常驻编辑器。
 - `%LOCALAPPDATA%\ScratchEditor\CodexEditor`：供 Codex 和 pi 使用的外部文件编辑器。
 
-构建脚本还会刷新已检测到的 AutoHotkey、Codex、pi、Git Bash、VS Code 和 WSL 集成。
+构建脚本还会刷新已检测到的 AutoHotkey、Codex、pi、Git Bash、VS Code 和 WSL 集成；
+此行为只适用于开发者本机部署，不属于公开 ZIP 或 WinGet 安装流程。
 首次配置后，应重新打开 Git Bash，并重启正在运行的 Codex 或 pi，使它们重新读取环境变量
 和设置。以后更新项目时，重新执行同一条 release 构建命令即可。
 
-如需检查集成状态而不重新安装，可运行：
+如需检查开发者本机集成状态而不重新安装，可运行：
 
 ```powershell
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\configure-codex-editor.ps1 -Action Check
@@ -602,6 +635,21 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\run-editor-swi
 
 ## CLI 外部编辑器
 
+便携版可手动配置到固定解压路径后供 CLI 使用。以下 PowerShell 环境变量只影响当前 shell
+及其启动的子进程，不会写入 Windows 用户环境设置：
+
+```powershell
+$env:VISUAL = '"C:\Tools\ScratchEditor\ScratchEditor.exe" --wait'
+$env:EDITOR = $env:VISUAL
+```
+
+在同一个 shell 中启动 Codex 或 pi 即可使用该编辑器。pi 也可以在自己的 `settings.json` 中将
+`externalEditor` 设置为带 `--wait` 的可执行文件命令。移动或删除解压目录前，应先更新或移除这些
+手动设置。便携包不包含 AutoHotkey 快捷键配置。
+
+下方的自动集成配置脚本仅供从源码构建的开发环境使用，会更新本机环境变量和检测到的外部集成；
+它不属于公开 ZIP，也不会由 WinGet 或公开发行工作流调用。
+
 文件位置参数会进入独立的外部编辑模式；`--wait` 是便于环境变量表达的兼容选项，进程本身
 始终等待到编辑完成：
 
@@ -752,3 +800,67 @@ Qt/旧 GUI 回退开关，不会被构建或测试脚本自动安装。AHK 迁�
   停止该确切实例，安装完成后再重新启动。
 
 Qt 部署资源目前会输出已知的 `libpng iCCP` 警告，不影响功能、像素检查或性能验收。
+
+## 公开发行流程
+
+ScratchEditor 的公开 Windows x64 发行通过 GitHub Releases 提供便携 ZIP，并为 WinGet 社区仓库
+生成多文件清单。当前公开版本基线为 `0.1.0`，标签形式为 `v0.1.0`。
+
+### 自动构建
+
+将 `v<版本>` 标签推送到 GitHub 后，`.github/workflows/release.yml` 在 `windows-2025` x64 runner 上：
+
+1. 核对标签版本与 `CMakeLists.txt` 中的项目版本一致。
+2. 使用 `scripts/restore-toolchain.ps1` 恢复 Qt 6.10.2、MinGW 13.1 及项目工具目录中的 CMake、Ninja。
+3. 使用 `scripts/build.ps1 -Preset release -SkipLocalInstall` 构建，不安装稳定副本、不刷新本机集成。
+4. 运行外部文件、剪贴板历史、编辑、窗口 UI 隔离测试。
+5. 在唯一的系统临时目录重新部署 `ScratchEditor.exe` 的运行时依赖，只打包应用、默认配置和发行许可材料。
+6. 解压发行 ZIP 到临时目录并清空子进程的 PATH 后，运行外部编辑器进程冒烟验收。
+7. 所有步骤通过后，使用最小 `contents: write` 工作流权限创建草稿发行版并附带 ZIP、SHA-256 文件和 WinGet 清单 ZIP。
+
+发行 ZIP 名称为 `ScratchEditor-<版本>-windows-x64.zip`。包根目录只有运行应用所需文件、`config/`、
+`licenses/`、`README.txt` 和 `THIRD-PARTY-NOTICES.txt`，不含测试二进制或开发工具。打包脚本拒绝版本号
+与 CMake 项目版本不一致的调用。
+
+### 草稿检查与发布
+
+发布前必须在未安装 Qt 开发工具链的 Windows 11 x64 环境验证 ZIP 启动及 `--wait` 保存；
+托管的 `windows-2025` runner 与本机隔离 PATH 冒烟不能替代这一验收。
+
+维护者应在 GitHub Releases 中检查发行说明、ZIP、校验文件、WinGet 清单以及 Actions 验收结果，确认后
+手动发布草稿。首发未签名；发行说明明确提示 Windows 可能显示未知发布者。SHA-256 文件由本地包生成，
+可通过 PowerShell `Get-FileHash -Algorithm SHA256` 复核。
+
+### WinGet 清单
+
+自动构建生成 `leixin0725.ScratchEditor` 的 version、defaultLocale 和 installer 三份清单，压缩为
+`ScratchEditor-<版本>-winget-manifest.zip`。清单使用 ZIP 内的 `ScratchEditor.exe` 作为 portable 安装器，
+发行 ZIP URL 和 SHA-256 根据本次实际文件写入。允许 WinGet 管理命令入口及所需用户 PATH；
+应用和发行脚本不修改外部工具配置。
+
+正式发布 GitHub Release 后，维护者应：
+
+1. 解压 WinGet 清单 ZIP，并确认包标识、版本、GitHub 下载地址、SHA-256 和内嵌文件路径。
+2. 使用 `winget validate --manifest <清单目录>` 校验；在干净 Windows 环境验证安装、升级和卸载。
+3. 确认卸载只移除 WinGet 管理的包入口，不移除 `%LOCALAPPDATA%\ScratchEditor\ScratchEditor` 中用户数据。
+4. 将该版本清单手动提交到 `microsoft/winget-pkgs`，处理仓库验证反馈。
+
+不使用跨仓库 token，也不由本仓库工作流自动提交 WinGet PR。
+
+### 许可与依赖核对
+
+发行前检查 ZIP 中的 `THIRD-PARTY-NOTICES.txt`、`licenses/` 和 Qt SBOM，确保内容与实际部署目录中的 DLL、
+插件及 QML 模块相符。`packaging/licenses/` 保存 Qt 6.10.2 上游许可正文，包括 LGPLv3、其引用的 GPLv3
+及三个部署模块的许可文本；打包缺少这些材料会失败。发行包还附带 ScratchEditor MIT、Lucide/Feather、
+MinGW 运行时许可和 Qt SBOM 中的组件版权、来源及自定义许可正文。许可材料来源记录见
+`packaging/licenses/SOURCES.md`。手动打包可通过 `-QtLicenseFile <路径>` 覆盖 LGPL 正文。
+更新 Qt/MinGW 版本或部署模块时，必须重新核对组件清单和所适用许可。
+
+### 本地验证
+
+```powershell
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\build.ps1 -Preset release -SkipLocalInstall
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\package-release.ps1 -Version 0.1.0
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\test-release-package.ps1 `
+  -PackagePath artifacts\release\ScratchEditor-0.1.0-windows-x64.zip
+```

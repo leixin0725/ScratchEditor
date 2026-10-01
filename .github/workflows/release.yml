@@ -1,0 +1,107 @@
+name: Windows release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  build-and-package:
+    runs-on: windows-2025
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.13"
+
+      - name: Validate release tag
+        shell: pwsh
+        run: |
+          $version = $env:GITHUB_REF_NAME -replace '^v', ''
+          if ($version -notmatch '^\d+\.\d+\.\d+$') { throw "Invalid release tag: $env:GITHUB_REF_NAME" }
+          $cmake = Get-Content CMakeLists.txt -Raw
+          if ($cmake -notmatch "project\(ScratchEditor\s+VERSION\s+$([regex]::Escape($version))\b") {
+            throw "Tag version $version does not match CMakeLists.txt project version."
+          }
+
+      - name: Restore locked Qt toolchain
+        shell: pwsh
+        run: ./scripts/restore-toolchain.ps1 -PythonExecutable (Get-Command python).Source
+
+      - name: Build release without local installation
+        shell: pwsh
+        run: ./scripts/build.ps1 -Preset release -SkipLocalInstall
+
+      - name: Run external-file session tests
+        shell: pwsh
+        run: |
+          & ./build/release/ScratchEditorExternalFileTests.exe
+          if ($LASTEXITCODE -ne 0) { throw "External-file session tests failed with exit code $LASTEXITCODE" }
+
+      - name: Run clipboard-history tests
+        shell: pwsh
+        run: ./scripts/run-clipboard-history-tests.ps1 -BuildSubdirectory build/release -ServerName ScratchEditor.ClipboardHistory.ReleaseCI
+
+      - name: Build editing validation preset
+        shell: pwsh
+        run: ./scripts/build.ps1 -Preset editing -SkipLocalInstall
+
+      - name: Run editing tests
+        shell: pwsh
+        run: ./scripts/run-editing-tests.ps1 -BuildSubdirectory build/editing -ServerName ScratchEditor.Editing.ReleaseCI
+
+      - name: Build window UI validation preset
+        shell: pwsh
+        run: ./scripts/build.ps1 -Preset window-ui -SkipLocalInstall
+
+      - name: Run window UI tests
+        shell: pwsh
+        run: ./scripts/run-window-ui-tests.ps1 -BuildSubdirectory build/window-ui -ServerName ScratchEditor.WindowUi.ReleaseCI -ArtifactPrefix release-ci
+
+      - name: Package portable ZIP and WinGet manifest
+        shell: pwsh
+        run: |
+          $version = $env:GITHUB_REF_NAME -replace '^v', ''
+          ./scripts/package-release.ps1 -Version $version
+
+      - name: Smoke-test extracted package
+        shell: pwsh
+        run: |
+          $version = $env:GITHUB_REF_NAME -replace '^v', ''
+          ./scripts/test-release-package.ps1 -PackagePath "artifacts/release/ScratchEditor-$version-windows-x64.zip"
+
+      - name: Create draft GitHub release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $version = $env:GITHUB_REF_NAME -replace '^v', ''
+          $notesPath = Join-Path $env:RUNNER_TEMP "ScratchEditor-release-notes.md"
+          $notes = @"
+          ScratchEditor $version for Windows 11 x64.
+
+          - Portable ZIP: extract and run ScratchEditor.exe; Qt runtime libraries are included.
+          - SHA-256 checksum is attached as a separate file.
+          - User settings and clipboard history remain in %LOCALAPPDATA%\ScratchEditor\ScratchEditor (Qt AppConfigLocation).
+          - The package does not configure CLI, AutoHotkey, WSL, Git Bash, VS Code, or environment variables.
+          - The binaries are unsigned; Windows may show an unknown publisher warning.
+          - Third-party notices and license texts are included in the ZIP.
+          - Optional CLI integration instructions: https://github.com/leixin0725/ScratchEditor#cli-外部提示词编辑器
+          - WinGet manages its command entry and may add its Links directory to the user PATH.
+
+          Maintainers: review this draft and its assets before publishing. The attached WinGet manifest archive is for manual submission after publication.
+          "@
+          [IO.File]::WriteAllText($notesPath, $notes, [Text.UTF8Encoding]::new($false))
+          $assets = @(
+            "artifacts/release/ScratchEditor-$version-windows-x64.zip",
+            "artifacts/release/ScratchEditor-$version-windows-x64.zip.sha256",
+            "artifacts/release/ScratchEditor-$version-winget-manifest.zip"
+          )
+          gh release create $env:GITHUB_REF_NAME --draft --verify-tag --title "ScratchEditor $version" --notes-file $notesPath @assets
+          if ($LASTEXITCODE -ne 0) { throw "Draft release creation failed with exit code $LASTEXITCODE" }

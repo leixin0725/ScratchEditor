@@ -1,6 +1,7 @@
 [CmdletBinding()]
 param(
-    [switch]$Force
+    [switch]$Force,
+    [string]$PythonExecutable
 )
 
 $ErrorActionPreference = "Stop"
@@ -48,7 +49,12 @@ $bootstrapPython = Join-Path $bootstrapRoot "Scripts\python.exe"
 
 try {
     Write-Host "Creating temporary aqtinstall environment..."
-    & py -3.13 -m venv $bootstrapRoot
+    if ($PythonExecutable) {
+        & $PythonExecutable -m venv $bootstrapRoot
+    }
+    else {
+        & py -3.13 -m venv $bootstrapRoot
+    }
     if ($LASTEXITCODE -ne 0) {
         throw "Failed to create the Python 3.13 bootstrap environment."
     }
