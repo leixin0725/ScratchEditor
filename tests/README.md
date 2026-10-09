@@ -2,6 +2,8 @@
 
 ## 自动验收程序
 
+`editing_main.cpp` 的 Tab 回归包含转义开闭符、反斜杠奇偶和空标记 run 的转义识别。
+
 - `perf_main.cpp`：性能、真实 OS 输入和微软拼音验收客户端。
 - `system_main.cpp`：滚动条、Escape、焦点和剪贴板异常回归。
   `run-system-tests.ps1` 仅为其启动的 test-mode 子进程设置

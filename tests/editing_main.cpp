@@ -3930,6 +3930,38 @@ int main(int argc, char *argv[])
               QStringLiteral("中文-"), 3, 3, QStringLiteral("key -"),
               keyAction(QStringLiteral("-")), QStringLiteral("中文——"), 4);
 
+    // Tab 转义只影响目标识别；此处从真实闭符号前出发，独立于跳转阶段。
+    const auto tabEscapeExpect = [&](const QString &name, QString marked,
+                                     bool matched) {
+        const int position = marked.indexOf(QLatin1Char('|'));
+        marked.remove(position, 1);
+        const QString expected = matched ? marked : QStringLiteral("    ") + marked;
+        cjkExpect(checks, details, name, marked, position, position,
+                  QStringLiteral("Tab escape recognition"),
+                  [] { return keyPress({}, QStringLiteral("Tab")); },
+                  expected, matched ? position + 1 : position + 4);
+    };
+    tabEscapeExpect(QStringLiteral("tabEscapedQuoteCloser"),
+                    QStringLiteral(R"("a\"b|")"), true);
+    tabEscapeExpect(QStringLiteral("tabEscapedParenOpener"),
+                    QStringLiteral(R"(\(ab|))"), false);
+    tabEscapeExpect(QStringLiteral("tabEvenBackslashesParen"),
+                    QStringLiteral(R"(\\(ab|))"), true);
+    tabEscapeExpect(QStringLiteral("tabEscapedQuoteOpener"),
+                    QStringLiteral(R"(\"ab|")"), false);
+    tabEscapeExpect(QStringLiteral("tabEscapedCurlyQuoteOpener"),
+                    QStringLiteral("\\“ab|”"), false);
+    tabEscapeExpect(QStringLiteral("tabEscapedEmphasisOpener"),
+                    QStringLiteral(R"(\*ab|*)"), false);
+    tabEscapeExpect(QStringLiteral("tabEscapedBacktickOpener"),
+                    QStringLiteral(R"(\`ab|`)"), false);
+    tabEscapeExpect(QStringLiteral("tabEscapedEmptyEmphasis"),
+                    QStringLiteral(R"(\*|*)"), false);
+    tabEscapeExpect(QStringLiteral("tabEscapedEmptyBackticks"),
+                    QStringLiteral(R"(\`|`)"), false);
+    tabEscapeExpect(QStringLiteral("tabEscapedEmptyBoldRun"),
+                    QStringLiteral(R"(\**|**)"), false);
+
     // --- Tab 跳出配对的 CJK 全角转换（TAB-CJK-001..008） ---
     const auto tabAction = [] { return keyPress({}, QStringLiteral("Tab")); };
     cjkExpect(checks, details, QStringLiteral("tabCjkParenPair"),

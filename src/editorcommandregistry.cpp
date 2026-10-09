@@ -5061,10 +5061,25 @@ bool EditorCommandRegistry::jumpOutOfPair()
         QStringLiteral("__"), QStringLiteral("`"), QStringLiteral("*"),
         QStringLiteral("_")};
 
+    // 只过滤 Tab 候选，不改变其他编辑路径的标记识别。
+    const auto nextTabMarker = [&](const QString &marker, int from) {
+        int position = nextExactMarkerRun(text, marker, from);
+        while (position >= 0 && position < lineEnd
+               && isEscapedAt(text, position, lineStart)) {
+            position = nextExactMarkerRun(text, marker, position + marker.size());
+        }
+        return position;
+    };
+
     for (const QString &marker : markers) {
+        int runStart = start;
+        while (runStart > lineStart && text.at(runStart - 1) == marker.front()) {
+            --runStart;
+        }
         if (start >= marker.size()
             && text.mid(start - marker.size(), marker.size()) == marker
-            && text.mid(start, marker.size()) == marker) {
+            && text.mid(start, marker.size()) == marker
+            && !isEscapedAt(text, runStart, lineStart)) {
             const int candidate = start + marker.size();
             jumpPosition = jumpPosition < 0 ? candidate : qMin(jumpPosition, candidate);
             continue;
@@ -5072,13 +5087,13 @@ bool EditorCommandRegistry::jumpOutOfPair()
 
         const int scopeStart = lineStart;
         int runCount = 0;
-        int run = nextExactMarkerRun(text, marker, scopeStart);
+        int run = nextTabMarker(marker, scopeStart);
         while (run >= 0 && run < start) {
             ++runCount;
-            run = nextExactMarkerRun(text, marker, run + marker.size());
+            run = nextTabMarker(marker, run + marker.size());
         }
         if ((runCount % 2) == 1) {
-            const int closing = nextExactMarkerRun(text, marker, start);
+            const int closing = nextTabMarker(marker, start);
             if (closing >= 0 && closing < lineEnd) {
                 const int candidate = closing + marker.size();
                 jumpPosition = jumpPosition < 0 ? candidate : qMin(jumpPosition, candidate);
@@ -5089,9 +5104,13 @@ bool EditorCommandRegistry::jumpOutOfPair()
     const auto &pairs = delimiterPairs();
     QVector<int> stack;
     QVector<int> openerPositions;
-    const auto consumeDelimiter = [&pairs](QVector<int> &delimiterStack,
+    const auto consumeDelimiter = [&pairs, &text, lineStart](QVector<int> &delimiterStack,
                                            QVector<int> &positions,
                                            int position, QChar character) -> int {
+        // 反斜杠自身不参与配对，避免长反斜杠串触发重复回扫。
+        if (character == QLatin1Char('\\') || isEscapedAt(text, position, lineStart)) {
+            return -1;
+        }
         if (!delimiterStack.isEmpty()
             && pairs.at(delimiterStack.back()).closing.front() == character) {
             const int openerPosition = positions.isEmpty() ? -1 : positions.back();
