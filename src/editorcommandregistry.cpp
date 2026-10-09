@@ -5056,6 +5056,14 @@ bool EditorCommandRegistry::jumpOutOfPair()
     const int lineStart = line.start;
     const int lineEnd = line.end;
     int jumpPosition = -1;
+    int closingPosition = -1;
+    // 仍按原来的闭标记之后位置选候选，避免两阶段改变混合标记的优先级。
+    const auto considerTarget = [&](int closing, int afterClosing) {
+        if (jumpPosition < 0 || afterClosing < jumpPosition) {
+            jumpPosition = afterClosing;
+            closingPosition = closing;
+        }
+    };
     const QStringList markers{
         QStringLiteral("***"), QStringLiteral("___"), QStringLiteral("**"),
         QStringLiteral("__"), QStringLiteral("`"), QStringLiteral("*"),
@@ -5081,7 +5089,7 @@ bool EditorCommandRegistry::jumpOutOfPair()
             && text.mid(start, marker.size()) == marker
             && !isEscapedAt(text, runStart, lineStart)) {
             const int candidate = start + marker.size();
-            jumpPosition = jumpPosition < 0 ? candidate : qMin(jumpPosition, candidate);
+            considerTarget(start, candidate);
             continue;
         }
 
@@ -5096,7 +5104,7 @@ bool EditorCommandRegistry::jumpOutOfPair()
             const int closing = nextTabMarker(marker, start);
             if (closing >= 0 && closing < lineEnd) {
                 const int candidate = closing + marker.size();
-                jumpPosition = jumpPosition < 0 ? candidate : qMin(jumpPosition, candidate);
+                considerTarget(closing, candidate);
             }
         }
     }
@@ -5144,7 +5152,7 @@ bool EditorCommandRegistry::jumpOutOfPair()
                 consumeDelimiter(stack, openerPositions, position, text.at(position));
             if (stack.size() < containingDepth) {
                 const int candidate = position + 1;
-                jumpPosition = jumpPosition < 0 ? candidate : qMin(jumpPosition, candidate);
+                considerTarget(position, candidate);
                 delimiterJumpPosition = candidate;
                 delimiterOpenerPosition = openerPosition;
                 delimiterCloserPosition = position;
@@ -5155,6 +5163,13 @@ bool EditorCommandRegistry::jumpOutOfPair()
 
     if (jumpPosition < 0) {
         return false;
+    }
+
+    // 内容中间的首次 Tab 仅停靠到闭标记前，不触发转换或编辑事务。
+    if (start < closingPosition) {
+        m_editor->setProperty("cursorPosition", closingPosition);
+        focusEditor();
+        return true;
     }
 
     // Tab 跳出严格匹配的半角配对时，若配对内容含 CJK 则整对转为全角，

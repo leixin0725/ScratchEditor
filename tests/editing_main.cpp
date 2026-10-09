@@ -3069,8 +3069,14 @@ int main(int argc, char *argv[])
     setTextAndSelection(QStringLiteral("***bold italic***"), 8, 8);
     const QJsonObject boldItalicTab = keyPress({}, QStringLiteral("Tab"));
     addCheck(checks, details, QStringLiteral("tabOutOfMarkdownEmphasis"),
-             boldItalicTab.value(QStringLiteral("cursorPosition")).toInt() == 17,
-             boldItalicTab);
+             boldItalicTab.value(QStringLiteral("cursorPosition")).toInt() == 14,
+             QJsonObject{{QStringLiteral("actual"), boldItalicTab},
+                         {QStringLiteral("expectedCursor"), 14}});
+    const QJsonObject boldItalicTabOut = keyPress({}, QStringLiteral("Tab"));
+    addCheck(checks, details, QStringLiteral("tabOutOfMarkdownEmphasisSecondStage"),
+             boldItalicTabOut.value(QStringLiteral("cursorPosition")).toInt() == 17,
+             QJsonObject{{QStringLiteral("actual"), boldItalicTabOut},
+                         {QStringLiteral("expectedCursor"), 17}});
 
     setTextAndSelection(QStringLiteral("a\nb"), 0, 3);
     const QJsonObject multiLineIndent = keyPress({}, QStringLiteral("Tab"));
@@ -3929,6 +3935,149 @@ int main(int argc, char *argv[])
     cjkExpect(checks, details, QStringLiteral("cjkKeyEmdash"),
               QStringLiteral("中文-"), 3, 3, QStringLiteral("key -"),
               keyAction(QStringLiteral("-")), QStringLiteral("中文——"), 4);
+
+    // 连续发送 Tab，不在两阶段之间重置文本或光标。
+    const auto tabStateExpect = [&](const QString &name, QString expected) {
+        const int expectedCursor = expected.indexOf(QLatin1Char('|'));
+        expected.remove(expectedCursor, 1);
+        const QJsonObject actual = keyPress({}, QStringLiteral("Tab"));
+        addCheck(checks, details, name,
+                 actual.value(QStringLiteral("text")).toString() == expected
+                     && actual.value(QStringLiteral("cursorPosition")).toInt() == expectedCursor
+                     && actual.value(QStringLiteral("selectionStart")).toInt() == expectedCursor
+                     && actual.value(QStringLiteral("selectionEnd")).toInt() == expectedCursor,
+                 QJsonObject{{QStringLiteral("actual"), actual},
+                             {QStringLiteral("expectedText"), expected},
+                             {QStringLiteral("expectedCursor"), expectedCursor}});
+    };
+    const auto tabStagesExpect = [&](const QString &name, QString input,
+                                     const QStringList &stages) {
+        const int position = input.indexOf(QLatin1Char('|'));
+        input.remove(position, 1);
+        setTextAndSelection(input, position, position);
+        for (int i = 0; i < stages.size(); ++i) {
+            tabStateExpect(name + QString::number(i + 1), stages.at(i));
+        }
+    };
+    const QList<QPair<QString, QString>> tabPairs{
+        {QStringLiteral("("), QStringLiteral(")")},
+        {QStringLiteral("["), QStringLiteral("]")},
+        {QStringLiteral("{"), QStringLiteral("}")},
+        {QStringLiteral("<"), QStringLiteral(">")},
+        {QStringLiteral("（"), QStringLiteral("）")},
+        {QStringLiteral("［"), QStringLiteral("］")},
+        {QStringLiteral("｛"), QStringLiteral("｝")},
+        {QStringLiteral("＜"), QStringLiteral("＞")},
+        {QStringLiteral("【"), QStringLiteral("】")},
+        {QStringLiteral("〔"), QStringLiteral("〕")},
+        {QStringLiteral("〖"), QStringLiteral("〗")},
+        {QStringLiteral("〘"), QStringLiteral("〙")},
+        {QStringLiteral("〚"), QStringLiteral("〛")},
+        {QStringLiteral("《"), QStringLiteral("》")},
+        {QStringLiteral("〈"), QStringLiteral("〉")},
+        {QStringLiteral("「"), QStringLiteral("」")},
+        {QStringLiteral("『"), QStringLiteral("』")},
+        {QStringLiteral("“"), QStringLiteral("”")},
+        {QStringLiteral("‘"), QStringLiteral("’")},
+        {QStringLiteral("\""), QStringLiteral("\"")},
+        {QStringLiteral("'"), QStringLiteral("'")},
+        {QStringLiteral("＂"), QStringLiteral("＂")},
+        {QStringLiteral("＇"), QStringLiteral("＇")},
+        {QStringLiteral("`"), QStringLiteral("`")},
+        {QStringLiteral("*"), QStringLiteral("*")},
+        {QStringLiteral("**"), QStringLiteral("**")},
+        {QStringLiteral("***"), QStringLiteral("***")},
+        {QStringLiteral("_"), QStringLiteral("_")},
+        {QStringLiteral("__"), QStringLiteral("__")},
+        {QStringLiteral("___"), QStringLiteral("___")},
+    };
+    for (int i = 0; i < tabPairs.size(); ++i) {
+        const auto &[opening, closing] = tabPairs.at(i);
+        tabStagesExpect(QStringLiteral("tabPair%1Stage").arg(i), opening + "a|bc" + closing,
+                        {opening + "abc|" + closing, opening + "abc" + closing + "|"});
+    }
+    tabStagesExpect(QStringLiteral("tabEmptyParen"), QStringLiteral("(|)"),
+                    {QStringLiteral("()|")});
+    tabStagesExpect(QStringLiteral("tabAdjacentParen"), QStringLiteral("(abc|)"),
+                    {QStringLiteral("(abc)|")});
+    tabStagesExpect(QStringLiteral("tabNested"), QStringLiteral("(a[b|c]d)"),
+                    {QStringLiteral("(a[bc|]d)"), QStringLiteral("(a[bc]|d)"),
+                     QStringLiteral("(a[bc]d|)"), QStringLiteral("(a[bc]d)|")});
+    tabStagesExpect(QStringLiteral("tabDeepNested"), QStringLiteral("{a(b[c|d]e)f}"),
+                    {QStringLiteral("{a(b[cd|]e)f}"), QStringLiteral("{a(b[cd]|e)f}")});
+    tabStagesExpect(QStringLiteral("tabQuoteNested"), QStringLiteral("\"a(b|c)d\""),
+                    {QStringLiteral("\"a(bc|)d\""), QStringLiteral("\"a(bc)|d\"")});
+    tabStagesExpect(QStringLiteral("tabMixedMarkerPriority"), QStringLiteral("*(a|b*c)"),
+                    {QStringLiteral("*(ab|*c)"), QStringLiteral("*(ab*|c)")});
+    tabStagesExpect(QStringLiteral("tabUtf16"), QStringLiteral("(a|😀b)"),
+                    {QStringLiteral("(a😀b|)"), QStringLiteral("(a😀b)|")});
+    tabStagesExpect(QStringLiteral("tabEscapedInnerCloser"), QStringLiteral(R"((a|\)b))"),
+                    {QStringLiteral(R"((a\)b|))"), QStringLiteral(R"((a\)b)|)")});
+    tabStagesExpect(QStringLiteral("tabEscapedQuoteStages"), QStringLiteral(R"("a|\"b")"),
+                    {QStringLiteral(R"("a\"b|")"), QStringLiteral(R"("a\"b"|)")});
+    tabStagesExpect(QStringLiteral("tabEscapedBoldCloser"), QStringLiteral(R"(**a|\**b**)"),
+                    {QStringLiteral(R"(**a\**b|**)"), QStringLiteral(R"(**a\**b**|)")});
+    tabStagesExpect(QStringLiteral("tabEscapedBacktickCloser"), QStringLiteral(R"(`a|\`b`)"),
+                    {QStringLiteral(R"(`a\`b|`)"), QStringLiteral(R"(`a\`b`|)")});
+    tabStagesExpect(QStringLiteral("tabNoPair"), QStringLiteral("abc|"),
+                    {QStringLiteral("    abc|")});
+    tabStagesExpect(QStringLiteral("tabUnclosedPair"), QStringLiteral("(a|bc"),
+                    {QStringLiteral("    (a|bc")});
+    tabStagesExpect(QStringLiteral("tabNoCrossLine"), QStringLiteral("(a|\nb)"),
+                    {QStringLiteral("    (a|\nb)")});
+    tabStagesExpect(QStringLiteral("tabCjkParenStages"), QStringLiteral("(中|文)"),
+                    {QStringLiteral("(中文|)"), QStringLiteral("（中文）|")});
+    tabStagesExpect(QStringLiteral("tabCjkBracketStages"), QStringLiteral("[中|文]"),
+                    {QStringLiteral("[中文|]"), QStringLiteral("【中文】|")});
+    tabStagesExpect(QStringLiteral("tabCjkDoubleStages"), QStringLiteral("\"中|文\""),
+                    {QStringLiteral("\"中文|\""), QStringLiteral("“中文”|")});
+    tabStagesExpect(QStringLiteral("tabCjkSingleStages"), QStringLiteral("'中|文'"),
+                    {QStringLiteral("'中文|'"), QStringLiteral("‘中文’|")});
+    tabStagesExpect(QStringLiteral("tabCjkNestedStages"), QStringLiteral("(\"中|文\")"),
+                    {QStringLiteral("(\"中文|\")"), QStringLiteral("(“中文”|)"),
+                     QStringLiteral("（“中文”）|")});
+    tabStagesExpect(QStringLiteral("tabCjkNoMapping"), QStringLiteral("{中|文}"),
+                    {QStringLiteral("{中文|}"), QStringLiteral("{中文}|")});
+    tabStagesExpect(QStringLiteral("tabCjkInlineProtected"), QStringLiteral("`(中|文)`"),
+                    {QStringLiteral("`(中文|)`"), QStringLiteral("`(中文)|`")});
+    tabStagesExpect(QStringLiteral("tabCjkFenceProtected"), QStringLiteral("```\n(中|文)\n```"),
+                    {QStringLiteral("```\n(中文|)\n```"), QStringLiteral("```\n(中文)|\n```")});
+    cjkExpect(checks, details, QStringLiteral("tabPairSelectionIndents"),
+              QStringLiteral("(ab[cd]ef)"), 4, 6, QStringLiteral("Tab with selection"),
+              [] { return keyPress({}, QStringLiteral("Tab")); },
+              QStringLiteral("    (ab[cd]ef)"), 14, 0, 14);
+
+    // 纯移动不能占据 Undo 步骤，也不能清除已有 Redo。
+    setTextAndSelection(QStringLiteral("(abc)"), 2, 2);
+    keyPress(QStringLiteral("x"));
+    tabStateExpect(QStringLiteral("tabUndoMoveBefore"), QStringLiteral("(axbc|)"));
+    tabStateExpect(QStringLiteral("tabUndoMoveAfter"), QStringLiteral("(axbc)|"));
+    request(QStringLiteral("testUndo"));
+    addCheck(checks, details, QStringLiteral("tabPureMovesSingleUndo"),
+             editorText() == QStringLiteral("(abc)"),
+             QJsonObject{{QStringLiteral("actual"), editorText()},
+                         {QStringLiteral("expected"), QStringLiteral("(abc)")}});
+    request(QStringLiteral("testSetSelection"),
+            {{QStringLiteral("start"), 2}, {QStringLiteral("end"), 2}});
+    tabStateExpect(QStringLiteral("tabRedoMoveBefore"), QStringLiteral("(abc|)"));
+    tabStateExpect(QStringLiteral("tabRedoMoveAfter"), QStringLiteral("(abc)|"));
+    request(QStringLiteral("testRedo"));
+    addCheck(checks, details, QStringLiteral("tabPureMovesPreserveRedo"),
+             editorText() == QStringLiteral("(axbc)"),
+             QJsonObject{{QStringLiteral("actual"), editorText()},
+                         {QStringLiteral("expected"), QStringLiteral("(axbc)")}});
+    tabStagesExpect(QStringLiteral("tabConversionUndoStages"), QStringLiteral("(中|文)"),
+                    {QStringLiteral("(中文|)"), QStringLiteral("（中文）|")});
+    request(QStringLiteral("testUndo"));
+    const QString tabConversionUndone = editorText();
+    request(QStringLiteral("testRedo"));
+    addCheck(checks, details, QStringLiteral("tabConversionUndoRedo"),
+             tabConversionUndone == QStringLiteral("(中文)")
+                 && editorText() == QStringLiteral("（中文）"),
+             QJsonObject{{QStringLiteral("actualUndo"), tabConversionUndone},
+                         {QStringLiteral("expectedUndo"), QStringLiteral("(中文)")},
+                         {QStringLiteral("actualRedo"), editorText()},
+                         {QStringLiteral("expectedRedo"), QStringLiteral("（中文）")}});
 
     // Tab 转义只影响目标识别；此处从真实闭符号前出发，独立于跳转阶段。
     const auto tabEscapeExpect = [&](const QString &name, QString marked,
