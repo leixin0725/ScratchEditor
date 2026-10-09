@@ -264,6 +264,49 @@ void cjkExpect(QJsonObject &checks, QJsonObject &details, const QString &name,
                 input, action, expectedText, actualText, status);
 }
 
+// 同时检查第一次及重做后的撤销，避免单次选区快照掩盖错误的事务光标。
+void undoCursorExpect(QJsonObject &checks, QJsonObject &details, const QString &name,
+                      QString input, const std::function<void()> &perform,
+                      const QString &expectedEditedText, int undoPosition = -1,
+                      int selectionAnchor = -1)
+{
+    const int position = input.indexOf(QLatin1Char('|'));
+    input.remove(position, 1);
+    if (undoPosition < 0) {
+        undoPosition = position;
+    }
+    if (selectionAnchor >= 0) {
+        setTextAndSelection(input, qMin(position, selectionAnchor),
+                            qMax(position, selectionAnchor), position);
+    } else {
+        setTextAndSelection(input, position, position);
+    }
+    perform();
+    QThread::msleep(30);
+    const QString edited = editorText();
+    addCheck(checks, details, name + QStringLiteral("Edit"), edited == expectedEditedText,
+             QJsonObject{{QStringLiteral("actualText"), edited},
+                         {QStringLiteral("expectedText"), expectedEditedText}});
+    for (int cycle = 0; cycle < 2; ++cycle) {
+        const QJsonObject undone = request(QStringLiteral("testUndo"));
+        const QString actualText = editorText();
+        addCheck(checks, details, name + QStringLiteral("Undo%1").arg(cycle + 1),
+                 actualText == input
+                     && undone.value(QStringLiteral("cursorPosition")).toInt() == undoPosition,
+                 QJsonObject{{QStringLiteral("actualText"), actualText},
+                             {QStringLiteral("expectedText"), input},
+                             {QStringLiteral("actualCursor"), undone.value(QStringLiteral("cursorPosition"))},
+                             {QStringLiteral("expectedCursor"), undoPosition}});
+        if (cycle == 0) {
+            request(QStringLiteral("testRedo"));
+            const QString redone = editorText();
+            addCheck(checks, details, name + QStringLiteral("Redo"), redone == expectedEditedText,
+                     QJsonObject{{QStringLiteral("actualText"), redone},
+                                 {QStringLiteral("expectedText"), expectedEditedText}});
+        }
+    }
+}
+
 void formatExpect(QJsonObject &checks, QJsonObject &details, const QString &name,
                   const QString &input, int start, int end, int cursor,
                   const QString &expectedText, int expectedCursor = -1,
@@ -4110,6 +4153,132 @@ int main(int argc, char *argv[])
                     QStringLiteral(R"(\`|`)"), false);
     tabEscapeExpect(QStringLiteral("tabEscapedEmptyBoldRun"),
                     QStringLiteral(R"(\**|**)"), false);
+
+    // 撤销事务必须记录实际编辑点，不能使用临时 QTextCursor 默认的文档位置 0。
+    const QList<QPair<QString, QString>> undoPairs{
+        {QStringLiteral("()"), QStringLiteral("（）")},
+        {QStringLiteral("[]"), QStringLiteral("【】")},
+        {QStringLiteral("\"\""), QStringLiteral("“”")},
+        {QStringLiteral("''"), QStringLiteral("‘’")},
+    };
+    for (int i = 0; i < undoPairs.size(); ++i) {
+        const auto &[ascii, fullwidth] = undoPairs.at(i);
+        const QString prefix = QStringLiteral("head\n😀x");
+        undoCursorExpect(checks, details, QStringLiteral("transactionTabPair%1").arg(i),
+                         prefix + ascii.front() + QStringLiteral("中文|") + ascii.back(),
+                         [] { keyPress({}, QStringLiteral("Tab")); },
+                         prefix + fullwidth.front() + QStringLiteral("中文") + fullwidth.back());
+    }
+    undoCursorExpect(checks, details, QStringLiteral("transactionTabTwoStages"),
+                     QStringLiteral("head\nx\"中|文\""),
+                     [] { keyPress({}, QStringLiteral("Tab")); keyPress({}, QStringLiteral("Tab")); },
+                     QStringLiteral("head\nx“中文”"), 9);
+    undoCursorExpect(checks, details, QStringLiteral("transactionCjkBackspace"),
+                     QStringLiteral("head\n中文|测试"),
+                     [] { keyPress({}, QStringLiteral("Backspace"), false, QStringLiteral("ctrl")); },
+                     QStringLiteral("head\n测试"));
+    undoCursorExpect(checks, details, QStringLiteral("transactionCjkDelete"),
+                     QStringLiteral("head\n中文|测试"),
+                     [] { keyPress({}, QStringLiteral("Delete"), false, QStringLiteral("ctrl")); },
+                     QStringLiteral("head\n中文"));
+    undoCursorExpect(checks, details, QStringLiteral("transactionUnwrapBold"),
+                     QStringLiteral("head\n**a|bc**"),
+                     [] { execute(QStringLiteral("toggleBold")); }, QStringLiteral("head\nabc"));
+    undoCursorExpect(checks, details, QStringLiteral("transactionReplaceAll"),
+                     QStringLiteral("cat\nca|t cat"),
+                     [] { request(QStringLiteral("testReplaceAll"),
+                                  {{QStringLiteral("query"), QStringLiteral("cat")},
+                                   {QStringLiteral("replacement"), QStringLiteral("dog")},
+                                   {QStringLiteral("caseSensitive"), true}}); },
+                     QStringLiteral("dog\ndog dog"));
+    undoCursorExpect(checks, details, QStringLiteral("transactionClear"),
+                     QStringLiteral("head\na|bc"),
+                     [] { execute(QStringLiteral("clearDocument")); }, QString());
+    undoCursorExpect(checks, details, QStringLiteral("transactionCheckboxToggle"),
+                     QStringLiteral("head\n- [ ] a|bc"),
+                     [] { execute(QStringLiteral("toggleCheckbox")); }, QStringLiteral("head\n- [x] abc"));
+    undoCursorExpect(checks, details, QStringLiteral("transactionCheckboxInsert"),
+                     QStringLiteral("head\na|bc"),
+                     [] { execute(QStringLiteral("toggleCheckbox")); }, QStringLiteral("head\n- [ ] abc"));
+    undoCursorExpect(checks, details, QStringLiteral("transactionEmptyListBackspace"),
+                     QStringLiteral("head\n- |"),
+                     [] { keyPress({}, QStringLiteral("Backspace")); }, QStringLiteral("head"));
+    undoCursorExpect(checks, details, QStringLiteral("transactionOrderedConversion"),
+                     QStringLiteral("head\n- a|bc"),
+                     [] { execute(QStringLiteral("convertToOrderedList")); }, QStringLiteral("head\n1. abc"));
+    undoCursorExpect(checks, details, QStringLiteral("transactionPathDrop"),
+                     QStringLiteral("head\na|bc"),
+                     [&] { dropUrls({plainUrl}); }, QStringLiteral("head\na") + plainPathText + QStringLiteral("bc"));
+    undoCursorExpect(checks, details, QStringLiteral("transactionClearAtStart"),
+                     QStringLiteral("|head\nabc"),
+                     [] { execute(QStringLiteral("clearDocument")); }, QString());
+    undoCursorExpect(checks, details, QStringLiteral("transactionReplaceAtStart"),
+                     QStringLiteral("|cat\ncat"),
+                     [] { request(QStringLiteral("testReplaceAll"),
+                                  {{QStringLiteral("query"), QStringLiteral("cat")},
+                                   {QStringLiteral("replacement"), QStringLiteral("dog")},
+                                   {QStringLiteral("caseSensitive"), true}}); },
+                     QStringLiteral("dog\ndog"));
+    undoCursorExpect(checks, details, QStringLiteral("transactionUnwrapAtCloser"),
+                     QStringLiteral("head\n**abc|**"),
+                     [] { execute(QStringLiteral("toggleBold")); }, QStringLiteral("head\nabc"));
+    undoCursorExpect(checks, details, QStringLiteral("transactionOrderedAtStart"),
+                     QStringLiteral("|- abc"),
+                     [] { execute(QStringLiteral("convertToOrderedList")); }, QStringLiteral("1. abc"));
+    undoCursorExpect(checks, details, QStringLiteral("transactionCheckboxAtState"),
+                     QStringLiteral("head\n- [| ] abc"),
+                     [] { execute(QStringLiteral("toggleCheckbox")); }, QStringLiteral("head\n- [x] abc"));
+    undoCursorExpect(checks, details, QStringLiteral("transactionPathDropReverseSelection"),
+                     QStringLiteral("head\n|abc"),
+                     [&] { dropUrls({plainUrl}); }, QStringLiteral("head\n") + plainPathText, -1, 8);
+
+    const auto historyUndoExpect = [&](const QString &name, QString marked) {
+        const int expectedCursor = marked.indexOf(QLatin1Char('|'));
+        marked.remove(expectedCursor, 1);
+        const QJsonObject actual = request(QStringLiteral("testUndo"));
+        addCheck(checks, details, name,
+                 editorText() == marked
+                     && actual.value(QStringLiteral("cursorPosition")).toInt() == expectedCursor,
+                 QJsonObject{{QStringLiteral("actualText"), editorText()},
+                             {QStringLiteral("expectedText"), marked},
+                             {QStringLiteral("actualCursor"), actual.value(QStringLiteral("cursorPosition"))},
+                             {QStringLiteral("expectedCursor"), expectedCursor}});
+    };
+    setTextAndSelection(QStringLiteral("head\n(\"中文\")"), 9, 9);
+    keyPress({}, QStringLiteral("Tab"));
+    keyPress({}, QStringLiteral("Tab"));
+    historyUndoExpect(QStringLiteral("undoHistoryNestedOuter"), QStringLiteral("head\n(“中文”|)"));
+    historyUndoExpect(QStringLiteral("undoHistoryNestedInner"), QStringLiteral("head\n(\"中文|\")"));
+    request(QStringLiteral("testRedo"));
+    request(QStringLiteral("testRedo"));
+    historyUndoExpect(QStringLiteral("undoHistoryNestedOuterAfterRedo"), QStringLiteral("head\n(“中文”|)"));
+    historyUndoExpect(QStringLiteral("undoHistoryNestedInnerAfterRedo"), QStringLiteral("head\n(\"中文|\")"));
+
+    setTextAndSelection(QStringLiteral("head\nx\"中文\""), 9, 9);
+    keyPress({}, QStringLiteral("Tab"));
+    keyPress(QStringLiteral("z"));
+    historyUndoExpect(QStringLiteral("undoHistoryInterleavedTyping"), QStringLiteral("head\nx“中文”|"));
+    historyUndoExpect(QStringLiteral("undoHistoryBeforeTyping"), QStringLiteral("head\nx\"中文|\""));
+    request(QStringLiteral("testRedo"));
+    request(QStringLiteral("testRedo"));
+    historyUndoExpect(QStringLiteral("undoHistoryTypingAfterRedo"), QStringLiteral("head\nx“中文”|"));
+    historyUndoExpect(QStringLiteral("undoHistoryConversionAfterRedo"), QStringLiteral("head\nx\"中文|\""));
+
+    setTextAndSelection(QStringLiteral("head\nabc"), 6, 6);
+    execute(QStringLiteral("clearDocument"));
+    historyUndoExpect(QStringLiteral("undoHistoryOriginalBranch"), QStringLiteral("head\na|bc"));
+    request(QStringLiteral("testSetSelection"),
+            {{QStringLiteral("start"), 7}, {QStringLiteral("end"), 7}});
+    execute(QStringLiteral("clearDocument"));
+    historyUndoExpect(QStringLiteral("undoHistoryReplacementBranch"), QStringLiteral("head\nab|c"));
+    request(QStringLiteral("testSetSelection"),
+            {{QStringLiteral("start"), 5}, {QStringLiteral("end"), 5}});
+    keyPress(QStringLiteral("q"));
+    historyUndoExpect(QStringLiteral("undoHistoryUntrackedBranch"), QStringLiteral("head\n|abc"));
+
+    setTextAndSelection(QStringLiteral("head\nxyz"), 6, 6);
+    keyPress(QStringLiteral("q"));
+    historyUndoExpect(QStringLiteral("undoHistoryDocumentReset"), QStringLiteral("head\nx|yz"));
 
     // --- Tab 跳出配对的 CJK 全角转换（TAB-CJK-001..008） ---
     const auto tabAction = [] { return keyPress({}, QStringLiteral("Tab")); };

@@ -2,6 +2,7 @@
 
 #include <QCursor>
 #include <QHash>
+#include <QMap>
 #include <QObject>
 #include <QPointer>
 #include <QPointF>
@@ -101,6 +102,15 @@ private:
         int formattedSelectionEnd = -1;
         int formattedCursorPosition = -1;
     };
+
+    struct UndoCursorRecord {
+        int undoStepsBefore;
+        int selectionStart;
+        int selectionEnd;
+        int cursorPosition;
+    };
+    UndoCursorRecord captureUndoCursor() const;
+    void rememberUndoCursor(const UndoCursorRecord &record);
 
     struct Definition {
         QString id;
@@ -274,6 +284,8 @@ private:
     bool m_doubleClickReplaying = false;
     std::optional<SelectionUndoSnapshot> m_selectionUndoSnapshot;
     std::optional<SelectionUndoSnapshot> m_selectionRedoSnapshot;
+    QMap<int, UndoCursorRecord> m_undoCursorRecords;
+    int m_observedUndoSteps = 0;
     bool m_inputAutoScrollCheckQueued = false;
     bool m_inputAutoScrollTrackingActive = false;
     bool m_inputScrollHoldWasActive = false;

@@ -1717,6 +1717,8 @@ void EditorCommandRegistry::setEditor(QObject *editor, QTextDocument *document)
     }
     m_editor = editor;
     m_document = document;
+    m_undoCursorRecords.clear();
+    m_observedUndoSteps = document ? document->availableUndoSteps() : 0;
     m_headingFolds->setEditor(editor, document);
     m_documentTextSnapshot = document ? document->toPlainText() : QString();
     m_documentTextSnapshotPrepared = false;
@@ -1726,6 +1728,7 @@ void EditorCommandRegistry::setEditor(QObject *editor, QTextDocument *document)
         connect(m_document.data(), &QTextDocument::contentsChanged, this,
                 [this] {
             if (m_document) {
+                m_observedUndoSteps = m_document->availableUndoSteps();
                 if (m_documentTextSnapshotPrepared) {
                     m_documentTextSnapshotPrepared = false;
                 } else {
@@ -1733,6 +1736,23 @@ void EditorCommandRegistry::setEditor(QObject *editor, QTextDocument *document)
                 }
             }
         });
+        // 只有新编辑会发出此信号；Undo/Redo 保留历史，分支编辑丢弃未来记录。
+        connect(m_document.data(), &QTextDocument::undoCommandAdded, this, [this] {
+            auto it = m_undoCursorRecords.upperBound(m_observedUndoSteps);
+            while (it != m_undoCursorRecords.end()) {
+                it = m_undoCursorRecords.erase(it);
+            }
+        });
+        const auto clearCursorHistoryIfEmpty = [this] {
+            if (!m_document->isUndoAvailable() && !m_document->isRedoAvailable()) {
+                m_undoCursorRecords.clear();
+                m_observedUndoSteps = 0;
+            }
+        };
+        connect(m_document.data(), &QTextDocument::undoAvailable,
+                this, clearCursorHistoryIfEmpty);
+        connect(m_document.data(), &QTextDocument::redoAvailable,
+                this, clearCursorHistoryIfEmpty);
     }
 }
 
@@ -2569,6 +2589,23 @@ QVariantMap EditorCommandRegistry::inputScrollDiagnostics() const
     return result;
 }
 
+EditorCommandRegistry::UndoCursorRecord EditorCommandRegistry::captureUndoCursor() const
+{
+    return {m_document->availableUndoSteps(),
+            m_editor->property("selectionStart").toInt(),
+            m_editor->property("selectionEnd").toInt(),
+            m_editor->property("cursorPosition").toInt()};
+}
+
+void EditorCommandRegistry::rememberUndoCursor(const UndoCursorRecord &record)
+{
+    const int undoStepsAfter = m_document->availableUndoSteps();
+    if (undoStepsAfter > record.undoStepsBefore) {
+        // 仅保存位置，文本及编辑块边界仍由 Qt 的撤销栈负责。
+        m_undoCursorRecords.insert(undoStepsAfter, record);
+    }
+}
+
 bool EditorCommandRegistry::performUndo()
 {
     if (!m_editor) {
@@ -2581,10 +2618,23 @@ bool EditorCommandRegistry::performUndo()
     }
     m_selectionUndoSnapshot.reset();
     m_selectionRedoSnapshot.reset();
+    std::optional<UndoCursorRecord> cursorRecord;
+    if (m_document) {
+        const auto found = m_undoCursorRecords.constFind(m_document->availableUndoSteps());
+        if (found != m_undoCursorRecords.cend()) {
+            cursorRecord = found.value();
+        }
+    }
     // 撤销视为一次普通编辑：可能是删除也可能是输入，不预设方向，
     // 撤销后光标落在哪条视口边就按哪条规则处理。
     beginInputAutoScrollTracking(QStringLiteral("undo"));
     const bool invoked = QMetaObject::invokeMethod(m_editor, "undo");
+    if (cursorRecord && m_document
+        && m_document->availableUndoSteps() == cursorRecord->undoStepsBefore) {
+        selectRangeWithActiveEnd(cursorRecord->selectionStart, cursorRecord->selectionEnd,
+                                 cursorRecord->cursorPosition);
+        focusEditor();
+    }
     if (selectionSnapshot
         && m_documentTextSnapshot == selectionSnapshot->originalText) {
         const int activeEnd = selectionSnapshot->cursorPosition
@@ -2622,7 +2672,9 @@ bool EditorCommandRegistry::insertPathText(const QString &text)
     const bool repairOrderedList = orderedListStructureAffected(
         beforeText, selectionStart, selectionEnd);
     beginInputAutoScrollTracking(QStringLiteral("drop"));
+    const UndoCursorRecord undoCursor = captureUndoCursor();
     QTextCursor editCursor(m_document);
+    editCursor.setPosition(cursorPosition);
     editCursor.beginEditBlock();
     editCursor.setPosition(selectionStart);
     editCursor.setPosition(selectionEnd, QTextCursor::KeepAnchor);
@@ -2636,6 +2688,7 @@ bool EditorCommandRegistry::insertPathText(const QString &text)
     }
     editCursor.endEditBlock();
 
+    rememberUndoCursor(undoCursor);
     m_selectionUndoSnapshot = SelectionUndoSnapshot{
         beforeText, m_documentTextSnapshot, selectionStart, selectionEnd, cursorPosition};
     focusEditor();
@@ -2747,12 +2800,15 @@ bool EditorCommandRegistry::deleteByCjkAwareWord(bool backwards)
     if (range.start >= range.end) {
         return false;
     }
+    const UndoCursorRecord undoCursor = captureUndoCursor();
     QTextCursor edit(m_document);
+    edit.setPosition(position);
     edit.beginEditBlock();
     edit.setPosition(range.start);
     edit.setPosition(range.end, QTextCursor::KeepAnchor);
     edit.removeSelectedText();
     edit.endEditBlock();
+    rememberUndoCursor(undoCursor);
     m_editor->setProperty("cursorPosition", range.start);
     focusEditor();
     return true;
@@ -3527,7 +3583,9 @@ int EditorCommandRegistry::replaceAll(const QString &query, const QString &repla
         }
     }
     int replacements = 0;
+    const UndoCursorRecord undoCursor = captureUndoCursor();
     QTextCursor editCursor(m_document);
+    editCursor.setPosition(m_editor->property("cursorPosition").toInt());
     editCursor.beginEditBlock();
     QTextCursor searchFrom(m_document);
     searchFrom.movePosition(QTextCursor::Start);
@@ -3549,6 +3607,7 @@ int EditorCommandRegistry::replaceAll(const QString &query, const QString &repla
     }
     editCursor.endEditBlock();
     if (replacements > 0) {
+        rememberUndoCursor(undoCursor);
         finishFindNavigation();
     }
     return replacements;
@@ -3599,7 +3658,9 @@ bool EditorCommandRegistry::wrapSelection(const QString &opening, const QString 
         std::sort(removals.begin(), removals.end(), [](const auto &left, const auto &right) {
             return left.removeStart > right.removeStart;
         });
+        const UndoCursorRecord undoCursor = captureUndoCursor();
         QTextCursor editCursor(m_document);
+        editCursor.setPosition(m_editor->property("cursorPosition").toInt());
         editCursor.beginEditBlock();
         for (const MarkupMarker &marker : removals) {
             QTextCursor removalCursor(m_document);
@@ -3609,6 +3670,7 @@ bool EditorCommandRegistry::wrapSelection(const QString &opening, const QString 
             removalCursor.removeSelectedText();
         }
         editCursor.endEditBlock();
+        rememberUndoCursor(undoCursor);
         if (hadSelection) {
             selectRange(adjustedStart, adjustedEnd);
         } else {
@@ -3831,7 +3893,9 @@ bool EditorCommandRegistry::convertToOrderedList()
         return true;
     }
 
+    const UndoCursorRecord undoCursor = captureUndoCursor();
     QTextCursor editCursor(m_document);
+    editCursor.setPosition(originalCursor);
     editCursor.beginEditBlock();
     for (auto replacement = plan.replacements.crbegin();
          replacement != plan.replacements.crend(); ++replacement) {
@@ -3842,6 +3906,7 @@ bool EditorCommandRegistry::convertToOrderedList()
         cursor.insertText(replacement->replacement);
     }
     editCursor.endEditBlock();
+    rememberUndoCursor(undoCursor);
     selectRange(plan.selectionStart, transformedSelectionEnd);
     m_selectionUndoSnapshot = SelectionUndoSnapshot{
         beforeText, m_documentTextSnapshot, originalStart, originalEnd, originalCursor};
@@ -3883,11 +3948,14 @@ bool EditorCommandRegistry::clearDocument()
     }
 
     // 整篇清空合并为一次撤销（一次 Ctrl+Z 可整体恢复原文）。
+    const UndoCursorRecord undoCursor = captureUndoCursor();
     QTextCursor cursor(m_document);
+    cursor.setPosition(m_editor->property("cursorPosition").toInt());
     cursor.beginEditBlock();
     cursor.select(QTextCursor::Document);
     cursor.removeSelectedText();
     cursor.endEditBlock();
+    rememberUndoCursor(undoCursor);
     selectRange(0, 0);
     focusEditor();
     return true;
@@ -4046,7 +4114,9 @@ bool EditorCommandRegistry::toggleCurrentCheckbox()
     const int positionInLine = cursorPosition - lineRange.start;
 
     const auto statePosition = taskCheckboxStatePosition(line);
+    const UndoCursorRecord undoCursor = captureUndoCursor();
     QTextCursor editCursor(m_document);
+    editCursor.setPosition(cursorPosition);
     editCursor.beginEditBlock();
     int updatedCursorPosition = cursorPosition;
     if (statePosition) {
@@ -4080,6 +4150,7 @@ bool EditorCommandRegistry::toggleCurrentCheckbox()
     }
     editCursor.endEditBlock();
 
+    rememberUndoCursor(undoCursor);
     m_editor->setProperty("cursorPosition", updatedCursorPosition);
     focusEditor();
     return true;
@@ -4598,7 +4669,9 @@ bool EditorCommandRegistry::handleSpecialBackspace()
             ? lineEnd
             : qMin(text.size(), lineEnd + (lineEnd < text.size() ? 1 : 0));
 
+        const UndoCursorRecord undoCursor = captureUndoCursor();
         QTextCursor editCursor(m_document);
+        editCursor.setPosition(start);
         editCursor.beginEditBlock();
         QTextCursor removalCursor(m_document);
         removalCursor.setPosition(removeStart);
@@ -4607,6 +4680,7 @@ bool EditorCommandRegistry::handleSpecialBackspace()
         m_editor->setProperty("cursorPosition", removeStart);
         repairOrderedLists(text, m_document->toPlainText(), true);
         editCursor.endEditBlock();
+        rememberUndoCursor(undoCursor);
         focusEditor();
         return true;
     }
@@ -5193,7 +5267,10 @@ bool EditorCommandRegistry::jumpOutOfPair()
             const bool closerProtected =
                 CjkText::isPositionProtected(analysis(), delimiterCloserPosition);
             if (!openerProtected && !closerProtected) {
+                const UndoCursorRecord undoCursor = captureUndoCursor();
                 QTextCursor cursor(m_document);
+                // Qt 在最外层 beginEditBlock 时记录撤销光标，必须先定位到跳出前。
+                cursor.setPosition(start);
                 cursor.beginEditBlock();
                 cursor.setPosition(delimiterCloserPosition);
                 cursor.setPosition(delimiterCloserPosition + 1, QTextCursor::KeepAnchor);
@@ -5202,6 +5279,7 @@ bool EditorCommandRegistry::jumpOutOfPair()
                 cursor.setPosition(delimiterOpenerPosition + 1, QTextCursor::KeepAnchor);
                 cursor.insertText(fullwidth->first);
                 cursor.endEditBlock();
+                rememberUndoCursor(undoCursor);
             }
         }
     }
