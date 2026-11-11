@@ -1984,6 +1984,58 @@ int main(int argc, char *argv[])
     addCheck(checks, details, QStringLiteral("historyHoverTransferKeepsPanelOpen"),
              panelTransferStaysOpen && panelTransferEventuallyCloses);
 
+
+    historyAction(QStringLiteral("historyHoverTriggerEnter"));
+    QThread::msleep(130);
+    historyAction(QStringLiteral("historyHoverTriggerLeave"));
+    historyAction(QStringLiteral("historyFocusQuery"));
+    auto checkSearchOpen = [&](const QString &name) {
+        QThread::msleep(580);
+        const QJsonObject actual = request(QStringLiteral("status"));
+        addCheck(checks, details, name,
+                 actual.value(QStringLiteral("historyPanelOpen")).toBool()
+                     && actual.value(QStringLiteral("historyQueryFocused")).toBool(),
+                 QJsonObject{{QStringLiteral("actual"), actual},
+                             {QStringLiteral("expected"), QStringLiteral("open and focused")}});
+    };
+    checkSearchOpen(QStringLiteral("historySearchFocusCancelsPendingClose"));
+    auto inputHistory = [&](const QString &preedit, const QString &text) {
+        return request(QStringLiteral("testInputMethodCommit"),
+                       {{QStringLiteral("activeFocus"), true},
+                        {QStringLiteral("preedit"), preedit},
+                        {QStringLiteral("text"), text}});
+    };
+    const QJsonObject composingHistory = inputHistory(QStringLiteral("zhong"), {});
+    addCheck(checks, details, QStringLiteral("historySearchReceivesPreedit"),
+             composingHistory.value(QStringLiteral("composing")).toBool(),
+             QJsonObject{{QStringLiteral("actual"), composingHistory},
+                         {QStringLiteral("expected"), true}});
+    historyAction(QStringLiteral("historyPanelLeave"));
+    checkSearchOpen(QStringLiteral("historySearchPreeditKeepsOpen"));
+    const QJsonObject committedHistory = inputHistory({}, QStringLiteral("\u4e2d"));
+    addCheck(checks, details, QStringLiteral("historySearchCommitsChinese"),
+             !committedHistory.value(QStringLiteral("composing")).toBool()
+                 && committedHistory.value(QStringLiteral("targetText")).toString()
+                     == QStringLiteral("\u4e2d"),
+             QJsonObject{{QStringLiteral("actual"), committedHistory},
+                         {QStringLiteral("expected"), QStringLiteral("\u4e2d")}});
+    checkSearchOpen(QStringLiteral("historySearchCommitKeepsOpen"));
+    inputHistory(QStringLiteral("wen"), {});
+    inputHistory({}, {});
+    checkSearchOpen(QStringLiteral("historySearchCancelKeepsOpen"));
+    historyAction(QStringLiteral("historyFocusEditor"));
+    QThread::msleep(300);
+    const bool openBeforeBlurDelay = request(QStringLiteral("status"))
+        .value(QStringLiteral("historyPanelOpen")).toBool();
+    QThread::msleep(280);
+    const QJsonObject blurredHistory = request(QStringLiteral("status"));
+    addCheck(checks, details, QStringLiteral("historySearchBlurRestoresDelay"),
+             openBeforeBlurDelay
+                 && !blurredHistory.value(QStringLiteral("historyPanelOpen")).toBool(),
+             QJsonObject{{QStringLiteral("actual"), blurredHistory},
+                         {QStringLiteral("openBeforeDelay"), openBeforeBlurDelay},
+                         {QStringLiteral("expected"), QStringLiteral("open at 300ms, closed at 580ms")}});
+
     const QJsonObject leftExit = request(
         QStringLiteral("testClipboardHistoryWindowLeave"),
         {{QStringLiteral("x"), -4}, {QStringLiteral("y"), 320},

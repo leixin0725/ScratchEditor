@@ -1921,14 +1921,21 @@ void EditorController::buildCommandHandlers()
             sendResponse(r.socket, response, r.startedNs, r.requestId);
         }}},
         {QStringLiteral("testInputMethodCommit"), {Gate::Test, [this](const DispatchRequest &r) {
-            QInputMethodEvent inputEvent;
+            QInputMethodEvent inputEvent(
+                r.request.value(QStringLiteral("preedit")).toString(), {});
             inputEvent.setCommitString(r.request.value(QStringLiteral("text")).toString());
-            const bool accepted = QCoreApplication::sendEvent(m_editor, &inputEvent);
+            QObject *target = r.request.value(QStringLiteral("activeFocus")).toBool()
+                && m_window ? m_window->activeFocusItem() : m_editor.data();
+            const bool accepted = target && QCoreApplication::sendEvent(target, &inputEvent);
+            const bool composing = target && target->property("inputMethodComposing").toBool();
+            const QString targetText = target ? target->property("text").toString() : QString();
             QPointer<QLocalSocket> guardedSocket = r.socket;
-            QTimer::singleShot(0, this, [this, guardedSocket, accepted, r] {
+            QTimer::singleShot(0, this, [this, guardedSocket, accepted, composing, targetText, r] {
                 QJsonObject response = statusObject();
                 response.insert(QStringLiteral("command"), r.command);
                 response.insert(QStringLiteral("accepted"), accepted);
+                response.insert(QStringLiteral("composing"), composing);
+                response.insert(QStringLiteral("targetText"), targetText);
                 response.insert(QStringLiteral("text"), m_editor->property("text").toString());
                 sendResponse(guardedSocket, response, r.startedNs, r.requestId);
             });

@@ -589,13 +589,21 @@ Window {
         scheduleClipboardHistoryClose()
     }
 
-    function scheduleClipboardHistoryClose() {
-        if (historyPanelOpen && !historyPanelOpenedByCommand
+    function historyAutoCloseAllowed() {
+        return historyPanelOpen && !historyPanelOpenedByCommand
             && !historyRevealHovered && !historyPanelHovered
-            && !historyCardDragActive) {
-            historyCloseTimer.restart()
-        }
+            && !historyCardDragActive && !historyQueryFocused
+            && !(historyPanelLoader.item && historyPanelLoader.item.queryComposing)
     }
+
+    function scheduleClipboardHistoryClose() {
+        if (historyAutoCloseAllowed())
+            historyCloseTimer.restart()
+        else
+            historyCloseTimer.stop()
+    }
+
+    onHistoryQueryFocusedChanged: scheduleClipboardHistoryClose()
 
     function handleClipboardHistoryLeftEdgeExit() {
         historyOpenTimer.stop()
@@ -648,6 +656,10 @@ Window {
             openClipboardHistory(true)
         } else if (action === "historyClose") {
             closeClipboardHistory()
+        } else if (action === "historyFocusQuery") {
+            historyPanelLoader.item.focusQuery()
+        } else if (action === "historyFocusEditor") {
+            editor.forceActiveFocus()
         } else if (action === "historySetQuery") {
             historyPanelLoader.item.setQuery(value)
         } else if (action === "historySelect") {
@@ -756,8 +768,7 @@ Window {
         interval: root.historyHoverCloseDelayMs
         repeat: false
         onTriggered: {
-            if (!root.historyPanelOpenedByCommand
-                && !root.historyRevealHovered && !root.historyPanelHovered) {
+            if (root.historyAutoCloseAllowed()) {
                 root.closeClipboardHistory()
             }
         }

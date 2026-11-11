@@ -17,6 +17,8 @@ Loader {
     sourceComponent: Item {
         id: historyRoot
         readonly property bool queryFocused: historyQuery.activeFocus
+        readonly property bool queryComposing: historyQuery.inputMethodComposing
+        onQueryComposingChanged: host.scheduleClipboardHistoryClose()
         readonly property color deleteButtonColor: historyDeleteButton.color
         readonly property real edgeIntrusion:
             host.historyPanelOpen ? 0
@@ -184,7 +186,7 @@ Loader {
                     anchors.left: parent.left
                     anchors.leftMargin: uiConfig.panels.history.inputMargin
                     anchors.verticalCenter: parent.verticalCenter
-                    visible: historyQuery.text.length === 0
+                    visible: historyQuery.text.length === 0 && historyQuery.preeditText.length === 0
                     text: "搜索完整文本"
                     color: host.themeMutedTextColor
                     font.family: host.uiFontFamily
