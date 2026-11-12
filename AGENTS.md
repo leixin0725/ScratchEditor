@@ -7,12 +7,9 @@
 - 工作区工具链位于 `.tools/Qt`，不进入 Git；构建 preset 见 `CMakePresets.json`。
 - 产品边界：不提供 Markdown 预览，不使用 WebEngine/WebView 或浏览器内核。
 
-## 文档位置
+## 文档入口
 
-- 正式文档：`README.md`（架构、构建与验收总览）、`tests/README.md`（测试程序与执行顺序）、`docs/README.md`（文档索引）。
-- 历史归档：`docs/archive/`。已完结的功能需求只归档（如 `docs/archive/cjk-features/`），不在宪章中展开。
-- 功能细节以正式文档为准；本宪章只保留跨功能、长期有效的约束。
-- 项目本体所有持续更新的细节应该且只应来自项目的唯一正式文档 `README.md`。
+先读[开发导航](docs/README.md)，按任务查阅相关模块、工作文档或测试说明。维护文档时遵循该页的收录与归档规则。
 
 ## 构建与验证
 
@@ -55,7 +52,7 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\run-editing-te
 
 ### 提交、编码与文档维护
 
-7. **原子提交、部署和文档维护**：开发过程中允许自行暂存并创建本地原子提交，无需逐次申请批准；每个提交必须职责单一、可独立回退，提交信息使用简体中文并遵循 GitHub 社区通行规范。禁止自行执行 `git push`，所有远端推送均由用户完成。重要改动完成后检查并更新 `docs/README.md` 索引；已完结的功能需求移入 `docs/archive/`；除非用户明确要求单独部署，否则部署仍按规则 12 等待用户批准。
+7. **原子提交、部署和文档维护**：开发过程中允许自行暂存并创建本地原子提交，无需逐次申请批准；每个提交必须职责单一、可独立回退，提交信息使用简体中文并遵循 GitHub 社区通行规范。禁止自行执行 `git push`，所有远端推送均由用户完成。重要改动后按文档管理规则更新对应模块和必要的入口；除非用户明确要求单独部署，否则部署仍按规则 12 等待用户批准。
 8. **文件编码**：项目内所有含中文的文本文件统一为 UTF-8（无 BOM）编码，不得混用 GBK/ANSI、UTF-16 或带 BOM 的 UTF-8；新增或编辑文件时保持该约定。
 
 ### 沙箱与 Git 权限
@@ -71,6 +68,6 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\run-editing-te
     New-Item -ItemType Junction -Path "D:\_Dev\ScratchEditor-worktrees\007-demo\.tools" -Target "D:\_Dev\ScratchEditor\.tools"
     ```
 **注意：worktree统一存储的位置为`D:\_Dev\ScratchEditor-worktrees`。**
-12.  **重大功能收尾批准、合并与部署**：重大功能开发和验证完成后，必须先向用户申请一次集中批准，明确列出归档 tag、非快进合并、安全移除 worktree、删除已合并分支和部署合并版本的整套收尾操作；获批后可连续完成当次已列明的流程，无需逐项重复申请，未获批准不得执行其中任何一步。批准后先在分支最终提交打轻量 tag `archive/NNN-<名>`（如 `git tag archive/007-demo 007-demo`），再在 `main` 上非快进合并，提交信息固定为 `merge: 合并<中文功能名>（NNN-<名>）`（如 `git merge --no-ff -m "merge: 合并示例功能（007-demo）" 007-demo`）；同时把已完结功能的需求文档移入 `docs/archive/` 并更新 `docs/README.md` 索引。集中批准不包含 `git push`，也不构成未来收尾操作的永久授权。
+12.  **重大功能收尾批准、合并与部署**：重大功能开发和验证完成后，必须先向用户申请一次集中批准，明确列出归档 tag、非快进合并、安全移除 worktree、删除已合并分支和部署合并版本的整套收尾操作；获批后可连续完成当次已列明的流程，无需逐项重复申请，未获批准不得执行其中任何一步。批准后先在分支最终提交打轻量 tag `archive/NNN-<名>`（如 `git tag archive/007-demo 007-demo`），再在 `main` 上非快进合并，提交信息固定为 `merge: 合并<中文功能名>（NNN-<名>）`（如 `git merge --no-ff -m "merge: 合并示例功能（007-demo）" 007-demo`）；同时按文档管理规则归档已完结专题并更新入口。集中批准不包含 `git push`，也不构成未来收尾操作的永久授权。
 13.  **分支删除与 tag 保留**：仅在规则 12 的当次集中批准范围内，且合并完成、`archive/` tag 已打后，先按规则 10 移除对应 worktree，再用 `git branch -d <分支名>` 删除分支；若 `-d` 拒绝删除，停止并向用户确认，禁止用 `-D` 强删。`archive/` tag 永久保留作为回溯依据。
 14. **`.tools` 不被删除（结果导向硬性规则）**：除非有意，任何行为不得导致 `.tools` 被删除（目录或其中内容）。“有意”仅指为满足构建需要对 `.tools` 内文件进行删改（如 `scripts/restore-toolchain.ps1` 替换工具链），以及规则 10 中受控脚本对 worktree `.tools` 联接的解除；绝对禁止任何意外删除，包括对含共享联接的 worktree 执行递归删除、`git clean` 类清理、绕过脚本的 `git worktree remove`，以及其他可能沿 junction 波及共享工具链的操作。删除目标不明、`.tools` 状态异常或脚本拒绝执行时，停止并向用户确认，不得自行清理。

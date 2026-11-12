@@ -28,7 +28,7 @@ ScratchEditor.exe [--wait] <file>
 | D：真实 CLI 验收 | 部分完成 | Codex 0.146.0 与 pi 0.80.10 通过；Claude Code 按本轮决定暂不测试 |
 
 主程序本身不静默修改用户的 `VISUAL`、`EDITOR`、Codex 配置或 pi 配置。需要持久配置时由用户显式运行
-[`scripts/configure-codex-editor.ps1`](../../scripts/configure-codex-editor.ps1)；脚本会将产物部署到并列的
+[`scripts/configure-codex-editor.ps1`](../../../scripts/configure-codex-editor.ps1)；脚本会将产物部署到并列的
 Codex/pi 与 AHK 用户级稳定目录，写入 Windows 用户级 `VISUAL`/`EDITOR`，维护 pi 设置、AHK 回退路径
 和 Git Bash `~/.bashrc` 中的同名变量。标准 `scripts/build.ps1` 每次成功构建后都会自动执行此同步。
 CLI 级自动化使用临时配置目录，并在 `/quit` 返回后清理。
@@ -45,7 +45,7 @@ CLI 级自动化使用临时配置目录，并在 `/quit` 返回后清理。
 
 ### 1. 命令行模式判定
 
-在 [`src/main.cpp`](../../src/main.cpp) 中声明 `--wait` 和一个可选位置参数 `file`，并在创建
+在 [`src/main.cpp`](../../../src/main.cpp) 中声明 `--wait` 和一个可选位置参数 `file`，并在创建
 控制器之前完成互斥校验：
 
 - 无文件参数：进入现有 `ClipboardResident` 模式。
@@ -70,7 +70,7 @@ CLI 级自动化使用临时配置目录，并在 `/quit` 返回后清理。
 
 ### 3. 控制器数据源分流
 
-为 [`EditorController`](../../src/editorcontroller.h) 增加明确的会话模式和可选文件会话：
+为 [`EditorController`](../../../src/editorcontroller.h) 增加明确的会话模式和可选文件会话：
 
 - `showEditor()` 在常驻模式继续读取剪贴板，在文件模式加载文件会话的初始文本。
 - `commitAndHide()` 保持现有常驻实现；文件模式使用单独的 `commitAndExit()`，避免把文件
@@ -82,7 +82,7 @@ CLI 级自动化使用临时配置目录，并在 `/quit` 返回后清理。
 
 ### 4. 关闭与保存语义
 
-在 [`qml/Main.qml`](../../qml/Main.qml) 中由控制器暴露只读的 `externalFileMode` 属性，并保持
+在 [`qml/Main.qml`](../../../qml/Main.qml) 中由控制器暴露只读的 `externalFileMode` 属性，并保持
 统一的 QML 入口：窗口关闭和 Escape 仍调用控制器，但控制器根据模式决定行为。
 
 文件模式采用与现有草稿窗一致的“关闭即提交”语义：

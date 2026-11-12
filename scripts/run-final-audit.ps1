@@ -20,7 +20,7 @@ $requiredFiles = @(
     "CMakeLists.txt",
     "CMakePresets.json",
     "README.md",
-    "docs\archive\ScratchEditor-Migration.md",
+    "docs\archive\2026-08-02-ahk-migration\ScratchEditor-Migration.md",
     ".gitattributes",
     ".gitignore",
     "src\appsettings.cpp",
@@ -47,11 +47,11 @@ $requiredFiles = @(
     "integration\README.md",
     "scripts\run-clipboard-history-tests.ps1",
     "docs\README.md",
-    "docs\archive\STAGE1-REPORT.md",
-    "docs\archive\STAGE2-REPORT.md",
-    "docs\archive\STAGE3-REPORT.md",
-    "docs\archive\STAGE4-REPORT.md",
-    "docs\archive\STAGE5-REPORT.md"
+    "docs\archive\2026-08-02-ahk-migration\STAGE1-REPORT.md",
+    "docs\archive\2026-08-02-ahk-migration\STAGE2-REPORT.md",
+    "docs\archive\2026-08-02-ahk-migration\STAGE3-REPORT.md",
+    "docs\archive\2026-08-02-ahk-migration\STAGE4-REPORT.md",
+    "docs\archive\2026-08-02-ahk-migration\STAGE5-REPORT.md"
 )
 
 $requiredBaselines = @(

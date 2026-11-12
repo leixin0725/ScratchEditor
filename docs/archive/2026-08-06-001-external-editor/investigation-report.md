@@ -44,7 +44,7 @@ pi 的官方设置文档以 `code --wait` 为例，说明调用方需要等待�
 `VISUAL` 和 `EDITOR` 指向同一个 ScratchEditor 等待命令；pi 也可使用自己的
 `externalEditor` 设置覆盖环境变量。
 
-仓库提供 [`scripts/configure-codex-editor.ps1`](../../scripts/configure-codex-editor.ps1)，将程序及 Qt
+仓库提供 [`scripts/configure-codex-editor.ps1`](../../../scripts/configure-codex-editor.ps1)，将程序及 Qt
 运行库部署到 `%LOCALAPPDATA%\ScratchEditor\CodexEditor`，持久写入 Windows 用户级
 `VISUAL`/`EDITOR`，并在 Git Bash 的 `~/.bashrc` 末尾维护同一命令。pi 的 `externalEditor` 也指向这个
 共享副本。后者很重要：shell 启动文件中的 `export VISUAL=...` 会覆盖 Windows 用户环境变量。脚本的
@@ -61,13 +61,13 @@ pi 的官方设置文档以 `code --wait` 为例，说明调用方需要等待�
 
 ### 命令行没有文件入口
 
-[`src/main.cpp`](../../src/main.cpp) 只注册 `background`、`toggle`、`show`、`hide` 和
+[`src/main.cpp`](../../../src/main.cpp) 只注册 `background`、`toggle`、`show`、`hide` 和
 `test-mode`，没有声明或读取位置参数。CLI 即使把临时文件路径传给程序，当前代码也不会将其
 作为编辑内容加载。
 
 ### 编辑内容绑定到剪贴板
 
-[`src/editorcontroller.cpp`](../../src/editorcontroller.cpp) 的 `showEditor()` 从剪贴板加载
+[`src/editorcontroller.cpp`](../../../src/editorcontroller.cpp) 的 `showEditor()` 从剪贴板加载
 文本，`commitAndHide()` 在隐藏前写回剪贴板。该行为适合现有全局快捷键草稿窗，但与外部
 编辑器所要求的“读取并覆盖调用方指定文件”是两种不同的数据源。
 
@@ -76,17 +76,17 @@ pi 的官方设置文档以 `code --wait` 为例，说明调用方需要等待�
 
 ### 单实例生命周期与同步等待冲突
 
-当常驻实例已经存在时，[`src/main.cpp`](../../src/main.cpp) 会把命令转发给现有实例并立即
+当常驻实例已经存在时，[`src/main.cpp`](../../../src/main.cpp) 会把命令转发给现有实例并立即
 退出。CLI 会因此立即读取临时文件，而用户尚未完成编辑。没有常驻实例时，程序又设置了
 `quitOnLastWindowClosed(false)`，关闭窗口只会隐藏常驻进程，CLI 将一直等待。
 
-生产 IPC 在 [`EditorController::dispatchCommand()`](../../src/editorcontroller.cpp) 中只接受
+生产 IPC 在 [`EditorController::dispatchCommand()`](../../../src/editorcontroller.cpp) 中只接受
 `toggle`、`show` 和 `hide`；测试命令不会在生产模式开放。这意味着当前 IPC 也没有文件会话
 标识、完成通知或等待者连接。
 
 ### 窗口关闭始终被改写为隐藏
 
-[`qml/Main.qml`](../../qml/Main.qml) 的 `onClosing` 总是拒绝原生关闭事件并调用
+[`qml/Main.qml`](../../../qml/Main.qml) 的 `onClosing` 总是拒绝原生关闭事件并调用
 `hideEditor()`，Escape 也执行同一操作。外部文件模式需要把这些入口解释为“保存并结束本次
 文件编辑进程”，而不是继续隐藏常驻窗口。
 
