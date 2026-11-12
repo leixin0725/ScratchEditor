@@ -169,32 +169,20 @@ private:
     void selectRangeWithActiveEnd(int start, int end, int activeEnd);
     void focusEditor();
     QString selectedText() const;
-    bool handleSelectionDragEvent(QEvent *event);
-    void trackNativeSelectionDragEvent(QEvent *event);
     bool moveByCjkAwareWord(bool left, bool keepSelection);
     bool deleteByCjkAwareWord(bool backwards);
     bool handleCjkDoubleClick(QMouseEvent *event);
     bool moveSelection(int selectionStart, int selectionEnd, int dropPosition);
     bool insertExternalText(const QString &text, int dropPosition);
     int editorPositionAt(const QPointF &localPosition) const;
-    int visibleEditorPositionAt(const QPointF &scenePosition) const;
     QQuickItem *editorItem() const;
-    void beginSelectionDrag(int selectionStart, int selectionEnd,
-                            const QPointF &scenePosition);
-    void updateSelectionDrag(const QPointF &scenePosition, bool scrollViewport);
-    void resetSelectionDrag(bool releaseMouseGrab);
-    void updateNativeSelectionDrag();
-    void resetNativeSelectionDrag();
-    void updateExternalTextDragPosition(const QPointF &scenePosition,
-                                        bool scrollViewport);
-    void updateExternalTextDragCursor(bool canDrop);
-    void resetExternalTextDrag();
-    bool scrollTextDragViewport(const QPointF &scenePosition);
     bool navigateToHeading(bool backwards);
     void scheduleHeadingScroll(int position);
     void scrollViewportToHeading(int position);
     void beginFindNavigation();
     void finishFindNavigation();
+
+    class SelectionDrag;
 
     AppSettings *m_settings = nullptr;
     std::unique_ptr<HeadingFoldManager> m_headingFolds;
@@ -208,27 +196,7 @@ private:
     QHash<QString, std::function<bool()>> m_commandHandlers;
     ClipboardReader m_clipboardReader;
     ClipboardWriter m_clipboardWriter;
-    QTimer m_selectionDragScrollTimer;
-    QPointF m_selectionDragPressScenePosition;
-    QPointF m_selectionDragScenePosition;
-    int m_selectionDragStart = -1;
-    int m_selectionDragEnd = -1;
-    int m_selectionDropPosition = -1;
-    bool m_selectionDragActive = false;
-    bool m_selectionDragPreviousKeepMouseGrab = false;
-    QCursor m_selectionDragOriginalCursor;
-    QPointF m_nativeSelectionDragPressScenePosition;
-    QPointF m_nativeSelectionDragScenePosition;
-    Qt::KeyboardModifiers m_nativeSelectionDragModifiers = Qt::NoModifier;
-    bool m_nativeSelectionDragPending = false;
-    bool m_nativeSelectionDragActive = false;
-    QString m_externalDragText;
-    QPointF m_externalDragPressScenePosition;
-    QPointF m_externalDragScenePosition;
-    int m_externalDropPosition = -1;
-    bool m_externalDragActive = false;
-    bool m_externalDragCursorOverridden = false;
-    Qt::CursorShape m_externalDragCursorShape = Qt::ArrowCursor;
+    std::unique_ptr<SelectionDrag> m_drag;
     bool m_doubleClickReplaying = false;
     std::optional<SelectionUndoSnapshot> m_selectionUndoSnapshot;
     std::optional<SelectionUndoSnapshot> m_selectionRedoSnapshot;

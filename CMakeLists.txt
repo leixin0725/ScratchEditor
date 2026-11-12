@@ -31,6 +31,7 @@ qt_add_executable(ScratchEditor WIN32
     src/editorcommandregistry.cpp
     src/editorviewport.cpp
     src/inputautoscroll.cpp
+    src/selectiondrag.cpp
     src/editorcommandregistry.h
     src/headingfoldmanager.cpp
     src/headingfoldmanager.h
