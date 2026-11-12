@@ -128,6 +128,18 @@ endif()
 
 qt_add_executable(ScratchEditorEditingTests
     tests/editing_main.cpp
+    tests/editing/support.cpp
+    tests/editing/analysis.cpp
+    tests/editing/cjkinput.cpp
+    tests/editing/cjkspacing.cpp
+    tests/editing/clipboard.cpp
+    tests/editing/commands.cpp
+    tests/editing/drag.cpp
+    tests/editing/find.cpp
+    tests/editing/headings.cpp
+    tests/editing/scroll.cpp
+    tests/editing/styles.cpp
+    tests/editing/words.cpp
     src/markdownhighlighter.cpp
     src/markdownhighlighter.h
     src/markdownstyle.cpp

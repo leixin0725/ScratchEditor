@@ -2,7 +2,11 @@
 
 ## 自动验收程序
 
-`editing_main.cpp` 的 Tab 回归包含转义开闭符、反斜杠奇偶和空标记 run 的转义识别。
+`editing_main.cpp` 负责按顺序调用 [editing/](editing/) 中的领域验收函数，并汇总
+`allPassed`、`checks`、`details`。各领域共用 `support.cpp` 的 IPC 客户端和断言；
+后续撤销用例所需的拖入文件由主入口保持到验收结束。
+
+Tab 回归包含转义开闭符、反斜杠奇偶和空标记 run 的转义识别。
 两阶段跳转覆盖括号／引号／Markdown 标记、嵌套与混合候选、UTF-16、CJK 转换时机和保护区，
 并验证选区／未命中时的缩进及纯光标移动的 Undo／Redo 保留。
 事务光标回归覆盖 Tab 四种全角转换、CJK 按词删除、取消包裹、全部替换、清空、checkbox、
@@ -15,7 +19,7 @@
   `run-system-tests.ps1` 仅为其启动的 test-mode 子进程设置
   `SCRATCHEDITOR_TEST_CLIPBOARD_BACKEND=native`，以验证真实 Win32 剪贴板锁定、写回与恢复；
   其他 test-mode 进程继续使用隔离的内存后端。
-- `editing_main.cpp`：编辑行为验证，覆盖 Markdown 高亮、相对字重配置、正文粗细联动与
+- `editing_main.cpp`、`editing/`：编辑行为验证，覆盖 Markdown 高亮、相对字重配置、正文粗细联动与
   100–900 边界钳制、编辑命令、标题层级折叠/导航、
   折叠光标恢复、标题导航高亮范围、文件/目录 URL 拖入后的路径格式、UTF-16 光标与选区、
   原子拒绝、输入法标点与引号边界、整行剪切撤销、无序列表转有序列表、嵌套列表修复和
