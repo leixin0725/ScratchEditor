@@ -4,6 +4,8 @@
 #include "headingfoldmanager.h"
 #include "editorviewport.h"
 #include "selectiondrag.h"
+#include "markdownlists.h"
+#include "textlinerange.h"
 
 #include <QCoreApplication>
 #include <QEvent>
@@ -45,25 +47,6 @@ QTextDocument::FindFlags findFlags(bool caseSensitive, bool backwards = false)
         flags |= QTextDocument::FindBackward;
     }
     return flags;
-}
-
-struct LineRange {
-    int start = 0;
-    int end = 0;
-};
-
-LineRange lineRangeAt(const QString &text, int position)
-{
-    const int boundedPosition = qBound(0, position, text.size());
-    // QString::lastIndexOf(..., -1) 会从文档末尾反向搜索。文档以空行开头时，
-    // 位置 0 必须显式归属于首个空块，不能把首个换行误当成前置分隔符。
-    const int start = boundedPosition == 0
-        ? 0 : text.lastIndexOf(QLatin1Char('\n'), boundedPosition - 1) + 1;
-    int end = text.indexOf(QLatin1Char('\n'), boundedPosition);
-    if (end < 0) {
-        end = text.size();
-    }
-    return {start, end};
 }
 
 struct DelimiterPair {
@@ -519,675 +502,6 @@ struct TextRange {
 
     bool isValid() const { return start < end; }
 };
-
-struct MarkdownListItem {
-    bool valid = false;
-    bool ordered = false;
-    bool task = false;
-    QString structuralPrefix;
-    QString marker;
-    QString numberText;
-    qlonglong number = 0;
-    QChar delimiter;
-    QString content;
-    int markerStart = -1;
-    int numberStart = -1;
-    int contentStart = -1;
-    int indentColumns = 0;
-    int quoteDepth = 0;
-
-    bool isEmpty() const { return content.trimmed().isEmpty(); }
-
-    QString continuationPrefix() const
-    {
-        const QString nextMarker = ordered
-            ? QString::number(number + 1) + delimiter
-            : marker;
-        return structuralPrefix + nextMarker
-            + (task ? QStringLiteral(" [ ] ") : QStringLiteral(" "));
-    }
-};
-
-struct MarkdownQuoteLine {
-    bool valid = false;
-    QString prefix;
-    QString content;
-    int contentStart = -1;
-    int deepestPrefixStart = -1;
-
-    bool isEmpty() const { return content.trimmed().isEmpty(); }
-};
-
-MarkdownQuoteLine parseMarkdownQuoteLine(const QString &line)
-{
-    static const QRegularExpression quotePattern(
-        QStringLiteral(R"(^([\t ]*(?:>[\t ]*)+)(.*)$)"));
-    const QRegularExpressionMatch match = quotePattern.match(line);
-    if (!match.hasMatch()) {
-        return {};
-    }
-
-    MarkdownQuoteLine quote;
-    quote.valid = true;
-    quote.prefix = match.captured(1);
-    quote.content = match.captured(2);
-    quote.contentStart = match.capturedStart(2);
-    quote.deepestPrefixStart = quote.prefix.lastIndexOf(QLatin1Char('>'));
-    return quote;
-}
-
-int indentationColumns(const QString &prefix)
-{
-    int columns = 0;
-    for (const QChar character : prefix) {
-        if (character == QLatin1Char('>')) {
-            break;
-        }
-        if (character == QLatin1Char('\t')) {
-            columns += 4 - (columns % 4);
-        } else if (character == QLatin1Char(' ')) {
-            ++columns;
-        }
-    }
-    return columns;
-}
-
-int oneLevelOutdentLength(const QString &line)
-{
-    if (line.startsWith(QLatin1Char('\t'))) {
-        return 1;
-    }
-
-    int spaces = 0;
-    while (spaces < qMin(4, line.size()) && line.at(spaces) == QLatin1Char(' ')) {
-        ++spaces;
-    }
-    return spaces;
-}
-
-MarkdownListItem parseMarkdownListItem(const QString &line)
-{
-    static const QRegularExpression listPattern(QStringLiteral(
-        R"(^([\t ]*(?:>[\t ]*)*)([-+*]|(\d+)([.)]))[\t ]+(?:\[([ xX])\][\t ]+)?(.*)$)"));
-    const QRegularExpressionMatch match = listPattern.match(line);
-    if (!match.hasMatch()) {
-        return {};
-    }
-
-    MarkdownListItem item;
-    item.valid = true;
-    item.structuralPrefix = match.captured(1);
-    item.marker = match.captured(2);
-    item.ordered = match.capturedStart(3) >= 0;
-    item.task = match.capturedStart(5) >= 0;
-    item.content = match.captured(6);
-    item.markerStart = match.capturedStart(2);
-    item.numberStart = match.capturedStart(3);
-    item.contentStart = match.capturedStart(6);
-    item.indentColumns = indentationColumns(item.structuralPrefix);
-    item.quoteDepth = item.structuralPrefix.count(QLatin1Char('>'));
-    if (item.ordered) {
-        bool numberOk = false;
-        item.numberText = match.captured(3);
-        item.number = item.numberText.toLongLong(&numberOk);
-        if (!numberOk || item.number == std::numeric_limits<qlonglong>::max()) {
-            return {};
-        }
-        item.delimiter = match.captured(4).front();
-    }
-    return item;
-}
-
-QString childMarkerForParent(const MarkdownListItem &parent)
-{
-    return parent.ordered
-        ? QString::number(parent.number + 1) + parent.delimiter
-        : parent.marker;
-}
-
-std::optional<MarkdownListItem> parentListItemForOutdent(
-    const QString &text, int lineStart, const MarkdownListItem &item,
-    int targetIndentColumns)
-{
-    int previousStart = lineStart;
-    while (previousStart > 0) {
-        const LineRange previousRange = lineRangeAt(text, previousStart - 1);
-        const MarkdownListItem candidate = parseMarkdownListItem(
-            text.mid(previousRange.start, previousRange.end - previousRange.start));
-        if (!candidate.valid || candidate.quoteDepth != item.quoteDepth) {
-            break;
-        }
-        if (candidate.indentColumns == targetIndentColumns) {
-            return candidate;
-        }
-        if (candidate.indentColumns < targetIndentColumns) {
-            break;
-        }
-        previousStart = previousRange.start;
-    }
-    return std::nullopt;
-}
-
-struct TextReplacement {
-    int start = 0;
-    int length = 0;
-    QString replacement;
-};
-
-struct ParsedListLine {
-    int start = 0;
-    int end = 0;
-    MarkdownListItem item;
-};
-
-struct OrderedListSequence {
-    QString signature;
-    qlonglong startNumber = 0;
-    QVector<int> lineIndexes;
-};
-
-QString orderedListSignature(const MarkdownListItem &item)
-{
-    return QStringLiteral("%1:%2:%3")
-        .arg(item.indentColumns)
-        .arg(item.quoteDepth)
-        .arg(static_cast<int>(item.delimiter.unicode()));
-}
-
-struct AffectedListArea {
-    QVector<ParsedListLine> lines;
-    QVector<std::pair<int, int>> regions;
-};
-
-AffectedListArea affectedListArea(const QString &text, int changeStart, int changeEnd)
-{
-    AffectedListArea area;
-    if (text.isEmpty()) {
-        return area;
-    }
-
-    const int boundedStart = qBound(0, qMin(changeStart, changeEnd), text.size());
-    const int boundedEnd = qBound(boundedStart, qMax(changeStart, changeEnd), text.size());
-    const LineRange firstRange = lineRangeAt(text, boundedStart);
-    const LineRange lastRange = lineRangeAt(text, boundedEnd);
-    QVector<int> seeds;
-    if (firstRange.start > 0) {
-        seeds.append(lineRangeAt(text, firstRange.start - 1).start);
-    }
-    int seedStart = firstRange.start;
-    while (seedStart <= lastRange.start) {
-        seeds.append(seedStart);
-        const LineRange seedRange = lineRangeAt(text, seedStart);
-        if (seedRange.end >= text.size()) {
-            break;
-        }
-        seedStart = seedRange.end + 1;
-    }
-    if (lastRange.end < text.size()) {
-        seeds.append(lastRange.end + 1);
-    }
-
-    QSet<int> collectedStarts;
-    const auto collectDirection = [&](int initialStart, bool backwards) {
-        int lineStart = initialStart;
-        while (lineStart >= 0 && lineStart <= text.size()) {
-            const LineRange range = lineRangeAt(text, lineStart);
-            const MarkdownListItem item = parseMarkdownListItem(
-                text.mid(range.start, range.end - range.start));
-            if (!item.valid) {
-                break;
-            }
-            if (!collectedStarts.contains(range.start)) {
-                collectedStarts.insert(range.start);
-                area.lines.append({range.start, range.end, item});
-            }
-            if (backwards) {
-                if (range.start == 0) {
-                    break;
-                }
-                lineStart = lineRangeAt(text, range.start - 1).start;
-            } else {
-                if (range.end >= text.size()) {
-                    break;
-                }
-                lineStart = range.end + 1;
-            }
-        }
-    };
-
-    for (const int seed : seeds) {
-        const LineRange range = lineRangeAt(text, seed);
-        if (collectedStarts.contains(range.start)) {
-            continue;
-        }
-        const MarkdownListItem item = parseMarkdownListItem(
-            text.mid(range.start, range.end - range.start));
-        if (!item.valid) {
-            continue;
-        }
-        collectDirection(range.start, true);
-        collectDirection(range.start, false);
-    }
-
-    std::sort(area.lines.begin(), area.lines.end(),
-              [](const ParsedListLine &left, const ParsedListLine &right) {
-                  return left.start < right.start;
-              });
-    for (int index = 0; index < area.lines.size(); ++index) {
-        const bool startsRegion = index == 0
-            || area.lines.at(index).start != area.lines.at(index - 1).end + 1;
-        if (startsRegion) {
-            area.regions.append({index, index});
-        } else {
-            area.regions.last().second = index;
-        }
-    }
-    return area;
-}
-
-QVector<OrderedListSequence> orderedSequences(
-    const QVector<ParsedListLine> &lines,
-    const QVector<std::pair<int, int>> &regions)
-{
-    QVector<OrderedListSequence> sequences;
-    for (const auto &[regionStart, regionEnd] : regions) {
-        for (int index = regionStart; index <= regionEnd; ++index) {
-            const MarkdownListItem &root = lines.at(index).item;
-            if (!root.ordered) {
-                continue;
-            }
-
-            bool hasPreviousSibling = false;
-            for (int previous = index - 1; previous >= regionStart; --previous) {
-                const MarkdownListItem &candidate = lines.at(previous).item;
-                const bool deeperLevel = candidate.indentColumns > root.indentColumns
-                    && candidate.quoteDepth == root.quoteDepth;
-                if (deeperLevel) {
-                    continue;
-                }
-                hasPreviousSibling = candidate.indentColumns == root.indentColumns
-                    && candidate.quoteDepth == root.quoteDepth && candidate.ordered
-                    && candidate.delimiter == root.delimiter;
-                break;
-            }
-            if (hasPreviousSibling) {
-                continue;
-            }
-
-            OrderedListSequence sequence;
-            sequence.signature = orderedListSignature(root);
-            sequence.startNumber = root.number;
-            sequence.lineIndexes.append(index);
-            for (int following = index + 1; following <= regionEnd; ++following) {
-                const MarkdownListItem &candidate = lines.at(following).item;
-                const bool deeperLevel = candidate.indentColumns > root.indentColumns
-                    && candidate.quoteDepth == root.quoteDepth;
-                if (deeperLevel) {
-                    continue;
-                }
-                const bool sameSequence = candidate.indentColumns == root.indentColumns
-                    && candidate.quoteDepth == root.quoteDepth && candidate.ordered
-                    && candidate.delimiter == root.delimiter;
-                if (!sameSequence) {
-                    break;
-                }
-                sequence.lineIndexes.append(following);
-            }
-            sequences.append(std::move(sequence));
-        }
-    }
-    return sequences;
-}
-
-QString repairedAffectedOrderedLists(QTextDocument *document, const QString &beforeText,
-                                     const QString &afterText, bool preservePreviousStart,
-                                     bool resetNewSequenceStart)
-{
-    if (!document) {
-        return afterText;
-    }
-    if (beforeText == afterText) {
-        return afterText;
-    }
-
-    int commonPrefix = 0;
-    const int sharedLength = qMin(beforeText.size(), afterText.size());
-    while (commonPrefix < sharedLength
-           && beforeText.at(commonPrefix) == afterText.at(commonPrefix)) {
-        ++commonPrefix;
-    }
-    int commonSuffix = 0;
-    while (commonSuffix < sharedLength - commonPrefix
-           && beforeText.at(beforeText.size() - 1 - commonSuffix)
-               == afterText.at(afterText.size() - 1 - commonSuffix)) {
-        ++commonSuffix;
-    }
-
-    const int beforeChangeEnd = beforeText.size() - commonSuffix;
-    const int afterChangeEnd = afterText.size() - commonSuffix;
-    const AffectedListArea beforeArea = affectedListArea(
-        beforeText, commonPrefix, beforeChangeEnd);
-    const AffectedListArea afterArea = affectedListArea(
-        afterText, commonPrefix, afterChangeEnd);
-    const QVector<OrderedListSequence> beforeSequences = orderedSequences(
-        beforeArea.lines, beforeArea.regions);
-    const QVector<OrderedListSequence> afterSequences = orderedSequences(
-        afterArea.lines, afterArea.regions);
-
-    QHash<QString, QVector<qlonglong>> previousStarts;
-    if (preservePreviousStart) {
-        for (const OrderedListSequence &sequence : beforeSequences) {
-            previousStarts[sequence.signature].append(sequence.startNumber);
-        }
-    }
-    QHash<QString, int> usedStarts;
-    QVector<TextReplacement> replacements;
-    for (const OrderedListSequence &sequence : afterSequences) {
-        qlonglong expectedNumber = sequence.startNumber;
-        const QVector<qlonglong> candidates = previousStarts.value(sequence.signature);
-        const int candidateIndex = usedStarts.value(sequence.signature);
-        if (candidateIndex < candidates.size()) {
-            expectedNumber = candidates.at(candidateIndex);
-            usedStarts[sequence.signature] = candidateIndex + 1;
-        } else if (resetNewSequenceStart) {
-            // Tab 新建的缩进层没有可继承的旧同层序列时，从 Markdown 常规起点 1 开始。
-            expectedNumber = 1;
-        }
-        for (const int lineIndex : sequence.lineIndexes) {
-            const ParsedListLine &line = afterArea.lines.at(lineIndex);
-            const QString expectedText = QString::number(expectedNumber);
-            if (line.item.numberText != expectedText) {
-                replacements.append({line.start + line.item.numberStart,
-                                     static_cast<int>(line.item.numberText.size()),
-                                     expectedText});
-            }
-            if (expectedNumber == std::numeric_limits<qlonglong>::max()) {
-                break;
-            }
-            ++expectedNumber;
-        }
-    }
-
-    QString repairedText = afterText;
-    for (auto replacement = replacements.crbegin(); replacement != replacements.crend();
-         ++replacement) {
-        QTextCursor cursor(document);
-        cursor.setPosition(replacement->start);
-        cursor.setPosition(replacement->start + replacement->length,
-                           QTextCursor::KeepAnchor);
-        cursor.insertText(replacement->replacement);
-        repairedText.replace(replacement->start, replacement->length,
-                             replacement->replacement);
-    }
-    return repairedText;
-}
-
-struct OrderedListConversionLine {
-    int start = 0;
-    int end = 0;
-    int previousSameLevel = -1;
-    int nextSameLevel = -1;
-    MarkdownListItem item;
-    bool selected = false;
-    bool fenced = false;
-};
-
-struct OrderedListConversionPlan {
-    QVector<TextReplacement> replacements;
-    int selectionStart = -1;
-    int selectionEnd = -1;
-    bool handled = false;
-};
-
-OrderedListConversionPlan orderedListConversionPlan(const QString &text,
-                                                    int selectionStart,
-                                                    int selectionEnd)
-{
-    OrderedListConversionPlan plan;
-    if (selectionStart < 0 || selectionEnd < selectionStart
-        || selectionEnd > text.size()) {
-        return plan;
-    }
-
-    const bool hasSelection = selectionStart != selectionEnd;
-    const LineRange firstSelectedLine = lineRangeAt(text, selectionStart);
-    const LineRange lastSelectedLine = lineRangeAt(
-        text, hasSelection ? selectionEnd - 1 : selectionEnd);
-    const CjkText::DocumentAnalysis analysis = CjkText::analyzeDocument(text);
-
-    QVector<OrderedListConversionLine> lines;
-    int blockIndex = 0;
-    int lineStart = 0;
-    while (lineStart <= text.size()) {
-        const LineRange range = lineRangeAt(text, lineStart);
-        while (blockIndex < analysis.blockSpans.size()
-               && analysis.blockSpans.at(blockIndex).outerEnd < range.start) {
-            ++blockIndex;
-        }
-        bool fenced = false;
-        if (blockIndex < analysis.blockSpans.size()) {
-            const CjkText::ProtectedSpan &span = analysis.blockSpans.at(blockIndex);
-            fenced = span.kind == CjkText::ProtectedKind::FencedCode
-                && span.outerStart <= range.end && range.start <= span.outerEnd;
-        }
-        const bool selected = range.start >= firstSelectedLine.start
-            && range.start <= lastSelectedLine.start;
-        lines.append({range.start, range.end, -1, -1,
-                      parseMarkdownListItem(
-                          text.mid(range.start, range.end - range.start)),
-                      selected, fenced});
-        if (range.end >= text.size()) {
-            break;
-        }
-        lineStart = range.end + 1;
-    }
-
-    // 每个活动层级只保留最近的同层列表项。进入更深层时父级保持活动，
-    // 回到浅层时弹出子级，因此每行只会入栈、出栈各一次。
-    QVector<std::pair<int, int>> activeLevels;
-    int activeQuoteDepth = -1;
-    for (int index = 0; index < lines.size(); ++index) {
-        OrderedListConversionLine &line = lines[index];
-        if (line.fenced || !line.item.valid || line.item.task) {
-            activeLevels.clear();
-            activeQuoteDepth = -1;
-            continue;
-        }
-        if (activeQuoteDepth >= 0 && activeQuoteDepth != line.item.quoteDepth) {
-            activeLevels.clear();
-        }
-        activeQuoteDepth = line.item.quoteDepth;
-        while (!activeLevels.isEmpty()
-               && activeLevels.back().first > line.item.indentColumns) {
-            activeLevels.pop_back();
-        }
-        if (!activeLevels.isEmpty()
-            && activeLevels.back().first == line.item.indentColumns) {
-            line.previousSameLevel = activeLevels.back().second;
-            lines[line.previousSameLevel].nextSameLevel = index;
-            activeLevels.back().second = index;
-        } else {
-            activeLevels.append({line.item.indentColumns, index});
-        }
-    }
-
-    const auto includeGroup = [&plan, &lines](const QVector<int> &chain,
-                                              int first, int last,
-                                              qlonglong startNumber,
-                                              QChar delimiter) {
-        for (int position = first; position <= last; ++position) {
-            const OrderedListConversionLine &line = lines.at(chain.at(position));
-            plan.selectionStart = plan.selectionStart < 0
-                ? line.start : qMin(plan.selectionStart, line.start);
-            plan.selectionEnd = qMax(plan.selectionEnd, line.end);
-        }
-
-        qlonglong number = startNumber;
-        for (int position = first; position <= last; ++position) {
-            const OrderedListConversionLine &line = lines.at(chain.at(position));
-            const QString marker = QString::number(number) + delimiter;
-            if (line.item.marker != marker) {
-                plan.replacements.append({line.start + line.item.markerStart,
-                                          static_cast<int>(line.item.marker.size()),
-                                          marker});
-            }
-            if (number == std::numeric_limits<qlonglong>::max()) {
-                break;
-            }
-            ++number;
-        }
-    };
-
-    for (int head = 0; head < lines.size(); ++head) {
-        const OrderedListConversionLine &headLine = lines.at(head);
-        if (headLine.fenced || !headLine.item.valid || headLine.item.task
-            || headLine.previousSameLevel >= 0) {
-            continue;
-        }
-
-        QVector<int> chain;
-        for (int index = head; index >= 0; index = lines.at(index).nextSameLevel) {
-            chain.append(index);
-        }
-        int segmentStart = 0;
-        while (segmentStart < chain.size()) {
-            const OrderedListConversionLine &firstLine = lines.at(chain.at(segmentStart));
-            if (!firstLine.item.ordered && !firstLine.selected) {
-                ++segmentStart;
-                continue;
-            }
-            int segmentEnd = segmentStart;
-            while (segmentEnd + 1 < chain.size()) {
-                const OrderedListConversionLine &next = lines.at(chain.at(segmentEnd + 1));
-                if (!next.item.ordered && !next.selected) {
-                    break;
-                }
-                ++segmentEnd;
-            }
-
-            bool selectedOrdered = false;
-            bool selectedUnordered = false;
-            for (int position = segmentStart; position <= segmentEnd; ++position) {
-                const OrderedListConversionLine &line = lines.at(chain.at(position));
-                selectedOrdered = selectedOrdered
-                    || (line.selected && line.item.ordered);
-                selectedUnordered = selectedUnordered
-                    || (line.selected && !line.item.ordered);
-            }
-            plan.handled = plan.handled || selectedOrdered || selectedUnordered;
-
-            if (selectedOrdered && selectedUnordered) {
-                int anchor = segmentStart;
-                while (anchor <= segmentEnd
-                       && !lines.at(chain.at(anchor)).item.ordered) {
-                    ++anchor;
-                }
-                const MarkdownListItem &anchorItem = lines.at(chain.at(anchor)).item;
-                includeGroup(chain, segmentStart, segmentEnd,
-                             anchorItem.number, anchorItem.delimiter);
-            } else if (selectedUnordered) {
-                int position = segmentStart;
-                while (position <= segmentEnd) {
-                    if (lines.at(chain.at(position)).item.ordered) {
-                        ++position;
-                        continue;
-                    }
-                    const int first = position;
-                    while (position + 1 <= segmentEnd
-                           && !lines.at(chain.at(position + 1)).item.ordered) {
-                        ++position;
-                    }
-                    includeGroup(chain, first, position, 1, QLatin1Char('.'));
-                    ++position;
-                }
-            } else if (selectedOrdered) {
-                int first = segmentStart;
-                while (first <= segmentEnd) {
-                    const QChar delimiter = lines.at(chain.at(first)).item.delimiter;
-                    int last = first;
-                    bool groupSelected = lines.at(chain.at(first)).selected;
-                    while (last + 1 <= segmentEnd
-                           && lines.at(chain.at(last + 1)).item.delimiter == delimiter) {
-                        ++last;
-                        groupSelected = groupSelected || lines.at(chain.at(last)).selected;
-                    }
-                    if (groupSelected) {
-                        includeGroup(chain, first, last,
-                                     lines.at(chain.at(first)).item.number, delimiter);
-                    }
-                    first = last + 1;
-                }
-            }
-            segmentStart = segmentEnd + 1;
-        }
-    }
-
-    return plan;
-}
-
-bool orderedListStructureAffected(const QString &text, int start, int end)
-{
-    const int rangeStart = qBound(0, qMin(start, end), text.size());
-    const int rangeEnd = qBound(rangeStart, qMax(start, end), text.size());
-    int inspectStart = lineRangeAt(text, rangeStart).start;
-    if (inspectStart > 0) {
-        inspectStart = lineRangeAt(text, inspectStart - 1).start;
-    }
-    int inspectEnd = lineRangeAt(text, rangeEnd).end;
-    if (inspectEnd < text.size()) {
-        inspectEnd = lineRangeAt(text, inspectEnd + 1).end;
-    }
-    bool orderedListNearby = false;
-    int lineStart = inspectStart;
-    while (lineStart <= inspectEnd) {
-        const LineRange range = lineRangeAt(text, lineStart);
-        const ParsedListLine line{
-            range.start, range.end,
-            parseMarkdownListItem(text.mid(range.start, range.end - range.start))};
-        orderedListNearby = orderedListNearby || line.item.ordered;
-        if (line.item.ordered) {
-            const int prefixEnd = line.start + line.item.contentStart;
-            if (rangeStart == rangeEnd) {
-                if (rangeStart >= line.start && rangeStart < prefixEnd) {
-                    return true;
-                }
-            } else if (rangeStart < prefixEnd && rangeEnd > line.start) {
-                return true;
-            }
-        } else {
-            // 删除编号中的单个字符后，该行会暂时不再满足完整列表正则；仍需识别
-            // `. item`、`2 item`、`2.item` 这类中间状态，保证逐字修改编号可收尾。
-            static const QRegularExpression partialOrderedPrefix(QStringLiteral(
-                R"(^([	 ]*(?:>[	 ]*)*)(?:\d+[.)]?|[.)])[	 ]*)"));
-            const QString lineText = text.mid(line.start, line.end - line.start);
-            const QRegularExpressionMatch partialMatch = partialOrderedPrefix.match(lineText);
-            if (partialMatch.hasMatch()) {
-                const int prefixEnd = line.start + partialMatch.capturedLength();
-                if ((rangeStart == rangeEnd
-                     && rangeStart >= line.start && rangeStart <= prefixEnd)
-                    || (rangeStart < prefixEnd && rangeEnd > line.start)) {
-                    return true;
-                }
-            }
-        }
-        if (range.end >= text.size() || range.end >= inspectEnd) {
-            break;
-        }
-        lineStart = range.end + 1;
-    }
-    return rangeEnd > rangeStart
-        && text.mid(rangeStart, rangeEnd - rangeStart).contains(QLatin1Char('\n'))
-        && orderedListNearby;
-}
-
-bool orderedListEditRequiresRepair(const QString &beforeText, const QString &afterText,
-                                   int start, int beforeEnd, int afterEnd)
-{
-    // 裸行首数字是有序列表前缀的中间状态，但在其后输入正文后就不再是列表。
-    // 只有编辑前后都命中列表结构时才短路到编号修复，避免跳过常规输入处理。
-    return orderedListStructureAffected(beforeText, start, beforeEnd)
-        && orderedListStructureAffected(afterText, start, afterEnd);
-}
 
 MarkupKind markupKind(const QString &opening, const QString &closing)
 {
@@ -2130,7 +1444,7 @@ bool EditorCommandRegistry::handleEditorEvent(QEvent *event)
             if (!result.consumed) {
                 QString expectedText = beforeText;
                 expectedText.replace(start, end - start, text);
-                if (orderedListEditRequiresRepair(
+                if (MarkdownLists::orderedListEditRequiresRepair(
                         beforeText, expectedText, start, end, start + text.size())) {
                     QTextCursor insertionCursor(m_document);
                     insertionCursor.setPosition(start);
@@ -2205,7 +1519,7 @@ bool EditorCommandRegistry::handleEditorEvent(QEvent *event)
         const QString beforeText = m_documentTextSnapshot;
         QString expectedText = beforeText;
         expectedText.replace(start, end - start, committedText);
-        const bool repairOrderedList = orderedListEditRequiresRepair(
+        const bool repairOrderedList = MarkdownLists::orderedListEditRequiresRepair(
             beforeText, expectedText, start, end, start + committedText.size());
         // 连续输入 `·`：提交文本尚未插入，若前一步正是上一个字面 `·`
         // （或其生成的 `` 对），先撤销该步再在本事件内完成转换；
@@ -2352,7 +1666,7 @@ bool EditorCommandRegistry::insertPathText(const QString &text)
         return false;
     }
 
-    const bool repairOrderedList = orderedListStructureAffected(
+    const bool repairOrderedList = MarkdownLists::orderedListStructureAffected(
         beforeText, selectionStart, selectionEnd);
     m_inputScroll.beginTracking(QStringLiteral("drop"));
     const UndoCursorRecord undoCursor = captureUndoCursor();
@@ -2549,9 +1863,9 @@ bool EditorCommandRegistry::moveSelection(int selectionStart, int selectionEnd,
         || (dropPosition >= selectionStart && dropPosition <= selectionEnd)) {
         return false;
     }
-    const bool repairOrderedList = orderedListStructureAffected(
+    const bool repairOrderedList = MarkdownLists::orderedListStructureAffected(
         beforeText, selectionStart, selectionEnd)
-        || orderedListStructureAffected(beforeText, dropPosition, dropPosition);
+        || MarkdownLists::orderedListStructureAffected(beforeText, dropPosition, dropPosition);
 
     QTextCursor cursor(m_document);
     cursor.setPosition(selectionStart);
@@ -2590,7 +1904,7 @@ bool EditorCommandRegistry::insertExternalText(const QString &text, int dropPosi
     const int cursorPosition = m_editor->property("cursorPosition").toInt();
 
     const bool repairOrderedList = text.contains(QLatin1Char('\n'))
-        || orderedListStructureAffected(beforeText, dropPosition, dropPosition);
+        || MarkdownLists::orderedListStructureAffected(beforeText, dropPosition, dropPosition);
     QTextCursor cursor(m_document);
     cursor.setPosition(dropPosition);
     // 先定位临时 cursor 再开启撤销块，避免 Qt 把构造时的文档开头
@@ -2782,7 +2096,7 @@ bool EditorCommandRegistry::replaceCurrent(const QString &query, const QString &
     const QString beforeText = m_documentTextSnapshot;
     const int selectionStart = m_editor->property("selectionStart").toInt();
     const int selectionEnd = m_editor->property("selectionEnd").toInt();
-    const bool markerEdit = orderedListStructureAffected(
+    const bool markerEdit = MarkdownLists::orderedListStructureAffected(
         beforeText, selectionStart, selectionEnd);
     QTextCursor cursor(m_document);
     cursor.setPosition(selectionStart);
@@ -2817,7 +2131,7 @@ int EditorCommandRegistry::replaceAll(const QString &query, const QString &repla
         int matchStart = beforeText.indexOf(query, 0,
             caseSensitive ? Qt::CaseSensitive : Qt::CaseInsensitive);
         while (matchStart >= 0) {
-            if (orderedListStructureAffected(
+            if (MarkdownLists::orderedListStructureAffected(
                     beforeText, matchStart, matchStart + query.size())) {
                 repairOrderedList = true;
                 break;
@@ -3113,7 +2427,7 @@ bool EditorCommandRegistry::convertToOrderedList()
     const int originalStart = m_editor->property("selectionStart").toInt();
     const int originalEnd = m_editor->property("selectionEnd").toInt();
     const int originalCursor = m_editor->property("cursorPosition").toInt();
-    OrderedListConversionPlan plan = orderedListConversionPlan(
+    MarkdownLists::OrderedListConversionPlan plan = MarkdownLists::orderedListConversionPlan(
         beforeText, originalStart, originalEnd);
     if (!plan.handled || plan.selectionStart < 0 || plan.selectionEnd < plan.selectionStart) {
         focusEditor();
@@ -3121,11 +2435,11 @@ bool EditorCommandRegistry::convertToOrderedList()
     }
 
     std::sort(plan.replacements.begin(), plan.replacements.end(),
-              [](const TextReplacement &left, const TextReplacement &right) {
+              [](const MarkdownLists::TextReplacement &left, const MarkdownLists::TextReplacement &right) {
                   return left.start < right.start;
               });
     int transformedSelectionEnd = plan.selectionEnd;
-    for (const TextReplacement &replacement : plan.replacements) {
+    for (const MarkdownLists::TextReplacement &replacement : plan.replacements) {
         if (replacement.start < plan.selectionEnd) {
             transformedSelectionEnd += replacement.replacement.size() - replacement.length;
         }
@@ -3262,7 +2576,7 @@ bool EditorCommandRegistry::cutSelection()
     }
 
     const QString beforeText = m_documentTextSnapshot;
-    const bool repairOrderedList = orderedListStructureAffected(beforeText, start, end);
+    const bool repairOrderedList = MarkdownLists::orderedListStructureAffected(beforeText, start, end);
     QTextCursor cursor(m_document);
     cursor.setPosition(start);
     cursor.setPosition(end, QTextCursor::KeepAnchor);
@@ -3336,7 +2650,7 @@ bool EditorCommandRegistry::pasteClipboard()
     selectRange(cursorAfter, cursorAfter);
     const bool manualNumberEdit = !smartLinePaste
         && !insertion.contains(QLatin1Char('\n'))
-        && orderedListStructureAffected(text, selectionStart, selectionEnd);
+        && MarkdownLists::orderedListStructureAffected(text, selectionStart, selectionEnd);
     const bool repairOrderedList = smartLinePaste
         || insertion.contains(QLatin1Char('\n')) || manualNumberEdit;
     if (repairOrderedList) {
@@ -3371,7 +2685,7 @@ bool EditorCommandRegistry::toggleCurrentCheckbox()
         stateCursor.insertText(line.at(*statePosition) == QLatin1Char(' ')
                                    ? QStringLiteral("x") : QStringLiteral(" "));
     } else {
-        const MarkdownListItem listItem = parseMarkdownListItem(line);
+        const MarkdownLists::MarkdownListItem listItem = MarkdownLists::parseMarkdownListItem(line);
         int insertionOffset = 0;
         QString insertion;
         if (listItem.valid) {
@@ -3850,9 +3164,22 @@ void EditorCommandRegistry::repairOrderedLists(const QString &beforeText,
                                                bool preservePreviousStart,
                                                bool resetNewSequenceStart)
 {
-    m_documentTextSnapshot = repairedAffectedOrderedLists(
-        m_document, beforeText, afterText, preservePreviousStart,
-        resetNewSequenceStart);
+    const auto replacements = m_document
+        ? MarkdownLists::orderedListNumberReplacements(beforeText, afterText, preservePreviousStart,
+                                        resetNewSequenceStart)
+        : QVector<MarkdownLists::TextReplacement>{};
+    QString repairedText = afterText;
+    for (auto replacement = replacements.crbegin(); replacement != replacements.crend();
+         ++replacement) {
+        QTextCursor cursor(m_document);
+        cursor.setPosition(replacement->start);
+        cursor.setPosition(replacement->start + replacement->length,
+                           QTextCursor::KeepAnchor);
+        cursor.insertText(replacement->replacement);
+        repairedText.replace(replacement->start, replacement->length,
+                             replacement->replacement);
+    }
+    m_documentTextSnapshot = std::move(repairedText);
     m_documentTextSnapshotPrepared = true;
 }
 
@@ -3874,7 +3201,7 @@ bool EditorCommandRegistry::handleStructuralDelete(bool backwards)
             ++end;
         }
     }
-    if (!orderedListStructureAffected(beforeText, start, end)) {
+    if (!MarkdownLists::orderedListStructureAffected(beforeText, start, end)) {
         return false;
     }
 
@@ -3904,7 +3231,7 @@ bool EditorCommandRegistry::handleSpecialBackspace()
     const LineRange line = lineRangeAt(text, start);
     const int lineStart = line.start;
     const int lineEnd = line.end;
-    const MarkdownListItem emptyListItem = parseMarkdownListItem(
+    const MarkdownLists::MarkdownListItem emptyListItem = MarkdownLists::parseMarkdownListItem(
         text.mid(lineStart, lineEnd - lineStart));
     if (emptyListItem.valid && emptyListItem.isEmpty()
         && start >= lineStart + emptyListItem.contentStart) {
@@ -3929,7 +3256,7 @@ bool EditorCommandRegistry::handleSpecialBackspace()
         return true;
     }
 
-    const MarkdownQuoteLine quote = parseMarkdownQuoteLine(
+    const MarkdownLists::MarkdownQuoteLine quote = MarkdownLists::parseMarkdownQuoteLine(
         text.mid(lineStart, lineEnd - lineStart));
     if (quote.valid && start == lineStart + quote.contentStart
         && !isInsideFencedBlock(lineStart)) {
@@ -4040,7 +3367,7 @@ bool EditorCommandRegistry::handleListEnter(bool insideFencedBlock)
         return false;
     }
 
-    const MarkdownListItem item = parseMarkdownListItem(
+    const MarkdownLists::MarkdownListItem item = MarkdownLists::parseMarkdownListItem(
         text.mid(lineStart, lineEnd - lineStart));
     const int positionInLine = start - lineStart;
     if (!item.valid || positionInLine < item.contentStart) {
@@ -4055,18 +3382,18 @@ bool EditorCommandRegistry::handleListEnter(bool insideFencedBlock)
     if (item.isEmpty()) {
         const QString lineText = text.mid(lineStart, lineEnd - lineStart);
         const int outdentLength = item.indentColumns > 0
-            ? oneLevelOutdentLength(lineText)
+            ? MarkdownLists::oneLevelOutdentLength(lineText)
             : 0;
         if (outdentLength > 0) {
             QString transformed = lineText;
             transformed.remove(0, outdentLength);
-            MarkdownListItem outdentedItem = parseMarkdownListItem(transformed);
+            MarkdownLists::MarkdownListItem outdentedItem = MarkdownLists::parseMarkdownListItem(transformed);
             if (outdentedItem.valid) {
-                if (const auto parent = parentListItemForOutdent(
+                if (const auto parent = MarkdownLists::parentListItemForOutdent(
                         text, lineStart, item, outdentedItem.indentColumns)) {
                     transformed.replace(outdentedItem.markerStart,
                                         outdentedItem.marker.size(),
-                                        childMarkerForParent(*parent));
+                                        MarkdownLists::childMarkerForParent(*parent));
                 }
 
                 QTextCursor replacementCursor(m_document);
@@ -4075,7 +3402,7 @@ bool EditorCommandRegistry::handleListEnter(bool insideFencedBlock)
                 replacementCursor.insertText(transformed);
                 repairOrderedLists(text, m_document->toPlainText(), true);
                 const LineRange repairedLine = lineRangeAt(m_documentTextSnapshot, lineStart);
-                const MarkdownListItem repairedItem = parseMarkdownListItem(
+                const MarkdownLists::MarkdownListItem repairedItem = MarkdownLists::parseMarkdownListItem(
                     m_documentTextSnapshot.mid(
                         repairedLine.start, repairedLine.end - repairedLine.start));
                 const int contentOffset = start - (lineStart + item.contentStart);
@@ -4138,7 +3465,7 @@ bool EditorCommandRegistry::handleQuoteEnter(bool preserveEmptyQuote,
         return false;
     }
 
-    const MarkdownQuoteLine quote = parseMarkdownQuoteLine(
+    const MarkdownLists::MarkdownQuoteLine quote = MarkdownLists::parseMarkdownQuoteLine(
         text.mid(line.start, line.end - line.start));
     const int positionInLine = start - line.start;
     if (!quote.valid || positionInLine < quote.contentStart) {
@@ -4553,7 +3880,7 @@ bool EditorCommandRegistry::changeIndent(bool outdent)
             line.prepend(QStringLiteral("    "));
             changed = true;
         } else {
-            const int outdentLength = oneLevelOutdentLength(line);
+            const int outdentLength = MarkdownLists::oneLevelOutdentLength(line);
             if (outdentLength > 0) {
                 line.remove(0, outdentLength);
                 changed = true;
