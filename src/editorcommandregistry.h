@@ -1,5 +1,7 @@
 #pragma once
 
+#include "inputautoscroll.h"
+
 #include <QCursor>
 #include <QHash>
 #include <QMap>
@@ -188,72 +190,18 @@ private:
     void updateExternalTextDragCursor(bool canDrop);
     void resetExternalTextDrag();
     bool scrollTextDragViewport(const QPointF &scenePosition);
-    void beginInputAutoScrollTracking(const QString &kind);
-    void queueInputAutoScrollCheck();
-    void checkInputAutoScroll();
-    void animateViewportScrollTo(QQuickItem *viewport, qreal targetY,
-                                 bool releaseInputHold = false);
     bool navigateToHeading(bool backwards);
     void scheduleHeadingScroll(int position);
     void scrollViewportToHeading(int position);
     void beginFindNavigation();
     void finishFindNavigation();
 
-    struct InputScrollDiagnostics {
-        QString lastKind;
-        qint64 inputCount = 0;
-        qint64 checkCount = 0;
-        qint64 triggerCount = 0;
-        qint64 overrideCount = 0;
-        qreal currentY = 0.0;
-        qreal cursorTop = 0.0;
-        qreal cursorBottom = 0.0;
-        qreal viewportHeight = 0.0;
-        qreal maxY = 0.0;
-        qreal targetY = 0.0;
-        qreal settleY = 0.0;
-        qreal heldY = 0.0;
-        int preLength = -1;
-        int docLength = -1;
-        int cursorPosition = -1;
-        bool atStart = false;
-        bool atEnd = false;
-        bool touchedTop = false;
-        bool touchedBottom = false;
-        bool didScroll = false;
-        bool overrideDetected = false;
-    };
-
-    struct InputScrollEvent {
-        QString type;
-        QString kind;
-        qint64 seq = 0;
-        qreal preY = 0.0;
-        qreal curY = 0.0;
-        qreal curBottom = 0.0;
-        qreal vh = 0.0;
-        qreal maxY = 0.0;
-        qreal targetY = 0.0;
-        qreal settleY = 0.0;
-        qreal heldY = 0.0;
-        int preLen = -1;
-        int docLen = -1;
-        int cursorPos = -1;
-        bool atStart = false;
-        bool atEnd = false;
-        bool touchedTop = false;
-        bool touchedBottom = false;
-        bool didScroll = false;
-        bool earlyReturn = false;
-    };
-
-    void recordInputScrollEvent(InputScrollEvent event);
-
     AppSettings *m_settings = nullptr;
     std::unique_ptr<HeadingFoldManager> m_headingFolds;
     QPointer<QObject> m_editor;
     QPointer<QTextDocument> m_document;
     QPointer<QQuickWindow> m_window;
+    InputAutoScroll m_inputScroll;
     QString m_documentTextSnapshot;
     bool m_documentTextSnapshotPrepared = false;
     QVector<Definition> m_definitions;
@@ -286,15 +234,6 @@ private:
     std::optional<SelectionUndoSnapshot> m_selectionRedoSnapshot;
     QMap<int, UndoCursorRecord> m_undoCursorRecords;
     int m_observedUndoSteps = 0;
-    bool m_inputAutoScrollCheckQueued = false;
-    bool m_inputAutoScrollTrackingActive = false;
-    bool m_inputScrollHoldWasActive = false;
     QTimer m_headingScrollTimer;
     int m_pendingHeadingScrollPosition = -1;
-    int m_inputPreTextLength = -1;
-    qreal m_inputPreScrollY = 0.0;
-    InputScrollDiagnostics m_inputScrollDiag;
-    QVector<InputScrollEvent> m_inputScrollEvents;
-    qint64 m_inputScrollEventSeq = 0;
-    qint64 m_inputScrollEarlyReturnCount = 0;
 };

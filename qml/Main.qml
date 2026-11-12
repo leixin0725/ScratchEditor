@@ -432,6 +432,13 @@ Window {
 
     property real requestedScrollY: -1
 
+    function cancelScrollForManualDrag() {
+        cancelFindNavigation()
+        releaseInputScrollHoldAfterAnimation = false
+        scrollAnimation.stop()
+        inputScrollHoldBottom = false
+    }
+
     // 文本编辑前先冻结当前视口范围，避免内容高度收缩时 Flickable 在
     // 延迟自动滚动检查前把 contentY 钳到新的自然上限。若上一次输入
     // 滚动动画仍在进行，则停在当前帧，由本次编辑重新决定后续滚动。
@@ -1196,16 +1203,10 @@ Window {
         // 用户拖动/甩动时立即停止动画，避免与手势互相打架；
         // 同时释放删除/撤销保持期间的弹性底部缓冲，手动滚动后由下一次检查重新判定。
         onDragStarted: {
-            root.cancelFindNavigation()
-            root.releaseInputScrollHoldAfterAnimation = false
-            scrollAnimation.stop()
-            root.inputScrollHoldBottom = false
+            root.cancelScrollForManualDrag()
         }
         onFlickStarted: {
-            root.cancelFindNavigation()
-            root.releaseInputScrollHoldAfterAnimation = false
-            scrollAnimation.stop()
-            root.inputScrollHoldBottom = false
+            root.cancelScrollForManualDrag()
         }
 
         // 滚轮手动滚动同样释放弹性缓冲；target 为 null 时不自动操纵对象，
@@ -1723,10 +1724,7 @@ Window {
             property real grabOffset: 0
 
             onPressed: function(mouse) {
-                root.cancelFindNavigation()
-                root.releaseInputScrollHoldAfterAnimation = false
-                scrollAnimation.stop()
-                root.inputScrollHoldBottom = false
+                root.cancelScrollForManualDrag()
                 grabOffset = mouse.y
             }
             onPositionChanged: function(mouse) {
