@@ -1,4 +1,5 @@
 #include "headingfoldmanager.h"
+#include "markdownfence.h"
 
 #include <QDebug>
 #include <QMetaObject>
@@ -39,18 +40,6 @@ HeadingSyntax headingSyntax(const QString &text, bool insideFence)
     }
     return {static_cast<int>(match.capturedLength(1)),
             static_cast<int>(match.capturedStart(1)), end};
-}
-
-bool isFenceLine(const QString &text)
-{
-    qsizetype firstContent = 0;
-    while (firstContent < text.size() && text.at(firstContent).isSpace()) {
-        ++firstContent;
-    }
-    return firstContent + 2 < text.size()
-        && text.at(firstContent) == QLatin1Char('`')
-        && text.at(firstContent + 1) == QLatin1Char('`')
-        && text.at(firstContent + 2) == QLatin1Char('`');
 }
 
 HeadingFoldBlockData *foldData(const QTextBlock &block)
@@ -329,11 +318,10 @@ void HeadingFoldManager::rebuild()
 
     m_rebuildQueued = false;
     QVector<Heading> headings;
-    bool insideFence = false;
+    MarkdownFence fence;
     for (QTextBlock block = m_document->begin(); block.isValid(); block = block.next()) {
         const QString text = block.text();
-        const bool fenceLine = isFenceLine(text);
-        const HeadingSyntax syntax = headingSyntax(text, insideFence || fenceLine);
+        const HeadingSyntax syntax = headingSyntax(text, fence.advance(text) != MarkdownFence::Line::Text);
         if (syntax.level > 0) {
             HeadingFoldBlockData *data = ensureFoldData(block);
             headings.append({block, block.position(), syntax.level,
@@ -344,9 +332,6 @@ void HeadingFoldManager::rebuild()
         } else if (HeadingFoldBlockData *data = foldData(block)) {
             Q_UNUSED(data);
             block.setUserData(nullptr);
-        }
-        if (fenceLine) {
-            insideFence = !insideFence;
         }
     }
 

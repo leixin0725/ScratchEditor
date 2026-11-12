@@ -3,11 +3,13 @@
 
 #include <QDir>
 #include <QFile>
+#include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QTemporaryDir>
 #include <QTextFormat>
 #include <QTextBlock>
+#include <QTextCursor>
 #include <QTextDocument>
 #include <QTextCharFormat>
 #include <QTextLayout>
@@ -521,6 +523,23 @@ void checkHighlighting(QJsonObject &checks, QJsonObject &details, const QJsonObj
     linkHighlighter.rehighlight();
     const bool fencedCodeLinkRejected = linkHighlighter.externalLinkAt(
         fencedCodeLink.indexOf(QStringLiteral("https"))).isEmpty();
+    const QString editableFence = QStringLiteral("~~~md\nbody\n~~~\n[link](https://example.invalid)");
+    linkDocument.setPlainText(editableFence);
+    linkHighlighter.rehighlight();
+    const int linkOffset = editableFence.indexOf(QStringLiteral("https"));
+    const bool initiallyLinked = !linkHighlighter.externalLinkAt(linkOffset).isEmpty();
+    QTextCursor opener(&linkDocument);
+    opener.insertText(QStringLiteral("~"));
+    linkHighlighter.rehighlightBlock(linkDocument.firstBlock());
+    const bool linkedInside = !linkHighlighter.externalLinkAt(linkOffset + 1).isEmpty();
+    opener.deletePreviousChar();
+    linkHighlighter.rehighlightBlock(linkDocument.firstBlock());
+    const bool linkedAgain = !linkHighlighter.externalLinkAt(linkOffset).isEmpty();
+    const QJsonArray actualLinkStates{initiallyLinked, linkedInside, linkedAgain};
+    const QJsonArray expectedLinkStates{true, false, true};
+    addCheck(checks, details, QStringLiteral("editedFenceLengthUpdatesLinkHitTesting"),
+             actualLinkStates == expectedLinkStates,
+             QJsonObject{{"actual", actualLinkStates}, {"expected", expectedLinkStates}});
     addCheck(checks, details, QStringLiteral("externalMarkdownLinkHoverStyle"),
              externalLinkHoverStyle && invalidTargetRejected && nonWebSchemeRejected
                  && inlineCodeLinkRejected && fencedCodeLinkRejected,

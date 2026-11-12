@@ -1,5 +1,6 @@
 #include "suites.h"
 #include "support.h"
+#include "cjktextprocessor.h"
 
 #include <QJsonArray>
 #include <QJsonObject>
@@ -11,6 +12,39 @@ namespace EditingTests {
 
 QString checkHeadingNavigation(QJsonObject &checks, QJsonObject &details)
 {
+    const QString fences = QStringLiteral(
+        "# Start\n\t~~~python\n# A\n ~~~ \t\n# B\n"
+        "    ````markdown\n~~~\n# wrong marker\n```\n# short\n"
+        "```` example\n# trailing text\n\t````` \t\n# D");
+    setTextAndSelection(fences, 0, 0);
+    const auto nextHeading = [] {
+        return execute(QStringLiteral("nextHeading")).value(QStringLiteral("cursorPosition")).toInt();
+    };
+    const QJsonArray actualHeadings{nextHeading(), nextHeading()};
+    const QJsonArray expectedHeadings{fences.indexOf(QStringLiteral("# B")),
+                                      fences.indexOf(QStringLiteral("# D"))};
+    addCheck(checks, details, QStringLiteral("fenceNavigationSkipsCodeHeadings"),
+             actualHeadings == expectedHeadings,
+             QJsonObject{{"actual", actualHeadings}, {"expected", expectedHeadings}});
+    const auto analysis = CjkText::analyzeDocument(fences);
+    for (const QString &label : {QStringLiteral("A"), QStringLiteral("B"),
+                                 QStringLiteral("wrong marker"), QStringLiteral("short"),
+                                 QStringLiteral("trailing text"), QStringLiteral("D")}) {
+        const int position = fences.indexOf(QStringLiteral("# ") + label);
+        const bool expected = label != QStringLiteral("B") && label != QStringLiteral("D");
+        const auto format = formatAtPosition(position);
+        const bool codeStyle = format.value(QStringLiteral("background")).toString()
+            == QStringLiteral("#303030");
+        addCheck(checks, details, QStringLiteral("fenceCodeStyle/") + label, codeStyle == expected,
+                 QJsonObject{{"actual", format}, {"expectedCodeStyle", expected}});
+        bool protectedCode = false;
+        for (const auto &span : analysis.blockSpans) {
+            protectedCode |= span.kind == CjkText::ProtectedKind::FencedCode
+                && span.contentStart <= position && position < span.contentEnd;
+        }
+        addCheck(checks, details, QStringLiteral("fenceEditProtection/") + label,
+                 protectedCode == expected, QJsonObject{{"actual", protectedCode}, {"expected", expected}});
+    }
     // --- 标题折叠与标题导航 ---
     const QString headingTree = QStringLiteral(
         "前言\n# A\nA body\n## B\nB body\n### C\nC body\n# D\nD body");

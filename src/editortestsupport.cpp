@@ -1,4 +1,5 @@
 #include "editortestsupport.h"
+#include "markdownfence.h"
 #include "appsettings.h"
 #include "clipboardhistorycoordinator.h"
 #include "editorcommandregistry.h"
@@ -915,7 +916,7 @@ void EditorController::TestSupport::registerCommands(QHash<QString, CommandEntry
                     if (block.layout()) {
                         formattedRanges += block.layout()->formats().size();
                     }
-                    if (block.userState() == 1) {
+                    if (MarkdownFence(block.userState()).active()) {
                         ++fencedBlocks;
                     }
                 }

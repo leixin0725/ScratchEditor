@@ -1,4 +1,5 @@
 #include "markdownhighlighter.h"
+#include "markdownfence.h"
 #include "markdownstyle.h"
 
 #include <QColor>
@@ -352,7 +353,7 @@ bool MarkdownHighlighter::findExternalLinkAt(int position, QUrl *target,
                                              int *start, int *length) const
 {
     const QTextBlock block = document()->findBlock(position);
-    if (!block.isValid() || block.userState() == 1) {
+    if (!block.isValid() || MarkdownFence(block.userState()).active()) {
         return false;
     }
 
@@ -419,6 +420,14 @@ void MarkdownHighlighter::highlightBlock(const QString &text)
     };
 
     const QStringView view(text);
+    MarkdownFence fence(previousBlockState());
+    const auto kind = fence.advance(view);
+    setCurrentBlockState(fence.blockState());
+    if (kind != MarkdownFence::Line::Text) {
+        setFormat(0, text.size(), kind == MarkdownFence::Line::Code ? m_codeBlockFormat : m_codeFenceFormat);
+        return;
+    }
+
     const qsizetype firstContent = [&view] {
         for (qsizetype index = 0; index < view.size(); ++index) {
             if (!view.at(index).isSpace()) {
@@ -427,18 +436,6 @@ void MarkdownHighlighter::highlightBlock(const QString &text)
         }
         return view.size();
     }();
-
-    const bool isFence = firstContent + 2 < view.size()
-        && view.at(firstContent) == QLatin1Char('`')
-        && view.at(firstContent + 1) == QLatin1Char('`')
-        && view.at(firstContent + 2) == QLatin1Char('`');
-    const bool insideFence = previousBlockState() == 1;
-    if (insideFence || isFence) {
-        setFormat(0, text.size(), isFence ? m_codeFenceFormat : m_codeBlockFormat);
-        setCurrentBlockState(isFence ? (insideFence ? 0 : 1) : 1);
-        return;
-    }
-    setCurrentBlockState(0);
 
     if (firstContent >= view.size()) {
         return;

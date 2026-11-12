@@ -1,4 +1,5 @@
 #include "cjktextprocessor.h"
+#include "markdownfence.h"
 
 #include <algorithm>
 #include <QSet>
@@ -16,54 +17,6 @@ bool isBlankOrDollarLine(const QString &line)
         return false;
     }
     i += 2;
-    while (i < line.size() && (line.at(i) == u' ' || line.at(i) == u'\t')) {
-        ++i;
-    }
-    return i == line.size();
-}
-
-bool startsWithFenceOpener(const QString &line, QChar *activeChar, int *runLength)
-{
-    int i = 0;
-    while (i < line.size() && (line.at(i) == u' ' || line.at(i) == u'\t')) {
-        ++i;
-    }
-    if (i >= line.size()) {
-        return false;
-    }
-    const QChar character = line.at(i);
-    if (character != u'`' && character != u'~') {
-        return false;
-    }
-    int run = 0;
-    while (i + run < line.size() && line.at(i + run) == character) {
-        ++run;
-    }
-    if (run < 3) {
-        return false;
-    }
-    *activeChar = character;
-    *runLength = run;
-    return true;
-}
-
-bool isFenceCloser(const QString &line, QChar activeChar, int minimumRunLength)
-{
-    int i = 0;
-    while (i < line.size() && (line.at(i) == u' ' || line.at(i) == u'\t')) {
-        ++i;
-    }
-    if (i >= line.size() || line.at(i) != activeChar) {
-        return false;
-    }
-    int run = 0;
-    while (i + run < line.size() && line.at(i + run) == activeChar) {
-        ++run;
-    }
-    if (run < minimumRunLength) {
-        return false;
-    }
-    i += run;
     while (i < line.size() && (line.at(i) == u' ' || line.at(i) == u'\t')) {
         ++i;
     }
@@ -487,8 +440,7 @@ DocumentAnalysis analyzeDocument(const QString &text)
     };
 
     State state = State::Normal;
-    QChar activeFenceChar;
-    int activeFenceLength = 0;
+    MarkdownFence fence;
     int blockStart = 0;
     int blockContentStart = 0;
 
@@ -502,7 +454,7 @@ DocumentAnalysis analyzeDocument(const QString &text)
         const QString line = text.mid(lineStart, lineEnd - lineStart);
 
         if (state == State::FencedCode) {
-            if (isFenceCloser(line, activeFenceChar, activeFenceLength)) {
+            if (fence.advance(line) == MarkdownFence::Line::Closing) {
                 analysis.blockSpans.append({blockStart, lineEnd, blockContentStart,
                                             lineStart, ProtectedKind::FencedCode});
                 state = State::Normal;
@@ -514,12 +466,8 @@ DocumentAnalysis analyzeDocument(const QString &text)
                 state = State::Normal;
             }
         } else {
-            QChar fenceChar;
-            int fenceLength = 0;
-            if (startsWithFenceOpener(line, &fenceChar, &fenceLength)) {
+            if (fence.advance(line) == MarkdownFence::Line::Opening) {
                 state = State::FencedCode;
-                activeFenceChar = fenceChar;
-                activeFenceLength = fenceLength;
                 blockStart = lineStart;
                 blockContentStart = lineEnd + 1;
             } else {

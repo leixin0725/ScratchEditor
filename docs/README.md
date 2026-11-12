@@ -8,7 +8,6 @@
 | 修改进程通信、历史持久化或外部文件编辑 | [运行模式与集成](integration/README.md) · src/ 中的常驻实例、历史协调器和文件会话；integration/ 保留 AHK 参考副本 |
 | 隔离构建、切换测试版、打包或发布 | [构建与发行](build-release/README.md) · scripts/ 是命令入口 |
 | 选择测试、夹具与回归顺序 | [测试指南](../tests/README.md#推荐执行顺序) · tests/ 定义验收程序 |
-| 确认围栏语法与回查编辑核心重构 | [验收结果与待决事项](work/editor-core-refactor.md) |
 
 ## 收录与维护
 
