@@ -19,3 +19,5 @@
 - `stage6-results-20260802-134740.json`：阶段 6 备份、受控安装、IPC、回退和进程保护验收。
 - `stage6-functional-20260802-134646.json`：阶段 6 Qt 功能与阶段 4/3/2 回归。
 - `stage6-performance-20260802-134805.json`：阶段 6 最终性能与输入法回归。
+
+- [2026-11-12 编辑核心重构](editor-core-refactor-20261112.zip) 保存最终 editing、window-ui 与 perf 的原始 JSON。冷启动和工作集保留超限结果，验收口径见[工作记录](../../docs/work/editor-core-refactor.md)。
