@@ -499,6 +499,11 @@ int main(int argc, char *argv[])
     const QJsonObject shown = commandObject(QStringLiteral("show"));
     report.insert(QStringLiteral("showForTests"), shown);
     const quintptr hwnd = shown.value(QStringLiteral("hwnd")).toString().toULongLong();
+    // 历史基准结束时搜索框仍持有焦点。原生拼音用例需要把按键送到正文。
+    sendCommandWithArguments(QStringLiteral("testClipboardHistoryUiAction"),
+                             {{QStringLiteral("action"), QStringLiteral("historyClose")}});
+    sendCommandWithArguments(QStringLiteral("testClipboardHistoryUiAction"),
+                             {{QStringLiteral("action"), QStringLiteral("historyFocusEditor")}});
     report.insert(QStringLiteral("systemIme"), runSystemImeBenchmark(hwnd));
     report.insert(QStringLiteral("ime"), commandObject(QStringLiteral("benchmarkIme")));
     report.insert(QStringLiteral("animation"),
