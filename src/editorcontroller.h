@@ -8,7 +8,6 @@
 #include <QHash>
 #include <QJsonObject>
 #include <QLocalServer>
-#include <QMutex>
 #include <QPointer>
 #include <QPointF>
 #include <QRect>
@@ -227,11 +226,7 @@ protected:
     bool eventFilter(QObject *watched, QEvent *event) override;
 
 private:
-    struct PendingRequest {
-        QPointer<QLocalSocket> socket;
-        qint64 startedNs = 0;
-        QString requestId;
-    };
+    class TestSupport;
 
     struct DispatchRequest {
         QLocalSocket *socket = nullptr;
@@ -264,11 +259,6 @@ private:
                         const QString &requestId, const QJsonObject &request);
     void waitForNextFrame(QLocalSocket *socket, QJsonObject response, qint64 startedNs,
                           const QString &requestId);
-    void captureEditorRenderSample(QLocalSocket *socket, QJsonObject response,
-                                   const QRectF &editorLocalRect, qint64 startedNs,
-                                   const QString &requestId);
-    void captureStatusPanelBorderSample(QLocalSocket *socket, QJsonObject response,
-                                        qint64 startedNs, const QString &requestId);
     bool commitAndHide(bool deliverAfterHide = false, bool persistState = true);
     bool commitExternalFileAndExit();
     void setExternalFileState(bool healthy, const QString &message);
@@ -298,12 +288,6 @@ private:
     bool handleClipboardHistoryWindowLeave(const QPointF &localPosition,
                                            bool mouseButtonPressed);
     QJsonObject statusObject() const;
-    void runLargeDocumentBenchmark(QLocalSocket *socket, qint64 startedNs,
-                                   const QString &requestId);
-    void runImeBenchmark(QLocalSocket *socket, qint64 startedNs, const QString &requestId);
-    void runAnimationBenchmark(QLocalSocket *socket, qint64 startedNs,
-                               const QString &requestId);
-    void restoreTestDocument();
     void reloadAppearance();
     void configureMarkdownStyleWatcher();
     void reloadMarkdownStyle();
@@ -334,8 +318,6 @@ private:
     bool m_ready = false;
     qint64 m_readyStartupMs = -1;
     bool m_positioned = false;
-    bool m_firstFrameCaptured = false;
-    QString m_firstFrameColor;
     QString m_statusMessage = QStringLiteral("Esc 关闭并复制 · Ctrl+S 关闭并输入 · Ctrl+W 关闭不保存");
     bool m_statusHealthy = true;
     QString m_statusPanelSummary = QStringLiteral("共 0 字 · 0 汉字");
@@ -344,8 +326,6 @@ private:
     quintptr m_previousForegroundWindow = 0;
     bool m_deliverAfterHide = false;
     quint64 m_focusGeneration = 0;
-    QString m_savedTestText;
-    bool m_hasSavedTestText = false;
     QString m_theme = QStringLiteral("dark");
     QString m_editorFontFamily = QStringLiteral("Consolas");
     QString m_editorFallbackFontFamily = QStringLiteral("NSimSun");
@@ -377,14 +357,5 @@ private:
     QTimer m_displayChangeSettleTimer;
     bool m_nativeDisplayChangeActive = false;
 
-    PendingRequest m_pendingInput;
-    QElapsedTimer m_inputTimer;
-    quint64 m_inputSequence = 0;
-
-    PendingRequest m_pendingAnimation;
-    QMetaObject::Connection m_animationFrameConnection;
-    QMutex m_animationMutex;
-    QElapsedTimer m_animationTimer;
-    QVector<double> m_animationFrameIntervals;
-    qint64 m_lastAnimationFrameNs = 0;
+    std::unique_ptr<TestSupport> m_testSupport;
 };

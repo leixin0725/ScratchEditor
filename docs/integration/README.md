@@ -26,6 +26,10 @@ Codex / pi ───────文件模式───> %LOCALAPPDATA%\ScratchEdi
 常驻实例使用管道名 `ScratchEditor.Stage1.v1`，名称保持稳定是为了兼容既有 AHK 调度。
 关闭窗口只会隐藏并复用进程，不会销毁编辑器。
 
+`EditorController` 负责解析、ready/test 门禁、生产命令和回复封装。只有 test-mode
+实例才创建私有的 `TestSupport` 并注册测试命令。测试诊断字段、像素采样、输入帧与
+动画基准的待回复状态在该对象中维护。生产和测试复用同一个分发入口。
+
 生产 IPC 另提供只读的 `getWindowGeometry` JSON 命令，供外部编辑进程查询常驻实例的
 窗口 resting 几何，以便唤起时避开可能已打开的临时编辑器窗口。
 

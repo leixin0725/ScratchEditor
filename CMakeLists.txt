@@ -23,6 +23,7 @@ qt_add_executable(ScratchEditor WIN32
     src/main.cpp
     src/appsettings.cpp
     src/appsettings.h
+    src/editortestsupport.cpp
     src/editorcontroller.cpp
     src/editorcontroller.h
     src/externalfilesession.cpp
